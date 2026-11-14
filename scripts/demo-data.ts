@@ -13,6 +13,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { StoreRegistry, type StoreConfig } from "../src/config.js";
 import { PlanStore } from "../src/plan.js";
 import { createServer } from "../src/server.js";
+import { takeSnapshot } from "../src/snapshot.js";
 import { FakeShop } from "../test/fakeShop.js";
 
 process.env.SYNC_AUDIT_LOG = join(mkdtempSync(join(tmpdir(), "demo-")), "audit.log");
@@ -124,6 +125,10 @@ async function call(name: string, args: Record<string, unknown>) {
   return res.isError ? { error: text } : JSON.parse(text);
 }
 
+// Before any write: how the eu menu looks, and how dev's references read in portable form.
+const menuBefore = eu.state.menus[0].items.map((i: { title: string }) => i.title);
+const devPortable = await takeSnapshot(dev, ["metaobjects", "menus"]);
+
 const diff = await call("diff_stores", { source: "dev", target: "eu" });
 const plan = await call("plan_sync", { source: "dev", target: "eu" });
 const refused = await call("apply_plan", { plan_id: plan.plan_id });
@@ -131,5 +136,25 @@ const applied = await call("apply_plan", { plan_id: plan.plan_id, confirm: "eu.m
 const again = await call("plan_sync", { source: "dev", target: "eu" });
 const menuAfter = eu.state.menus[0].items.map((i: { title: string; resourceId: string | null }) => [i.title, i.resourceId]);
 
-console.log(JSON.stringify({ diff, plan, refused, applied, replan: again.totals, menuAfter }, null, 2));
+// Follow two references from dev, through the portable form, to the IDs written in eu.
+const shirtsDev = dev.state.metaobjects.find((o: { handle: string }) => o.handle === "shirts");
+const shirtsEu = eu.state.metaobjects.find((o: { handle: string }) => o.handle === "shirts");
+const shirtsPortable = devPortable.resources.metaobjects!.items.find((i) => i.key === "size_guide/shirts")!.data.fields as Record<string, string>;
+const menuPortable = devPortable.resources.menus!.items[0]!.data.items as { title: string; resourceId?: string }[];
+const trace = [
+  {
+    what: "size_guide/shirts · product field",
+    source: shirtsDev.fields.find((f: { key: string }) => f.key === "product").value,
+    portable: shirtsPortable.product,
+    target: shirtsEu.fields.find((f: { key: string }) => f.key === "product").value,
+  },
+  {
+    what: "main-menu · Shipping link",
+    source: dev.state.menus[0].items[1].resourceId,
+    portable: menuPortable.find((i) => i.title === "Shipping")!.resourceId,
+    target: eu.state.menus[0].items.find((i: { title: string }) => i.title === "Shipping").resourceId,
+  },
+];
+
+console.log(JSON.stringify({ diff, plan, refused, applied, replan: again.totals, menuBefore, menuAfter, trace }, null, 2));
 process.exit(0);

@@ -150,7 +150,7 @@
     ]
   },
   "plan": {
-    "plan_id": "5be47f57-8af2-4f9b-87ce-e34d89c92d6c",
+    "plan_id": "f1529deb-5c0e-4caf-8206-fa41f2edd92a",
     "status": "pending",
     "source": {
       "alias": "dev",
@@ -160,7 +160,7 @@
       "alias": "eu",
       "domain": "eu.myshopify.com"
     },
-    "expiresAt": "2026-11-15T00:45:38.743Z",
+    "expiresAt": "2026-11-15T00:57:22.335Z",
     "totals": {
       "create": 6,
       "update": 3,
@@ -294,7 +294,7 @@
     "error": "Refused: store \"eu\" is protected. Pass confirm=\"eu.myshopify.com\" to apply."
   },
   "applied": {
-    "plan_id": "5be47f57-8af2-4f9b-87ce-e34d89c92d6c",
+    "plan_id": "f1529deb-5c0e-4caf-8206-fa41f2edd92a",
     "status": "applied",
     "totals": {
       "created": 6,
@@ -371,6 +371,9 @@
     "update": 0,
     "conflict": 1
   },
+  "menuBefore": [
+    "New in"
+  ],
   "menuAfter": [
     [
       "New in",
@@ -380,5 +383,19 @@
       "Shipping",
       "gid://shopify/Page/91"
     ]
+  ],
+  "trace": [
+    {
+      "what": "size_guide/shirts · product field",
+      "source": "gid://shopify/Product/101",
+      "portable": "shopify://Product/linen-shirt",
+      "target": "gid://shopify/Product/9101"
+    },
+    {
+      "what": "main-menu · Shipping link",
+      "source": "gid://shopify/Page/1",
+      "portable": "shopify://Page/shipping",
+      "target": "gid://shopify/Page/91"
+    }
   ]
 }

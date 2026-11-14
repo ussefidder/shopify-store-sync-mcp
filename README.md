@@ -11,15 +11,30 @@
 
 # shopify-store-sync-mcp
 
-**Diff and sync configuration between Shopify stores, from Claude, Cursor or any MCP client.**
+**Keep your Shopify stores in sync by asking for it.** Compare a dev store with production, see every difference field by field, review a dry-run plan, then apply it, from Claude, Cursor or any MCP client.
 
-Move metafield definitions, metaobjects, menus, pages and redirects from a dev store to production, or from one region's store to another. The agent shows you a field-level diff and a dry-run plan first, and writes only after you approve.
+It copies the store setup that usually gets rebuilt by hand: **metafield and metaobject definitions, metaobject entries, pages, navigation menus and URL redirects.** References between them (a size guide pointing at a product, a menu linking to a page) are carried across by handle, so they land on the right item in the target store instead of a broken ID.
+
+<table>
+<tr>
+<td width="33%" valign="top"><b>See it before it happens</b><br>Field-level diffs and a dry-run plan for every sync. Nothing is written until you apply a reviewed plan.</td>
+<td width="33%" valign="top"><b>Safe on production</b><br>Writes are off by default, protected stores need typed confirmation, drifted items are skipped, and nothing is ever deleted.</td>
+<td width="33%" valign="top"><b>References that survive</b><br>Product, collection, page, metaobject and definition IDs are remapped by handle between stores.</td>
+</tr>
+</table>
 
 <p align="center">
   <img src="docs/images/demo.png" alt="diff_stores, plan_sync and apply_plan output: 6 created, 3 updated, 1 conflict skipped, protected store refused without confirmation" width="100%">
 </p>
 
 <sub>Real output of the server's tools on two sample stores. Regenerate with <code>npm run docs:demo && npm run docs:images</code>.</sub>
+
+## Use cases
+
+- **Dev → staging → production.** Build a new metaobject type and its entries on a dev store, check the diff against production, ship it with one reviewed plan.
+- **Multi-region brands.** Keep the EU, UK and US stores on the same definitions, menus and redirects without exporting CSVs.
+- **New market launch.** Seed a new store with the setup of an existing one, then see exactly what still differs.
+- **Drift audits.** Ask which stores have fallen out of line, without changing anything (every tool except `apply_plan` is read-only).
 
 ## Why this exists
 
@@ -63,6 +78,12 @@ App-owned (`app--…`) and Shopify-reserved (`shopify--…`) definitions are ski
 | `apply_plan` | **yes** | Execute a plan, with every safety check below. |
 
 Every tool except `apply_plan` is read-only and annotated as such, so clients can auto-approve them.
+
+What `diff_stores` reports, field by field (real output):
+
+<p align="center">
+  <img src="docs/images/field-diff.png" alt="Field-level diff: page body, menu items, definition name, and a type conflict reported but not forced" width="100%">
+</p>
 
 ## Quick start
 
@@ -187,6 +208,12 @@ This covers JSON list values (`list.product_reference`) and definition validatio
 Things in the same plan can depend on each other, for example a metaobject pointing at another one being created, or a definition that references itself. These are written in two passes: first without the pending references, then complete.
 
 **Not remapped yet:** files (images, videos), product variants and articles. Their values are left out of the sync and listed as warnings, never copied as broken IDs.
+
+Two references followed from the source store to the target, as the sample sync above wrote them:
+
+<p align="center">
+  <img src="docs/images/remapping.png" alt="gid://shopify/Product/101 in dev becomes shopify://Product/linen-shirt, then gid://shopify/Product/9101 in eu" width="100%">
+</p>
 
 ## Tested against a live store
 

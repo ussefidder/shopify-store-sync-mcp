@@ -236,3 +236,107 @@ render("how-it-works", 1280, 370, `
   .gt { font-size: 12px; letter-spacing: .08em; margin-right: 6px; }
   .gate { display: flex; align-items: center; gap: 8px; padding: 9px 12px; font-size: 12.5px; white-space: nowrap; }
 `);
+
+// ---------------------------------------------------------------- field-level diff (real output)
+const changed = Object.fromEntries(
+  out.diff.resources.flatMap((r) => r.changed.map((c) => [`${r.kind}:${c.key}`, c.changes])),
+);
+const ch = (k) => changed[k] ?? [];
+const name = ch("metafield_definitions:PRODUCT.custom.care_guide")[0];
+const type = ch("metafield_definitions:PRODUCT.custom.size_chart")[0];
+const body = ch("pages:shipping")[0];
+const menu = ch("menus:main-menu")[0];
+const menuLines = (() => {
+  const t = new Set(menu.target.map((i) => i.title));
+  return menu.source.map((i) => `<div class="ln ${t.has(i.title) ? "" : "add"}"><span class="sg">${t.has(i.title) ? " " : "+"}</span>${esc(i.title)} <span class="ref">${esc(i.resourceId ?? i.url ?? "")}</span></div>`).join("");
+})();
+const dline = (sign, cls, text) => `<div class="ln ${cls}"><span class="sg">${sign}</span>${esc(text)}</div>`;
+const dcard = (title, kind, path, inner, badge = "") =>
+  `<div class="dc card"><div class="dh"><span class="mono">${esc(title)}</span><span class="muted">${esc(kind)}</span><span class="path mono">${esc(path)}</span>${badge}</div><div class="code mono">${inner}</div></div>`;
+render("field-diff", 1280, 352, `
+<div class="wrap">
+  <div class="hd"><span class="mono b">diff_stores</span><span class="muted">field by field · <span class="r">−</span> eu (target) · <span class="g">+</span> dev (source)</span></div>
+  <div class="grid">
+    ${dcard("shipping", "page", "body", dline("−", "del", body.target) + dline("+", "add", body.source))}
+    ${dcard("main-menu", "menu", "items", menuLines)}
+    ${dcard("PRODUCT.custom.care_guide", "definition", "name", dline("−", "del", name.target) + dline("+", "add", name.source))}
+    ${dcard("PRODUCT.custom.size_chart", "definition", "type", dline("−", "del", type.target) + dline("+", "add", type.source), '<span class="badge">conflict, not forced</span>')}
+  </div>
+</div>`, `
+  .wrap { width: 1280px; padding: 30px 32px; }
+  .hd { display: flex; gap: 14px; align-items: baseline; font-size: 14px; margin-bottom: 16px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .dc { padding: 14px 16px; }
+  .dh { display: flex; gap: 10px; align-items: baseline; font-size: 13.5px; margin-bottom: 10px; white-space: nowrap; }
+  .dh .path { margin-left: auto; color: #8b98a8; font-size: 12px; background: #16202b; padding: 2px 8px; border-radius: 6px; }
+  .badge { white-space: nowrap; font-size: 11.5px; color: #f47067; border: 1px solid #5a2a2a; border-radius: 999px; padding: 2px 8px; }
+  .code { font-size: 13px; border-radius: 8px; overflow: hidden; border: 1px solid #1c2530; }
+  .ln { padding: 7px 10px; white-space: pre-wrap; word-break: break-word; }
+  .ln + .ln { border-top: 1px solid #161e27; }
+  .del { background: rgba(244,112,103,.10); color: #f6a39d; }
+  .add { background: rgba(87,194,110,.10); color: #8fdc9f; }
+  .sg { display: inline-block; width: 18px; opacity: .8; }
+  .ref { color: #6cb6ff; font-size: 12px; margin-left: 6px; }
+`);
+
+// ---------------------------------------------------------------- remapping trace (real output)
+const traceRow = (t) => `
+  <div class="tr">
+    <div class="what">${esc(t.what)}</div>
+    <div class="cells">
+      <div class="cell card"><div class="lab muted">in dev</div><div class="mono v">${esc(t.source)}</div></div>
+      <div class="ar">→</div>
+      <div class="cell card port"><div class="lab b">portable, compared and planned</div><div class="mono v b">${esc(t.portable)}</div></div>
+      <div class="ar">→</div>
+      <div class="cell card"><div class="lab muted">written to eu</div><div class="mono v g">${esc(t.target)}</div></div>
+    </div>
+  </div>`;
+render("remapping", 1280, 300, `
+<div class="wrap">
+  <div class="hd"><span class="b mono">ID remapping</span><span class="muted">every ID is store-specific, so references travel by handle</span></div>
+  ${out.trace.map(traceRow).join("")}
+</div>`, `
+  .wrap { width: 1280px; padding: 30px 32px; }
+  .hd { display: flex; gap: 14px; align-items: baseline; font-size: 14px; margin-bottom: 18px; }
+  .tr { margin-bottom: 20px; }
+  .what { font-size: 14px; color: #c9d4df; margin-bottom: 8px; }
+  .cells { display: flex; align-items: center; gap: 12px; }
+  .cell { flex: 1; padding: 14px 16px; }
+  .cell.port { border-color: #24425e; background: #101b26; }
+  .lab { font-size: 11.5px; letter-spacing: .04em; margin-bottom: 6px; }
+  .v { font-size: 14.5px; }
+  .ar { color: #4a5868; font-size: 22px; }
+`);
+
+// ---------------------------------------------------------------- social preview (GitHub: 1280x640)
+render("social-preview", 1280, 640, `
+<div class="wrap">
+  <div class="glow"></div>
+  <div class="eyebrow mono">OPEN SOURCE · MCP SERVER</div>
+  <h1>shopify-store-sync-mcp</h1>
+  <p class="tag">Diff and sync configuration between Shopify stores from Claude, Cursor or any MCP client.</p>
+  <div class="row">
+    <div class="pill"><span class="dot bg-g"></span>Metafield &amp; metaobject definitions</div>
+    <div class="pill"><span class="dot bg-g"></span>Metaobjects</div>
+    <div class="pill"><span class="dot bg-g"></span>Pages · Menus · Redirects</div>
+  </div>
+  <div class="row">
+    <div class="pill"><span class="dot bg-b"></span>Field-level diffs</div>
+    <div class="pill"><span class="dot bg-a"></span>Dry-run plans</div>
+    <div class="pill"><span class="dot bg-b"></span>ID remapping by handle</div>
+    <div class="pill"><span class="dot bg-r"></span>Never deletes</div>
+  </div>
+  <div class="foot mono muted">github.com/ussefidder/shopify-store-sync-mcp · MIT</div>
+</div>`, `
+  .wrap { position: relative; width: 1280px; height: 640px; padding: 88px 96px; overflow: hidden;
+          background: radial-gradient(1000px 500px at 0% 0%, #13202a 0%, #0b0f14 60%); }
+  .glow { position: absolute; right: -160px; bottom: -200px; width: 700px; height: 700px; border-radius: 50%;
+          background: radial-gradient(circle, rgba(87,194,110,.16), transparent 65%); }
+  .eyebrow { font-size: 16px; letter-spacing: .14em; color: #57c26e; margin-bottom: 18px; }
+  h1 { font-size: 76px; font-weight: 800; letter-spacing: -0.025em; }
+  .tag { margin-top: 18px; font-size: 28px; color: #b5c2cf; max-width: 960px; line-height: 1.35; }
+  .row { margin-top: 22px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .row + .row { margin-top: 12px; }
+  .pill { font-size: 18px; padding: 9px 16px; }
+  .foot { position: absolute; bottom: 52px; left: 96px; font-size: 16px; }
+`);
