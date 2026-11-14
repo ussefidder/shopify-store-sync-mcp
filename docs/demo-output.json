@@ -1,0 +1,384 @@
+{
+  "diff": {
+    "source": "dev",
+    "target": "eu",
+    "resources": [
+      {
+        "kind": "metafield_definitions",
+        "counts": {
+          "onlyInSource": 1,
+          "changed": 2,
+          "onlyInTarget": 0,
+          "identical": 0
+        },
+        "onlyInSource": [
+          "PRODUCT.custom.material"
+        ],
+        "changed": [
+          {
+            "key": "PRODUCT.custom.care_guide",
+            "changes": [
+              {
+                "path": "name",
+                "source": "Care instructions",
+                "target": "Care"
+              }
+            ]
+          },
+          {
+            "key": "PRODUCT.custom.size_chart",
+            "changes": [
+              {
+                "path": "type",
+                "source": "json",
+                "target": "single_line_text_field"
+              }
+            ]
+          }
+        ],
+        "onlyInTarget": []
+      },
+      {
+        "kind": "metaobject_definitions",
+        "counts": {
+          "onlyInSource": 1,
+          "changed": 0,
+          "onlyInTarget": 0,
+          "identical": 0
+        },
+        "onlyInSource": [
+          "size_guide"
+        ],
+        "changed": [],
+        "onlyInTarget": []
+      },
+      {
+        "kind": "pages",
+        "counts": {
+          "onlyInSource": 0,
+          "changed": 1,
+          "onlyInTarget": 0,
+          "identical": 0
+        },
+        "onlyInSource": [],
+        "changed": [
+          {
+            "key": "shipping",
+            "changes": [
+              {
+                "path": "body",
+                "source": "<p>Free delivery from 80 EUR, 2 to 4 days.</p>",
+                "target": "<p>Free delivery from 100 EUR, 3 to 5 days.</p>"
+              }
+            ]
+          }
+        ],
+        "onlyInTarget": []
+      },
+      {
+        "kind": "metaobjects",
+        "counts": {
+          "onlyInSource": 2,
+          "changed": 0,
+          "onlyInTarget": 0,
+          "identical": 0
+        },
+        "onlyInSource": [
+          "size_guide/shirts",
+          "size_guide/trousers"
+        ],
+        "changed": [],
+        "onlyInTarget": []
+      },
+      {
+        "kind": "menus",
+        "counts": {
+          "onlyInSource": 0,
+          "changed": 1,
+          "onlyInTarget": 0,
+          "identical": 0
+        },
+        "onlyInSource": [],
+        "changed": [
+          {
+            "key": "main-menu",
+            "changes": [
+              {
+                "path": "items",
+                "source": [
+                  {
+                    "title": "New in",
+                    "type": "COLLECTION",
+                    "resourceId": "shopify://Collection/new-in"
+                  },
+                  {
+                    "title": "Shipping",
+                    "type": "PAGE",
+                    "resourceId": "shopify://Page/shipping"
+                  }
+                ],
+                "target": [
+                  {
+                    "title": "New in",
+                    "type": "COLLECTION",
+                    "resourceId": "shopify://Collection/new-in"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "onlyInTarget": []
+      },
+      {
+        "kind": "redirects",
+        "counts": {
+          "onlyInSource": 2,
+          "changed": 0,
+          "onlyInTarget": 1,
+          "identical": 0
+        },
+        "onlyInSource": [
+          "/old-shirt",
+          "/summer-sale"
+        ],
+        "changed": [],
+        "onlyInTarget": [
+          "/legacy-home"
+        ]
+      }
+    ]
+  },
+  "plan": {
+    "plan_id": "5be47f57-8af2-4f9b-87ce-e34d89c92d6c",
+    "status": "pending",
+    "source": {
+      "alias": "dev",
+      "domain": "dev.myshopify.com"
+    },
+    "target": {
+      "alias": "eu",
+      "domain": "eu.myshopify.com"
+    },
+    "expiresAt": "2026-11-15T00:45:38.743Z",
+    "totals": {
+      "create": 6,
+      "update": 3,
+      "conflict": 1
+    },
+    "warnings": [
+      "1 conflict(s) need a manual fix in the target; they will be skipped."
+    ],
+    "ops": [
+      {
+        "seq": 1,
+        "kind": "metafield_definitions",
+        "key": "PRODUCT.custom.material",
+        "action": "create"
+      },
+      {
+        "seq": 2,
+        "kind": "metafield_definitions",
+        "key": "PRODUCT.custom.care_guide",
+        "action": "update",
+        "changes": [
+          {
+            "path": "name",
+            "from": "Care",
+            "to": "Care instructions"
+          }
+        ]
+      },
+      {
+        "seq": 3,
+        "kind": "metafield_definitions",
+        "key": "PRODUCT.custom.size_chart",
+        "action": "conflict",
+        "reason": "type differs (single_line_text_field in target, json in source); Shopify can't change a definition's type in place",
+        "changes": [
+          {
+            "path": "type",
+            "from": "single_line_text_field",
+            "to": "json"
+          }
+        ]
+      },
+      {
+        "seq": 4,
+        "kind": "metaobject_definitions",
+        "key": "size_guide",
+        "action": "create"
+      },
+      {
+        "seq": 5,
+        "kind": "pages",
+        "key": "shipping",
+        "action": "update",
+        "changes": [
+          {
+            "path": "body",
+            "from": "<p>Free delivery from 100 EUR, 3 to 5 days.</p>",
+            "to": "<p>Free delivery from 80 EUR, 2 to 4 days.</p>"
+          }
+        ]
+      },
+      {
+        "seq": 6,
+        "kind": "metaobjects",
+        "key": "size_guide/shirts",
+        "action": "create"
+      },
+      {
+        "seq": 7,
+        "kind": "metaobjects",
+        "key": "size_guide/trousers",
+        "action": "create"
+      },
+      {
+        "seq": 8,
+        "kind": "menus",
+        "key": "main-menu",
+        "action": "update",
+        "changes": [
+          {
+            "path": "items",
+            "from": [
+              {
+                "title": "New in",
+                "type": "COLLECTION",
+                "resourceId": "shopify://Collection/new-in"
+              }
+            ],
+            "to": [
+              {
+                "title": "New in",
+                "type": "COLLECTION",
+                "resourceId": "shopify://Collection/new-in"
+              },
+              {
+                "title": "Shipping",
+                "type": "PAGE",
+                "resourceId": "shopify://Page/shipping"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "seq": 9,
+        "kind": "redirects",
+        "key": "/old-shirt",
+        "action": "create"
+      },
+      {
+        "seq": 10,
+        "kind": "redirects",
+        "key": "/summer-sale",
+        "action": "create"
+      }
+    ],
+    "onlyInTarget": [
+      {
+        "kind": "redirects",
+        "count": 1,
+        "keys": [
+          "/legacy-home"
+        ]
+      }
+    ],
+    "note": "Nothing has been written. Review, then call apply_plan with this plan_id. Items only in the target are never deleted.",
+    "targetWritable": true,
+    "targetProtected": true
+  },
+  "refused": {
+    "error": "Refused: store \"eu\" is protected. Pass confirm=\"eu.myshopify.com\" to apply."
+  },
+  "applied": {
+    "plan_id": "5be47f57-8af2-4f9b-87ce-e34d89c92d6c",
+    "status": "applied",
+    "totals": {
+      "created": 6,
+      "updated": 3,
+      "skipped": 1,
+      "failed": 0
+    },
+    "results": [
+      {
+        "seq": 1,
+        "kind": "metafield_definitions",
+        "key": "PRODUCT.custom.material",
+        "outcome": "created"
+      },
+      {
+        "seq": 2,
+        "kind": "metafield_definitions",
+        "key": "PRODUCT.custom.care_guide",
+        "outcome": "updated"
+      },
+      {
+        "seq": 3,
+        "kind": "metafield_definitions",
+        "key": "PRODUCT.custom.size_chart",
+        "outcome": "skipped",
+        "message": "type differs (single_line_text_field in target, json in source); Shopify can't change a definition's type in place"
+      },
+      {
+        "seq": 4,
+        "kind": "metaobject_definitions",
+        "key": "size_guide",
+        "outcome": "created"
+      },
+      {
+        "seq": 5,
+        "kind": "pages",
+        "key": "shipping",
+        "outcome": "updated"
+      },
+      {
+        "seq": 6,
+        "kind": "metaobjects",
+        "key": "size_guide/shirts",
+        "outcome": "created"
+      },
+      {
+        "seq": 7,
+        "kind": "metaobjects",
+        "key": "size_guide/trousers",
+        "outcome": "created"
+      },
+      {
+        "seq": 8,
+        "kind": "menus",
+        "key": "main-menu",
+        "outcome": "updated"
+      },
+      {
+        "seq": 9,
+        "kind": "redirects",
+        "key": "/old-shirt",
+        "outcome": "created"
+      },
+      {
+        "seq": 10,
+        "kind": "redirects",
+        "key": "/summer-sale",
+        "outcome": "created"
+      }
+    ]
+  },
+  "replan": {
+    "create": 0,
+    "update": 0,
+    "conflict": 1
+  },
+  "menuAfter": [
+    [
+      "New in",
+      "gid://shopify/Collection/9201"
+    ],
+    [
+      "Shipping",
+      "gid://shopify/Page/91"
+    ]
+  ]
+}

@@ -20,7 +20,9 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run typecheck && npm test && npm run build",
-    "validate:graphql": "node scripts/validate-graphql.mjs"
+    "validate:graphql": "node scripts/validate-graphql.mjs",
+    "docs:demo": "tsx scripts/demo-data.ts > docs/demo-output.json",
+    "docs:images": "node scripts/render-docs-images.mjs"
   },
   "keywords": [
     "mcp",
@@ -54,6 +56,7 @@
   "devDependencies": {
     "@types/node": "^22.20.5",
     "graphql": "^16.15.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "vitest": "^3.2.7"
   }

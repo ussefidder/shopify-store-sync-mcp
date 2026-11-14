@@ -1,0 +1,238 @@
+#!/usr/bin/env node
+// Builds the README images from real server output.
+//
+//   npx tsx scripts/demo-data.ts > docs/demo-output.json
+//   node scripts/render-docs-images.mjs            (needs Google Chrome or Chromium)
+//
+// Every number and label in demo.png comes from docs/demo-output.json.
+
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const root = new URL("..", import.meta.url).pathname;
+const out = JSON.parse(readFileSync(join(root, "docs/demo-output.json"), "utf8"));
+const chrome = process.env.CHROME ?? ["google-chrome", "chromium", "chromium-browser"].find((c) => {
+  try {
+    execFileSync("which", [c], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+});
+if (!chrome) throw new Error("Chrome or Chromium is required (or set CHROME=/path/to/chrome)");
+
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+const BASE_CSS = `
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: #0b0f14; }
+  body { font-family: Inter, system-ui, sans-serif; color: #e6edf3; -webkit-font-smoothing: antialiased; }
+  .mono { font-family: "DejaVu Sans Mono", ui-monospace, monospace; }
+  .muted { color: #8b98a8; }
+  .card { background: #11161d; border: 1px solid #222c38; border-radius: 14px; }
+  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px;
+          background: #16202b; border: 1px solid #263342; font-size: 14px; color: #c9d4df; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .g { color: #57c26e; } .a { color: #e3b341; } .r { color: #f47067; } .b { color: #6cb6ff; }
+  .bg-g { background: #57c26e; } .bg-a { background: #e3b341; } .bg-r { background: #f47067; } .bg-b { background: #6cb6ff; }
+`;
+
+function render(name, width, height, body, css = "") {
+  const dir = mkdtempSync(join(tmpdir(), "docimg-"));
+  const html = join(dir, `${name}.html`);
+  writeFileSync(html, `<!doctype html><html><head><meta charset="utf-8"><style>${BASE_CSS}${css}</style></head><body>${body}</body></html>`);
+  const png = join(root, "docs/images", `${name}.png`);
+  execFileSync(chrome, [
+    "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars", "--force-device-scale-factor=2",
+    `--window-size=${width},${height}`, `--screenshot=${png}`, `file://${html}`,
+  ], { stdio: "ignore" });
+  console.log(`docs/images/${name}.png`);
+}
+
+// ---------------------------------------------------------------- hero
+render("hero", 1280, 360, `
+<div class="wrap">
+  <div class="glow"></div>
+  <div class="left">
+    <div class="eyebrow mono">MCP SERVER · SHOPIFY ADMIN API</div>
+    <h1>shopify-store-sync-mcp</h1>
+    <p class="tag">Diff and sync configuration between Shopify stores, straight from your AI assistant.</p>
+    <div class="pills">
+      <span class="pill"><span class="dot bg-g"></span>Dry-run plans</span>
+      <span class="pill"><span class="dot bg-b"></span>Cross-store ID remapping</span>
+      <span class="pill"><span class="dot bg-a"></span>Drift-checked writes</span>
+      <span class="pill"><span class="dot bg-r"></span>Never deletes</span>
+    </div>
+  </div>
+  <div class="stores">
+    <div class="store card"><div class="muted small">source</div><div class="sname">dev</div><div class="mono small muted">dev.myshopify.com</div></div>
+    <div class="arrow"><div class="line"></div><div class="mono small">plan → apply</div></div>
+    <div class="store card prot"><div class="muted small">target · protected</div><div class="sname">eu</div><div class="mono small muted">eu.myshopify.com</div></div>
+  </div>
+</div>`, `
+  .wrap { position: relative; width: 1280px; height: 360px; padding: 56px 64px; display: flex; align-items: center; gap: 48px; overflow: hidden;
+          background: radial-gradient(1200px 400px at 0% 0%, #13202a 0%, #0b0f14 60%); }
+  .glow { position: absolute; right: -120px; top: -160px; width: 520px; height: 520px; border-radius: 50%;
+          background: radial-gradient(circle, rgba(87,194,110,.18), transparent 65%); }
+  .left { flex: 1; position: relative; }
+  .eyebrow { font-size: 13px; letter-spacing: .12em; color: #57c26e; margin-bottom: 14px; }
+  h1 { font-size: 52px; font-weight: 800; letter-spacing: -0.02em; }
+  .tag { margin-top: 12px; font-size: 21px; color: #b5c2cf; max-width: 640px; line-height: 1.4; }
+  .pills { margin-top: 26px; display: flex; flex-wrap: wrap; gap: 10px; }
+  .stores { position: relative; display: flex; flex-direction: column; align-items: center; gap: 10px; width: 300px; }
+  .store { width: 300px; padding: 16px 20px; }
+  .store.prot { border-color: #3a2a2a; }
+  .sname { font-size: 26px; font-weight: 700; margin: 2px 0 2px; }
+  .small { font-size: 13px; }
+  .arrow { display: flex; align-items: center; gap: 12px; color: #57c26e; height: 34px; }
+  .line { width: 2px; height: 34px; background: linear-gradient(#57c26e, #2a6b3a); }
+`);
+
+// ---------------------------------------------------------------- demo (real output)
+const LABEL = {
+  metafield_definitions: "Metafield definitions",
+  metaobject_definitions: "Metaobject definitions",
+  pages: "Pages",
+  metaobjects: "Metaobjects",
+  menus: "Menus",
+  redirects: "Redirects",
+};
+const diffRows = out.diff.resources
+  .map((r) => `<tr><td>${LABEL[r.kind]}</td>
+    <td class="num ${r.counts.onlyInSource ? "g" : "muted"}">${r.counts.onlyInSource}</td>
+    <td class="num ${r.counts.changed ? "a" : "muted"}">${r.counts.changed}</td>
+    <td class="num ${r.counts.onlyInTarget ? "b" : "muted"}">${r.counts.onlyInTarget}</td></tr>`)
+  .join("");
+
+const ICON = { create: ["+", "g"], update: ["~", "a"], conflict: ["!", "r"] };
+const opRows = out.plan.ops
+  .map((o) => {
+    const [sym, cls] = ICON[o.action];
+    const detail =
+      o.action === "conflict"
+        ? `<span class="r">type differs, skipped</span>`
+        : o.changes?.length
+          ? `<span class="muted">${o.changes.map((c) => esc(c.path)).join(", ")}</span>`
+          : "";
+    return `<div class="op"><span class="sym ${cls}">${sym}</span><span class="kind muted">${esc(o.kind.replace(/_/g, " "))}</span><span class="key mono">${esc(o.key)}</span>${detail}</div>`;
+  })
+  .join("");
+
+const t = out.applied.totals;
+render("demo", 1280, 700, `
+<div class="wrap">
+  <div class="chat">
+    <div class="msg user">Compare <b>dev</b> with <b>eu</b>, plan a sync and apply it.</div>
+
+    <div class="tool card">
+      <div class="th"><span class="mono b">diff_stores</span><span class="muted mono">source: dev → target: eu</span></div>
+      <table>
+        <thead><tr><th></th><th>only in dev</th><th>changed</th><th>only in eu</th></tr></thead>
+        <tbody>${diffRows}</tbody>
+      </table>
+    </div>
+
+    <div class="tool card">
+      <div class="th"><span class="mono b">plan_sync</span><span class="muted mono">nothing written yet</span>
+        <span class="tot"><span class="g">${out.plan.totals.create} create</span> · <span class="a">${out.plan.totals.update} update</span> · <span class="r">${out.plan.totals.conflict} conflict</span></span></div>
+      <div class="ops">${opRows}</div>
+    </div>
+  </div>
+
+  <div class="side">
+    <div class="tool card">
+      <div class="th"><span class="mono b">apply_plan</span></div>
+      <div class="refused"><span class="r">✕</span> ${esc(out.refused.error.replace(/^Refused: /, ""))}</div>
+    </div>
+    <div class="tool card">
+      <div class="th"><span class="mono b">apply_plan</span><span class="muted mono">confirm: eu.myshopify.com</span></div>
+      <div class="stats">
+        <div><div class="big g">${t.created}</div><div class="muted">created</div></div>
+        <div><div class="big a">${t.updated}</div><div class="muted">updated</div></div>
+        <div><div class="big muted">${t.skipped}</div><div class="muted">skipped</div></div>
+        <div><div class="big ${t.failed ? "r" : "muted"}">${t.failed}</div><div class="muted">failed</div></div>
+      </div>
+    </div>
+    <div class="tool card">
+      <div class="th"><span class="mono b">menu links after sync</span></div>
+      ${out.menuAfter.map(([title, id]) => `<div class="remap"><span>${esc(title)}</span><span class="mono g">${esc(id.replace("gid://shopify/", ""))}</span></div>`).join("")}
+      <div class="muted note">Remapped to eu's own IDs by handle.</div>
+    </div>
+    <div class="tool card">
+      <div class="th"><span class="mono b">plan_sync</span><span class="muted mono">run again</span></div>
+      <div class="again"><span class="g">${out.replan.create} create</span> · <span class="g">${out.replan.update} update</span> · <span class="r">${out.replan.conflict} conflict</span></div>
+      <div class="muted note">Already in sync. The conflict stays reported until fixed by hand.</div>
+    </div>
+  </div>
+</div>
+<div class="foot muted">Real output of the server's tools on two sample stores (scripts/demo-data.ts).</div>`, `
+  .wrap { display: flex; gap: 22px; padding: 32px 32px 12px; width: 1280px; }
+  .chat { flex: 1.45; display: flex; flex-direction: column; gap: 14px; }
+  .side { flex: 1; display: flex; flex-direction: column; gap: 14px; padding-top: 58px; }
+  .msg.user { align-self: flex-end; background: #1f2a37; border: 1px solid #2c3a4b; padding: 11px 16px; border-radius: 14px 14px 4px 14px; font-size: 15px; }
+  .tool { padding: 14px 16px; }
+  .th { display: flex; gap: 12px; align-items: baseline; font-size: 13px; margin-bottom: 10px; }
+  .th .tot { margin-left: auto; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: right; font-weight: 500; color: #8b98a8; font-size: 12px; padding: 0 6px 6px; }
+  td { padding: 5px 6px; border-top: 1px solid #1c2530; }
+  td.num { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; width: 110px; }
+  .ops { display: flex; flex-direction: column; gap: 3px; font-size: 13.5px; }
+  .op { display: grid; grid-template-columns: 22px 170px 220px 1fr; align-items: center; padding: 4px 6px; border-radius: 6px; }
+  .op:nth-child(odd) { background: #0e1319; }
+  .sym { font-weight: 800; font-family: "DejaVu Sans Mono", monospace; }
+  .kind { font-size: 12.5px; }
+  .key { font-size: 12.5px; }
+  .refused { font-size: 13.5px; line-height: 1.45; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); text-align: center; font-size: 12.5px; }
+  .big { font-size: 30px; font-weight: 800; }
+  .remap { display: flex; justify-content: space-between; font-size: 13.5px; padding: 3px 0; }
+  .note { font-size: 12px; margin-top: 6px; }
+  .again { font-size: 15px; font-weight: 600; }
+  .foot { padding: 0 32px 24px; font-size: 12px; text-align: right; }
+`);
+
+// ---------------------------------------------------------------- how it works
+const step = (n, title, text, cls) =>
+  `<div class="step card"><div class="n ${cls}">${n}</div><div class="st">${title}</div><div class="sd muted">${text}</div></div>`;
+render("how-it-works", 1280, 370, `
+<div class="wrap">
+  <div class="row">
+    <div class="store card"><div class="muted small">source store</div><div class="sname">dev</div></div>
+    <div class="arr">→</div>
+    ${step(1, "Snapshot", "Reads both stores and swaps every ID for a portable ref:<br><span class='mono b nw'>shopify://Product/shirt</span>", "b")}
+    <div class="arr">→</div>
+    ${step(2, "Diff", "Field by field: only in source, changed, only in target.", "b")}
+    <div class="arr">→</div>
+    ${step(3, "Plan", "Dry run: creates, updates, conflicts and missing references. Nothing written.", "a")}
+    <div class="arr">→</div>
+    ${step(4, "Apply", "Resolves refs to the target's own IDs and writes in dependency order.", "g")}
+    <div class="arr">→</div>
+    <div class="store card"><div class="muted small">target store</div><div class="sname">eu</div></div>
+  </div>
+  <div class="gates">
+    <div class="gt mono muted">safety</div>
+    <div class="gate card"><span class="dot bg-g"></span>Writes off unless <span class="mono">allowWrites</span></div>
+    <div class="gate card"><span class="dot bg-a"></span>Protected stores need typed confirmation</div>
+    <div class="gate card"><span class="dot bg-b"></span>Drifted items skipped</div>
+    <div class="gate card"><span class="dot bg-r"></span>Never deletes</div>
+    <div class="gate card"><span class="dot" style="background:#a371f7"></span>Audit log</div>
+  </div>
+</div>`, `
+  .wrap { width: 1280px; height: 370px; padding: 36px 36px; background: radial-gradient(900px 300px at 50% 0%, #121b24, #0b0f14 70%); }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .store { width: 110px; padding: 18px 14px; text-align: center; }
+  .sname { font-size: 22px; font-weight: 800; margin-top: 4px; }
+  .small { font-size: 12px; }
+  .arr { color: #4a5868; font-size: 22px; }
+  .step { flex: 1; padding: 18px 16px; min-height: 180px; }
+  .n { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; background: #16202b; border: 1px solid #263342; margin-bottom: 12px; }
+  .st { font-size: 19px; font-weight: 700; margin-bottom: 8px; }
+  .sd { font-size: 14px; line-height: 1.5; }
+  .gates { margin-top: 28px; display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; }
+  .nw { white-space: nowrap; }
+  .gt { font-size: 12px; letter-spacing: .08em; margin-right: 6px; }
+  .gate { display: flex; align-items: center; gap: 8px; padding: 9px 12px; font-size: 12.5px; white-space: nowrap; }
+`);

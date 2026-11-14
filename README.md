@@ -1,21 +1,25 @@
+<p align="center">
+  <img src="docs/images/hero.png" alt="shopify-store-sync-mcp: diff and sync configuration between Shopify stores from your AI assistant" width="100%">
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-57c26e" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/node-%3E%3D20-6cb6ff" alt="Node 20+">
+  <img src="https://img.shields.io/badge/MCP-server-a371f7" alt="MCP server">
+  <img src="https://img.shields.io/badge/Shopify%20Admin%20API-2026--10-e3b341" alt="Shopify Admin API 2026-10">
+</p>
+
 # shopify-store-sync-mcp
 
 **Diff and sync configuration between Shopify stores, from Claude, Cursor or any MCP client.**
 
 Move metafield definitions, metaobjects, menus, pages and redirects from a dev store to production, or from one region's store to another. The agent shows you a field-level diff and a dry-run plan first, and writes only after you approve.
 
-```
-You:    What's different between staging and the EU store?
-Claude: 3 metafield definitions and 1 metaobject type exist only in staging,
-        12 FAQ entries differ (answers updated), main-menu has 2 new links,
-        and 40 redirects are missing in EU.
-You:    Plan a sync for the metaobjects and menu.
-Claude: Plan 7f3c…: create 1 definition, create 4 entries, update 12 entries,
-        update main-menu. 1 warning: "see_also" references a product that
-        doesn't exist in EU (shopify://Product/linen-shirt).
-You:    Apply it.
-Claude: Applied: 17 created/updated, 0 failed. Audit log written.
-```
+<p align="center">
+  <img src="docs/images/demo.png" alt="diff_stores, plan_sync and apply_plan output: 6 created, 3 updated, 1 conflict skipped, protected store refused without confirmation" width="100%">
+</p>
+
+<sub>Real output of the server's tools on two sample stores. Regenerate with <code>npm run docs:demo && npm run docs:images</code>.</sub>
 
 ## Why this exists
 
@@ -149,6 +153,12 @@ claude mcp add shopify-store-sync \
 - *"Which product metafield definitions in namespace custom are missing from eu?"* (uses `include: ["PRODUCT.custom.*"]`)
 - *"Plan a sync of the faq and size_guide metaobjects from dev to eu."*
 - *"Apply only ops 1 to 4 of that plan."*
+
+## How it works
+
+<p align="center">
+  <img src="docs/images/how-it-works.png" alt="Snapshot, diff, plan, apply, with safety checks before every write" width="100%">
+</p>
 
 ## How it stays safe
 
