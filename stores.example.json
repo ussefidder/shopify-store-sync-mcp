@@ -1,0 +1,22 @@
+{
+  "stores": {
+    "dev": {
+      "domain": "my-brand-dev.myshopify.com",
+      "accessToken": "env:DEV_TOKEN",
+      "label": "Development store"
+    },
+    "staging": {
+      "domain": "my-brand-staging.myshopify.com",
+      "accessToken": "env:STAGING_TOKEN",
+      "allowWrites": true
+    },
+    "eu": {
+      "domain": "my-brand-eu.myshopify.com",
+      "clientId": "env:EU_CLIENT_ID",
+      "clientSecret": "env:EU_CLIENT_SECRET",
+      "allowWrites": true,
+      "protected": true,
+      "label": "EU production"
+    }
+  }
+}

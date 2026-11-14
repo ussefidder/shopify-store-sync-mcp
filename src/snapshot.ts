@@ -1,0 +1,34 @@
+import { ADAPTERS, orderKinds, type FetchOptions, type Item, type ResourceKind } from "./resources/index.js";
+import { collectGids, GidToRefMapper } from "./refs.js";
+import type { AdminClient } from "./shopify/client.js";
+
+export interface ResourceSnapshot {
+  items: Item[];
+  skipped: { key: string; reason: string }[];
+}
+
+export interface Snapshot {
+  store: string;
+  domain: string;
+  takenAt: string;
+  resources: Partial<Record<ResourceKind, ResourceSnapshot>>;
+}
+
+/** Read resources from a store and rewrite every GID inside `data` into a portable ref. */
+export async function takeSnapshot(client: AdminClient, kinds: readonly ResourceKind[], opts: FetchOptions = {}): Promise<Snapshot> {
+  const mapper = new GidToRefMapper(client);
+  const resources: Snapshot["resources"] = {};
+
+  for (const kind of orderKinds(kinds)) {
+    const { items, skipped } = await ADAPTERS[kind].fetch(client, opts);
+    const gids = new Set<string>();
+    for (const item of items) for (const g of collectGids(item.data)) gids.add(g);
+    await mapper.load(gids);
+    resources[kind] = {
+      items: items.map((i) => ({ ...i, data: mapper.map(i.data) })),
+      skipped,
+    };
+  }
+
+  return { store: client.store.alias, domain: client.store.domain, takenAt: new Date().toISOString(), resources };
+}

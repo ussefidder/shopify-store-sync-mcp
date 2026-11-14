@@ -1,0 +1,60 @@
+{
+  "name": "shopify-store-sync-mcp",
+  "version": "0.1.0",
+  "description": "MCP server to diff and sync configuration between Shopify stores: metafield and metaobject definitions, metaobjects, menus, redirects and pages. Dry-run first, write-gated, multi-store.",
+  "type": "module",
+  "bin": {
+    "shopify-store-sync-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build",
+    "validate:graphql": "node scripts/validate-graphql.mjs"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "shopify",
+    "shopify-plus",
+    "metafields",
+    "metaobjects",
+    "store-sync",
+    "diff",
+    "claude",
+    "ai-agents"
+  ],
+  "author": "Youssef Idder",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ussefidder/shopify-store-sync-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ussefidder/shopify-store-sync-mcp/issues"
+  },
+  "homepage": "https://github.com/ussefidder/shopify-store-sync-mcp#readme",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "graphql": "^16.15.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}
