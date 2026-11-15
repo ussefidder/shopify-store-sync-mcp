@@ -10,7 +10,7 @@ import { DEFAULT_OWNER_TYPES } from "./resources/metafieldDefinitions.js";
 import type { AdminClient } from "./shopify/client.js";
 import { DEFAULT_THEME_FILES, type ThemeDiff } from "./themes.js";
 
-export const VERSION = "0.2.1";
+export const VERSION = "0.3.0";
 
 export interface ServerDeps {
   registry: StoreRegistry;
@@ -69,7 +69,7 @@ function describeStore(s: StoreConfig) {
     domain: s.domain,
     label: s.label,
     apiVersion: s.apiVersion,
-    auth: s.accessToken ? "access_token" : "client_credentials",
+    auth: s.auth === "shopify-cli" ? "shopify_cli" : s.accessToken ? "access_token" : "client_credentials",
     allowWrites: s.allowWrites,
     protected: s.protected,
   };

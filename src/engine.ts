@@ -5,6 +5,7 @@ import { buildPlan, PlanStore, type Plan } from "./plan.js";
 import { RefToGidResolver } from "./refs.js";
 import { DEFAULT_KINDS, type FetchOptions, type ResourceKind } from "./resources/index.js";
 import { ShopifyAdminClient, type AdminClient } from "./shopify/client.js";
+import { ShopifyCliClient } from "./shopify/cliClient.js";
 import { takeSnapshot, type Snapshot } from "./snapshot.js";
 import { exportSnapshot, readSnapshot, type ExportResult } from "./snapshotFiles.js";
 import { diffThemes, type ThemeDiff } from "./themes.js";
@@ -33,7 +34,7 @@ export class Engine {
   constructor(
     readonly registry: StoreRegistry,
     readonly plans: PlanStore = new PlanStore(),
-    private readonly clientFactory: (store: StoreConfig) => AdminClient = (s) => new ShopifyAdminClient(s),
+    private readonly clientFactory: (store: StoreConfig) => AdminClient = (s) => (s.auth === "shopify-cli" ? new ShopifyCliClient(s) : new ShopifyAdminClient(s)),
   ) {}
 
   client(alias: string): AdminClient {

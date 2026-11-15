@@ -12,13 +12,15 @@ const storeSchema = z
     accessToken: z.string().min(1).optional(),
     clientId: z.string().min(1).optional(),
     clientSecret: z.string().min(1).optional(),
+    /** "shopify-cli": use the sign-in saved by `shopify store auth` (no app or token needed). */
+    auth: z.enum(["shopify-cli"]).optional(),
     apiVersion: z.string().regex(/^\d{4}-\d{2}$/).optional(),
     allowWrites: z.boolean().default(false),
     protected: z.boolean().default(false),
     label: z.string().optional(),
   })
-  .refine((s) => Boolean(s.accessToken) || (Boolean(s.clientId) && Boolean(s.clientSecret)), {
-    message: "each store needs accessToken, or clientId + clientSecret",
+  .refine((s) => s.auth === "shopify-cli" || Boolean(s.accessToken) || (Boolean(s.clientId) && Boolean(s.clientSecret)), {
+    message: 'each store needs "auth": "shopify-cli", an accessToken, or clientId + clientSecret',
   });
 
 export type StoreConfig = z.infer<typeof storeSchema> & { alias: string; apiVersion: string };
@@ -84,6 +86,7 @@ export function loadStores(env: NodeJS.ProcessEnv = process.env, cwd = process.c
           accessToken: env.SHOPIFY_ACCESS_TOKEN,
           clientId: env.SHOPIFY_CLIENT_ID,
           clientSecret: env.SHOPIFY_CLIENT_SECRET,
+          auth: env.SHOPIFY_AUTH === "shopify-cli" ? "shopify-cli" : undefined,
           allowWrites: env.SHOPIFY_ALLOW_WRITES === "true",
         },
       },

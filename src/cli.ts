@@ -1,17 +1,20 @@
+import { spawn } from "node:child_process";
 import { ApplyRefused } from "./apply.js";
-import { loadStores, StoreRegistry } from "./config.js";
+import { DEFAULT_API_VERSION, loadStores, StoreRegistry, type StoreConfig } from "./config.js";
 import { preview, type ResourceDiff } from "./diff.js";
 import { Engine, type Scope } from "./engine.js";
 import type { Plan } from "./plan.js";
 import { RESOURCE_KINDS, type ResourceKind } from "./resources/index.js";
 import { summarizeDiff, summarizePlan, summarizeThemes } from "./server.js";
+import { cliBin, scopesFor, ShopifyCliClient } from "./shopify/cliClient.js";
 
-export const COMMANDS = ["stores", "diff", "plan", "plans", "apply", "export", "themes", "help"] as const;
+export const COMMANDS = ["connect", "stores", "diff", "plan", "plans", "apply", "export", "themes", "help"] as const;
 
 const HELP = `shopify-store-sync: diff and sync configuration between Shopify stores
 
 Usage
   shopify-store-sync-mcp                          start the MCP server (stdio)
+  shopify-store-sync-mcp connect <store>          sign in to a store through Shopify CLI (no app needed)
   shopify-store-sync-mcp stores                   list configured stores
   shopify-store-sync-mcp diff   <source> <target> compare (read-only)
   shopify-store-sync-mcp plan   <source> <target> dry-run plan, prints a plan id
@@ -27,6 +30,7 @@ Options
   --include  glob,glob   only keys matching, e.g. "PRODUCT.custom.*,faq/*"
   --exclude  glob,glob   drop keys matching
   --namespaces a,b       metafield value namespaces      --locales fr,de   translation locales
+  --writes               connect: also request write scopes (default: what the store config allows)
   --confirm <domain>     required to apply to a protected store
   --only 1,2,3           apply only these plan steps
   --files a,b            theme file patterns              --source-theme / --target-theme <id>
@@ -44,7 +48,7 @@ export function parseArgs(argv: string[]): { positional: string[]; flags: Flags 
       const [name, inline] = a.slice(2).split("=", 2) as [string, string | undefined];
       const next = argv[i + 1];
       if (inline !== undefined) flags[name] = inline;
-      else if (next !== undefined && !next.startsWith("--") && !["json", "exit-code", "values"].includes(name)) flags[name] = argv[++i]!;
+      else if (next !== undefined && !next.startsWith("--") && !["json", "exit-code", "values", "writes"].includes(name)) flags[name] = argv[++i]!;
       else flags[name] = true;
     } else positional.push(a);
   }
@@ -117,11 +121,31 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.en
 
   try {
     switch (cmd) {
+      case "connect": {
+        need(a);
+        const known = engine.registry.list().find((s) => s.alias === a || s.domain === a);
+        const domain = known?.domain ?? (a!.includes(".") ? a! : `${a}.myshopify.com`);
+        if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i.test(domain)) throw new Error(`"${a}" is not a configured store alias or a *.myshopify.com domain`);
+        const scopes = scopesFor({ allowWrites: flags.writes === true || Boolean(known?.allowWrites) });
+        const bin = cliBin(env);
+        console.log(`Opening Shopify in your browser to approve access to ${domain} (${scopes.some((x) => x.startsWith("write_")) ? "read and write" : "read-only"})...`);
+        const code = await interactive(bin, ["store", "auth", "--store", domain, "--scopes", scopes.join(",")]);
+        if (code !== 0) throw new Error(`shopify store auth exited with code ${code}`);
+        const probe: StoreConfig = { alias: known?.alias ?? "store", domain, auth: "shopify-cli", apiVersion: known?.apiVersion ?? DEFAULT_API_VERSION, allowWrites: false, protected: false };
+        const shop = await new ShopifyCliClient(probe, undefined, bin).request<{ shop: { name: string } }>("query { shop { name } }");
+        console.log(green(`Connected to ${shop.shop.name} (${domain}).`));
+        if (!known) {
+          console.log(`\nAdd it to stores.json:\n  "${domain.split(".")[0]}": { "domain": "${domain}", "auth": "shopify-cli"${flags.writes === true ? ', "allowWrites": true' : ""} }`);
+        } else if (known.auth !== "shopify-cli") {
+          console.log(dim(`\nTo use this sign-in for "${known.alias}", set "auth": "shopify-cli" in its stores.json entry.`));
+        }
+        return 0;
+      }
       case "stores": {
-        const stores = engine.registry.list().map((s) => ({ alias: s.alias, domain: s.domain, writes: s.allowWrites, protected: s.protected }));
+        const stores = engine.registry.list().map((s) => ({ alias: s.alias, domain: s.domain, writes: s.allowWrites, protected: s.protected, auth: s.auth ?? (s.accessToken ? "access-token" : "client-credentials") }));
         if (asJson) out(stores);
         else if (!stores.length) console.log("No stores configured. See the README, Configuration.");
-        else for (const s of stores) console.log(`${bold(s.alias.padEnd(12))} ${s.domain}  ${s.writes ? green("writes on") : dim("read-only")}${s.protected ? red("  protected") : ""}`);
+        else for (const s of stores) console.log(`${bold(s.alias.padEnd(12))} ${s.domain}  ${s.writes ? green("writes on") : dim("read-only")}${s.protected ? red("  protected") : ""}  ${dim(s.auth)}`);
         return 0;
       }
       case "diff": {
@@ -201,4 +225,15 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.en
     console.error(red(err instanceof ApplyRefused ? `Refused: ${msg}` : msg));
     return 1;
   }
+}
+
+/** Run a command attached to the terminal (the CLI opens the browser and waits for approval). */
+function interactive(bin: string, args: string[]): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args, { stdio: "inherit", shell: process.platform === "win32" });
+    child.on("error", (e: NodeJS.ErrnoException) =>
+      reject(e.code === "ENOENT" ? new Error(`Shopify CLI not found ("${bin}"). Install it with: npm install -g @shopify/cli`) : e),
+    );
+    child.on("close", (code) => resolve(code ?? 1));
+  });
 }

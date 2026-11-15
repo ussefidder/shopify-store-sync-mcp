@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+- Connect a store without creating an app: `connect <store>` signs in through Shopify CLI (`shopify store auth`) in the browser, and `"auth": "shopify-cli"` in `stores.json` sends requests through `shopify store execute`
+- Read-only scopes are requested unless the store allows writes (or `--writes` is passed)
+- Clear messages when Shopify CLI is missing or the sign-in has expired
+
 ## 0.2.1
 
 - Verified every feature end to end between two live development stores, through the CLI and the MCP server

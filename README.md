@@ -23,7 +23,7 @@ It copies the store setup that usually gets rebuilt by hand: **metafield and met
 </tr>
 </table>
 
-> **What you need:** Node 20+, and a private Shopify app on each store so the server can call the Admin API. Shopify gives API access to apps only, so this step can't be skipped, but it's free, takes about 5 minutes, and nothing is published on the App Store. You choose its exact permissions. [Setup steps below](#1-create-a-private-app-on-each-store).
+> **What you need:** Node 20+ and access to the stores' admin. The quickest way to connect needs no app at all: run `shopify-store-sync-mcp connect my-store`, approve in the browser, done (it uses [Shopify CLI](https://shopify.dev/docs/api/shopify-cli)'s own sign-in). For scheduled or unattended runs, a private app works too. [Setup below](#1-connect-your-stores).
 
 <p align="center">
   <img src="docs/images/demo.png" alt="diff_stores, plan_sync and apply_plan output: 6 created, 3 updated, 1 conflict skipped, protected store refused without confirmation" width="100%">
@@ -97,11 +97,27 @@ What `diff_stores` reports, field by field (real output):
 
 ## Quick start
 
-### 1. Create a private app on each store
+### 1. Connect your stores
 
-This server is a program you run yourself, so it can't borrow the Shopify login of your AI client. It reaches each store through the Admin API, and Shopify only grants that to an app installed on the store. Pick the option that matches who owns the stores.
+This server is a program you run yourself, so it can't borrow the Shopify login of your AI client. Pick one of three ways to give it access.
 
-**Option A: your own or your organization's stores (Dev Dashboard app, recommended).** One app covers every store in the same Shopify organization, and tokens are fetched and refreshed for you.
+**Option 1: sign in with Shopify CLI (fastest, no app to create).** Works on any store where your Shopify account can approve app access, including client stores you collaborate on.
+
+```bash
+npm install -g @shopify/cli
+npx shopify-store-sync-mcp connect my-dev-store            # read-only
+npx shopify-store-sync-mcp connect my-staging-store --writes
+```
+
+Each `connect` opens Shopify in your browser; click **Install** to approve. It asks for read-only scopes unless you pass `--writes` (or the store is configured with `"allowWrites": true`), then prints the line to add to `stores.json`:
+
+```json
+{ "stores": { "my-dev-store": { "domain": "my-dev-store.myshopify.com", "auth": "shopify-cli" } } }
+```
+
+Requests then run through `shopify store execute`, Shopify CLI's supported command, using the sign-in it saved. That sign-in belongs to you and expires after a while; when it does, the tool says so and you run `connect` again. Because of that, use one of the options below for scheduled or unattended runs.
+
+**Option 2: a Dev Dashboard app (best for automation on your own or your organization's stores).** One app covers every store in the same Shopify organization, and tokens are fetched and refreshed for you.
 
 1. Open the [Dev Dashboard](https://dev.shopify.com/dashboard), go to **Apps**, click **Create app**, then **Create app manually**.
 2. Give it a name, for example `Store Sync`. Any URL works as the App URL (it's never opened); untick **Embed app in Shopify admin**.
@@ -111,7 +127,7 @@ This server is a program you run yourself, so it can't borrow the Shopify login 
 
 Adding a scope later means releasing a new version and approving the update on each store (same install link).
 
-**Option B: a store owned by someone else (a client's store, for example).** Client credentials only work on stores in the app's own organization; elsewhere Shopify answers `shop_not_permitted`. Ask the store owner to create a custom app in their admin (**Settings > Apps > Develop apps**), grant the scopes below, install it and share the Admin API access token (`shpat_...`). Use it as `accessToken` in step 2.
+**Option 3: an access token from a custom app (a store owned by someone else, for automation).** Client credentials only work on stores in the app's own organization; elsewhere Shopify answers `shop_not_permitted`. For unattended runs on such a store, ask the owner to create a custom app in their admin (**Settings > Apps > Develop apps**), grant the scopes below, install it and share the Admin API access token (`shpat_...`). Use it as `accessToken` in step 2.
 
 | Resource | Read scope | Write scope |
 |---|---|---|
@@ -162,6 +178,7 @@ Create `stores.json`. Secrets can come from environment variables with `env:NAME
 | Option | Default | Meaning |
 |---|---|---|
 | `domain` | required | `*.myshopify.com` domain |
+| `auth` | | `"shopify-cli"`: use the sign-in saved by `connect` (no token needed), **or** |
 | `accessToken` | | Static Admin API token, **or** |
 | `clientId` + `clientSecret` | | Dev Dashboard app; tokens are fetched and refreshed automatically |
 | `apiVersion` | `2026-10` | Admin API version |
@@ -317,6 +334,7 @@ Besides the 49 automated tests, every feature has been run end to end between tw
 | Theme settings diff | read-only, 15 files compared in about 1 second |
 | Safety: write to a read-only store | refused |
 | Safety: target edited after the plan was made | step skipped, nothing overwritten |
+| Shopify CLI sign-in (`connect`) | Shopify's consent screen accepts every scope the tool needs, writes included; error handling (no sign-in, CLI missing) checked against Shopify CLI 5.0.1 |
 
 Behaviours of the live API found this way are covered by tests: `nodes` returns `null` for customer account pages (they're looked up by listing instead), `ShopPolicy.type` has to be aliased next to `Metaobject.type`, Shopify refuses edits to auto-managed policies, and a failed token request carries its reason (such as `app_not_installed`) in an HTML page.
 
