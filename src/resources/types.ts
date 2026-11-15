@@ -1,16 +1,24 @@
 import type { AdminClient } from "../shopify/client.js";
-import type { RefToGidResolver } from "../refs.js";
+import type { GidToRefMapper, RefToGidResolver } from "../refs.js";
 
+/** In apply order: things that are referenced come before the things that reference them. */
 export const RESOURCE_KINDS = [
   "metafield_definitions",
   "metaobject_definitions",
+  "collections",
   "pages",
+  "shop_policies",
   "metaobjects",
   "menus",
   "redirects",
+  "metafields",
+  "translations",
 ] as const;
 
 export type ResourceKind = (typeof RESOURCE_KINDS)[number];
+
+/** Read by default. metafields and translations can be large, so they are opt-in. */
+export const DEFAULT_KINDS: readonly ResourceKind[] = RESOURCE_KINDS.filter((k) => k !== "metafields" && k !== "translations");
 
 /** A resource as fetched from a store. `data` is what gets compared and copied. */
 export interface Item {
@@ -26,6 +34,10 @@ export interface FetchOptions {
   ownerTypes?: string[];
   /** Metaobject types to read entries for. Defaults to every syncable definition type. */
   metaobjectTypes?: string[];
+  /** Metafield namespaces to read values for (metafields kind). Default: all non-app namespaces. */
+  namespaces?: string[];
+  /** Locales to read translations for. Default: every non-primary locale of the store. */
+  locales?: string[];
 }
 
 export interface FetchResult {
@@ -42,7 +54,8 @@ export interface WriteContext {
 export interface ResourceAdapter {
   kind: ResourceKind;
   description: string;
-  fetch(client: AdminClient, opts: FetchOptions): Promise<FetchResult>;
+  /** `mapper` lets an adapter key items by a portable ref (translations do). GIDs in data are mapped afterwards anyway. */
+  fetch(client: AdminClient, opts: FetchOptions, mapper: GidToRefMapper): Promise<FetchResult>;
   /** Create the resource in the target. `data` has already had refs rewritten to target GIDs. */
   create(ctx: WriteContext, key: string, data: Record<string, unknown>): Promise<string>;
   /** Update an existing target resource so it matches `data`. Never deletes target-only content. */

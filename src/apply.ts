@@ -95,7 +95,7 @@ function dropUnmappable(data: Record<string, unknown>, kind: ResourceKind): Reco
 export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOptions = {}): Promise<OpResult[]> {
   checkApplyAllowed(plan, client.store, opts);
   const log = opts.auditLog ?? process.env.SYNC_AUDIT_LOG ?? join(stateDir(), "audit.log");
-  const resolver = new RefToGidResolver(client);
+  const resolver = new RefToGidResolver(client, new Map(Object.entries(plan.files ?? {})));
   const results: OpResult[] = [];
 
   const selected = plan.ops.filter((o) => !opts.only?.length || opts.only.includes(o.seq));
@@ -187,6 +187,7 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
   }
 
   results.sort((a, b) => a.seq - b.seq);
+  if (resolver.uploaded.length) audit(log, { plan: plan.id, target: plan.target.domain, uploadedFiles: resolver.uploaded });
   const failed = results.filter((r) => r.outcome === "failed").length;
   const done = results.filter((r) => r.outcome === "created" || r.outcome === "updated").length;
   if (opts.only?.length && selected.length < plan.ops.length) {

@@ -1,7 +1,7 @@
 {
   "name": "shopify-store-sync-mcp",
-  "version": "0.1.0",
-  "description": "MCP server to diff and sync configuration between Shopify stores: metafield and metaobject definitions, metaobjects, menus, redirects and pages. Dry-run first, write-gated, multi-store.",
+  "version": "0.2.0",
+  "description": "MCP server and CLI to diff and sync configuration between Shopify stores: metafield and metaobject definitions, metaobjects, collections, pages, menus, redirects, policies, metafield values and translations. Config as code, dry-run plans, never deletes.",
   "type": "module",
   "bin": {
     "shopify-store-sync-mcp": "dist/index.js"
@@ -34,7 +34,10 @@
     "store-sync",
     "diff",
     "claude",
-    "ai-agents"
+    "ai-agents",
+    "translations",
+    "config-as-code",
+    "cli"
   ],
   "author": "Youssef Idder",
   "license": "MIT",

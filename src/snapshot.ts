@@ -1,5 +1,5 @@
 import { ADAPTERS, orderKinds, type FetchOptions, type Item, type ResourceKind } from "./resources/index.js";
-import { collectGids, GidToRefMapper } from "./refs.js";
+import { collectGids, GidToRefMapper, type FileSource } from "./refs.js";
 import type { AdminClient } from "./shopify/client.js";
 
 export interface ResourceSnapshot {
@@ -12,6 +12,8 @@ export interface Snapshot {
   domain: string;
   takenAt: string;
   resources: Partial<Record<ResourceKind, ResourceSnapshot>>;
+  /** Download URLs of the files referenced, keyed by portable ref, so they can be uploaded elsewhere. */
+  files: Record<string, FileSource>;
 }
 
 /** Read resources from a store and rewrite every GID inside `data` into a portable ref. */
@@ -20,7 +22,7 @@ export async function takeSnapshot(client: AdminClient, kinds: readonly Resource
   const resources: Snapshot["resources"] = {};
 
   for (const kind of orderKinds(kinds)) {
-    const { items, skipped } = await ADAPTERS[kind].fetch(client, opts);
+    const { items, skipped } = await ADAPTERS[kind].fetch(client, opts, mapper);
     const gids = new Set<string>();
     for (const item of items) for (const g of collectGids(item.data)) gids.add(g);
     await mapper.load(gids);
@@ -30,5 +32,11 @@ export async function takeSnapshot(client: AdminClient, kinds: readonly Resource
     };
   }
 
-  return { store: client.store.alias, domain: client.store.domain, takenAt: new Date().toISOString(), resources };
+  return {
+    store: client.store.alias,
+    domain: client.store.domain,
+    takenAt: new Date().toISOString(),
+    resources,
+    files: Object.fromEntries(mapper.files),
+  };
 }

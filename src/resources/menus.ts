@@ -1,4 +1,5 @@
 import { assertNoUserErrors, paginate } from "../shopify/client.js";
+import { REF_PREFIX } from "../refs.js";
 import type { Item, ResourceAdapter } from "./types.js";
 import { compact, PAGE_INFO } from "./util.js";
 
@@ -89,6 +90,10 @@ export const menus: ResourceAdapter = {
       (d) => d.menus,
     );
     return { items: nodes.map(normalizeMenu), skipped: [] };
+  },
+
+  refFor(key) {
+    return `${REF_PREFIX}Menu/${key}`;
   },
 
   async create({ client }, _key, d) {

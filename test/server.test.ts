@@ -39,9 +39,11 @@ describe("MCP server", () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
-      ["apply_plan", "diff_stores", "get_plan", "list_resource_types", "list_stores", "plan_sync", "snapshot_store"].sort(),
+      ["apply_plan", "diff_stores", "diff_themes", "export_snapshot", "get_plan", "list_resource_types", "list_stores", "plan_sync", "snapshot_store"].sort(),
     );
-    for (const t of tools) expect(t.annotations?.readOnlyHint).toBe(t.name !== "apply_plan");
+    // export_snapshot writes local files only; apply_plan is the one tool that writes to Shopify.
+    for (const t of tools) expect(t.annotations?.readOnlyHint).toBe(!["apply_plan", "export_snapshot"].includes(t.name));
+    expect(tools.find((t) => t.name === "export_snapshot")?.annotations?.destructiveHint).toBe(false);
   });
 
   it("never returns secrets from list_stores", async () => {

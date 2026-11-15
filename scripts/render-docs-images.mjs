@@ -340,3 +340,80 @@ render("social-preview", 1280, 640, `
   .pill { font-size: 18px; padding: 9px 16px; }
   .foot { position: absolute; bottom: 52px; left: 96px; font-size: 16px; }
 `);
+
+// ---------------------------------------------------------------- CLI (real output of scripts/demo-cli.ts)
+const cli = JSON.parse(readFileSync(join(root, "docs/demo-cli.json"), "utf8"));
+const colorLine = (line) => {
+  const l = esc(line);
+  if (/^\s+(\d+ )?\+ /.test(line)) return `<span class="g">${l}</span>`;
+  if (/^\s+(\d+ )?~ /.test(line)) return `<span class="a">${l}</span>`;
+  if (/^\s+(\d+ )?! /.test(line)) return `<span class="r">${l}</span>`;
+  if (/^(Plan|Themes) /.test(line)) return `<b>${l}</b>`;
+  if (/^Nothing written|identical$/.test(line)) return `<span class="muted">${l}</span>`;
+  return l;
+};
+const block = (c) => `<div class="cmd"><span class="ps">$</span> ${esc(c.cmd)}</div><pre>${c.output.split("\n").map(colorLine).join("\n")}</pre>`;
+render("cli", 1280, 860, `
+<div class="wrap"><div class="term card">
+  <div class="bar"><span class="d" style="background:#f47067"></span><span class="d" style="background:#e3b341"></span><span class="d" style="background:#57c26e"></span><span class="title mono muted">terminal</span></div>
+  <div class="body mono">${block(cli.diff)}${block(cli.plan)}${block(cli.themes)}</div>
+</div>
+<div class="foot muted">Real output of the CLI on two sample stores (scripts/demo-cli.ts). No AI client needed.</div></div>`, `
+  .wrap { width: 1280px; padding: 28px 32px 16px; }
+  .term { overflow: hidden; }
+  .bar { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid #1c2530; background: #0e1319; }
+  .d { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  .bar .title { margin-left: 10px; font-size: 12px; }
+  .body { padding: 18px 22px; font-size: 13.5px; line-height: 1.55; }
+  .cmd { color: #e6edf3; margin-top: 6px; }
+  .ps { color: #57c26e; }
+  pre { font-family: inherit; color: #c9d4df; margin: 4px 0 16px; white-space: pre; }
+  .foot { font-size: 12px; text-align: right; padding-top: 10px; }
+`);
+
+// ---------------------------------------------------------------- config as code (real export)
+const groups = {};
+for (const f of cli.tree) {
+  const [dir, file] = f.includes("/") ? f.split("/") : ["", f];
+  (groups[dir] ??= []).push(file);
+}
+const treeHtml = Object.entries(groups)
+  .sort(([a], [b]) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)))
+  .map(([dir, files]) =>
+    dir
+      ? `<div class="dir">▾ ${esc(dir)}/</div>${files.map((f) => `<div class="file${f === "fr_Page_shipping.json" ? " sel" : ""}">${esc(f)}</div>`).join("")}`
+      : files.map((f) => `<div class="file root">${esc(f)}</div>`).join(""),
+  )
+  .join("");
+render("config-as-code", 1280, 490, `
+<div class="wrap">
+  <div class="hd mono"><span class="ps">$</span> ${esc(cli.export.cmd)}</div>
+  <div class="cols">
+    <div class="tree card mono"><div class="muted lab">store-config/</div>${treeHtml}</div>
+    <div class="file-view card">
+      <div class="fh mono"><span>translations/fr_Page_shipping.json</span><span class="muted">sorted keys · no store IDs · diff-friendly</span></div>
+      <pre class="mono">${esc(cli.sample)}</pre>
+    </div>
+  </div>
+  <div class="notes">
+    <span class="pill"><span class="dot bg-g"></span>Commit it to git</span>
+    <span class="pill"><span class="dot bg-a"></span>Review store changes in a pull request</span>
+    <span class="pill"><span class="dot bg-b"></span>diff dir:./store-config prod to spot drift</span>
+    <span class="pill"><span class="dot bg-r"></span>plan dir:./store-config prod to restore</span>
+  </div>
+</div>`, `
+  .wrap { width: 1280px; padding: 26px 32px; }
+  .hd { font-size: 14px; margin-bottom: 14px; color: #e6edf3; }
+  .ps { color: #57c26e; }
+  .cols { display: grid; grid-template-columns: 330px 1fr; gap: 14px; }
+  .tree { padding: 14px 16px; font-size: 13px; line-height: 1.75; }
+  .lab { margin-bottom: 4px; }
+  .dir { color: #c9d4df; }
+  .file { padding-left: 18px; color: #8b98a8; }
+  .file.root { padding-left: 0; color: #c9d4df; }
+  .file.sel { color: #6cb6ff; background: #101b26; border-radius: 4px; }
+  .file-view { overflow: hidden; }
+  .fh { display: flex; justify-content: space-between; padding: 10px 16px; font-size: 12.5px; border-bottom: 1px solid #1c2530; background: #0e1319; }
+  .file-view pre { padding: 14px 16px; font-size: 13px; line-height: 1.6; color: #c9d4df; white-space: pre-wrap; }
+  .notes { margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; }
+`);

@@ -13,7 +13,7 @@
 
 **Keep your Shopify stores in sync by asking for it.** Compare a dev store with production, see every difference field by field, review a dry-run plan, then apply it, from Claude, Cursor or any MCP client.
 
-It copies the store setup that usually gets rebuilt by hand: **metafield and metaobject definitions, metaobject entries, pages, navigation menus and URL redirects.** References between them (a size guide pointing at a product, a menu linking to a page) are carried across by handle, so they land on the right item in the target store instead of a broken ID.
+It copies the store setup that usually gets rebuilt by hand: **metafield and metaobject definitions, metaobject entries, collections, pages, menus, redirects, store policies, metafield values and translations**, with the images they use. References between them (a size guide pointing at a product, a menu linking to a page) are carried across by handle, so they land on the right item in the target store instead of a broken ID.
 
 <table>
 <tr>
@@ -62,8 +62,14 @@ There are plenty of Shopify Admin MCP servers that read and write a *single* sto
 | `metaobjects` | `type/handle` | All field values, publish status. References to products, collections, pages and other metaobjects are remapped. |
 | `menus` | `handle` | Full item tree (3 levels), including customer account menus. Links to resources are remapped; custom URLs are kept; links to things that can't be matched are left out and reported. |
 | `redirects` | `path` | Thousands are fine. |
+| `collections` | `handle` | Title, description, sort order, template, SEO and smart-collection rules (rules on a metafield definition are remapped). Manual collections keep their own product list; sales-channel publishing is not copied. Manual versus smart is reported as a conflict. |
+| `shop_policies` | `type` | Refund, privacy, terms, shipping and contact policy text. |
+| `metafields` *(opt-in)* | `OWNER/handle/namespace.key` | Metafield **values** on products and collections, landed on the item with the same handle. Reference values are remapped. Filter with `namespaces`. |
+| `translations` *(opt-in)* | `locale:Type/handle` | Translations of pages, collections, metaobjects, menus and policies. Registered against the target's own text, after the content itself is synced. The plan warns when a language isn't added to the target. |
 
-App-owned (`app--…`) and Shopify-reserved (`shopify--…`) definitions are skipped and listed in the report.
+`metafields` and `translations` can be large, so they're read only when you ask for them (`resources: ["metafields"]`). App-owned (`app--…`) and Shopify-reserved (`shopify--…`) data is skipped and listed in the report.
+
+**Files and images** referenced by any of the above are matched by file name in the target. When one is missing, the plan says so and `apply_plan` uploads it from the source store.
 
 ## Tools
 
@@ -76,8 +82,10 @@ App-owned (`app--…`) and Shopify-reserved (`shopify--…`) definitions are ski
 | `plan_sync` | no | Dry-run plan: creates, updates, conflicts, missing references. Returns a `plan_id`. |
 | `get_plan` | no | Show a plan, or list recent ones. |
 | `apply_plan` | **yes** | Execute a plan, with every safety check below. |
+| `export_snapshot` | local files only | Write a store's configuration to a folder for git ([config as code](#config-as-code)). |
+| `diff_themes` | no | Compare theme templates and settings between two stores ([theme settings](#theme-settings-diff)). |
 
-Every tool except `apply_plan` is read-only and annotated as such, so clients can auto-approve them.
+Every tool except `apply_plan` is read-only toward Shopify and annotated as such, so clients can auto-approve them.
 
 What `diff_stores` reports, field by field (real output):
 
@@ -98,6 +106,12 @@ Use a Dev Dashboard app (client ID and secret) or a custom app access token (`sh
 | pages | `read_online_store_pages` | `write_online_store_pages` |
 | menus | `read_online_store_navigation` | `write_online_store_navigation` |
 | redirects | `read_online_store_navigation` | `write_online_store_navigation` |
+| collections | `read_products` | `write_products` |
+| shop policies | `read_legal_policies` | `write_legal_policies` |
+| metafield values | `read_products` | `write_products` |
+| translations | `read_translations`, `read_locales` | `write_translations` |
+| files | `read_files` | `write_files` (to upload missing files) |
+| theme diff | `read_themes` | none, never writes |
 | ID remapping | `read_products`, `read_content` | none |
 
 Give source stores read-only scopes when you can.
@@ -174,6 +188,52 @@ claude mcp add shopify-store-sync \
 - *"Which product metafield definitions in namespace custom are missing from eu?"* (uses `include: ["PRODUCT.custom.*"]`)
 - *"Plan a sync of the faq and size_guide metaobjects from dev to eu."*
 - *"Apply only ops 1 to 4 of that plan."*
+- *"Copy the French translations from dev to eu."* (uses `resources: ["translations"], locales: ["fr"]`)
+- *"Export eu's configuration to ./store-config so I can commit it."*
+- *"Has eu drifted from ./store-config?"*
+- *"What's different in the theme settings between dev and eu?"*
+
+## Command line
+
+Everything also works without an AI client. Run a command instead of starting the server:
+
+```bash
+npx shopify-store-sync-mcp stores
+npx shopify-store-sync-mcp diff dev eu --resources pages,menus
+npx shopify-store-sync-mcp plan dev eu
+npx shopify-store-sync-mcp apply <plan-id> --confirm eu.myshopify.com
+npx shopify-store-sync-mcp export eu ./store-config
+npx shopify-store-sync-mcp themes dev eu
+```
+
+`--json` gives machine-readable output and `--exit-code` makes `diff` and `themes` exit with 2 when they find differences, handy for a scheduled drift check. Run `npx shopify-store-sync-mcp help` for every option.
+
+<p align="center">
+  <img src="docs/images/cli.png" alt="CLI output of diff, plan and themes commands" width="100%">
+</p>
+
+## Config as code
+
+Export a store's configuration as one small JSON file per item, with sorted keys and no store-specific IDs, then commit it:
+
+```bash
+npx shopify-store-sync-mcp export prod ./store-config
+git add store-config && git commit -m "Snapshot prod configuration"
+```
+
+Any command or tool that takes a source also takes `dir:<path>`:
+
+- **Spot drift:** `diff dir:./store-config prod` shows what changed in production since the commit.
+- **Review changes:** edit the files or re-export from staging, and review the change as a pull request.
+- **Restore or promote:** `plan dir:./store-config prod`, then `apply`, with all the usual safety checks.
+
+<p align="center">
+  <img src="docs/images/config-as-code.png" alt="Exported store-config folder and one translation file" width="100%">
+</p>
+
+## Theme settings diff
+
+`diff_themes` (or `themes` on the command line) compares the published themes of two stores: JSON templates, section groups and `config/settings_data.json`, setting by setting. Pass theme ids to compare other themes, and `files` to narrow it down (for example `templates/product*.json`). It is read-only: themes are never written to.
 
 ## How it works
 
@@ -201,13 +261,18 @@ gid://shopify/Metaobject/2918          →  shopify://Metaobject/faq/returns
 gid://shopify/MetaobjectDefinition/77  →  shopify://MetaobjectDefinition/faq
 gid://shopify/CustomerAccountPage/12   →  shopify://CustomerAccountPage/orders
 gid://shopify/ShopPolicy/5             →  shopify://ShopPolicy/PRIVACY_POLICY
+gid://shopify/Menu/41                  →  shopify://Menu/main-menu
+gid://shopify/MetafieldDefinition/9    →  shopify://MetafieldDefinition/PRODUCT.custom.fabric
+gid://shopify/MediaImage/730           →  shopify://File/size-chart.png
 ```
 
 This covers JSON list values (`list.product_reference`) and definition validations (`metaobject_definition_id`). When it writes, references are resolved by handle in the target. A reference that doesn't exist there is flagged in the plan before anything is written.
 
 Things in the same plan can depend on each other, for example a metaobject pointing at another one being created, or a definition that references itself. These are written in two passes: first without the pending references, then complete.
 
-**Not remapped yet:** files (images, videos), product variants and articles. Their values are left out of the sync and listed as warnings, never copied as broken IDs.
+Files (images, generic files and videos) are matched by file name and uploaded to the target when missing. Collection rules that filter on a metafield are remapped to the target's definition.
+
+**Not remapped yet:** product variants and articles. Their values are left out of the sync and listed as warnings, never copied as broken IDs.
 
 Two references followed from the source store to the target, as the sample sync above wrote them:
 
@@ -217,7 +282,7 @@ Two references followed from the source store to the target, as the sample sync 
 
 ## Tested against a live store
 
-Besides the unit and integration tests, every read query and the write payloads for metaobject definitions (including a self-referencing one), metaobjects, metafield definitions and redirects have been run against a real Shopify Plus development store. Read-backs from it normalize to exactly the same portable data as the source, so a second sync is a no-op. Two behaviours of the live API found this way are covered by tests: the `nodes` query returns `null` for customer account pages (they're looked up by listing instead), and `ShopPolicy.type` has to be aliased next to `Metaobject.type`.
+Besides the unit and integration tests, every read query and the write payloads for metaobject definitions (including a self-referencing one), metaobjects, metafield definitions and redirects have been run against a real Shopify Plus development store. Read-backs from it normalize to exactly the same portable data as the source, so a second sync is a no-op. Two behaviours of the live API found this way are covered by tests: the `nodes` query returns `null` for customer account pages (they're looked up by listing instead), and `ShopPolicy.type` has to be aliased next to `Metaobject.type`. The read queries for collections, policies, metafield values, languages, translations, files (including lookup by file name) and theme files have been run on the same store.
 
 ## Development
 
@@ -236,8 +301,12 @@ Layout:
 
 ```
 src/
-  index.ts            stdio entrypoint
+  index.ts            entrypoint: MCP server on stdio, or the CLI when given a command
+  engine.ts           everything the tools and the CLI do, in one place
   server.ts           MCP tools
+  cli.ts              command line
+  snapshotFiles.ts    export and read snapshot folders (config as code)
+  themes.ts           read-only theme settings diff
   config.ts           store config loading and validation
   shopify/client.ts   Admin GraphQL client (token refresh, throttling, retries)
   refs.ts             GID <-> portable reference mapping
@@ -254,12 +323,17 @@ Adding a resource type means writing one adapter (`fetch`, `create`, `update`) i
 
 ## Roadmap
 
-- [ ] Translations (`translationsRegister`) per locale
+- [x] Translations per locale
+- [x] File references, re-uploaded by URL
+- [x] Collections with smart-collection rules
+- [x] Shop policies, and metafield values on products and collections
+- [x] Snapshots as files, for git-tracked store config
+- [x] Command line
+- [x] Read-only theme settings diff
+- [ ] Move collection rules to Shopify's new `sources` model (`ruleSet` is deprecated but supported through 2027-01)
+- [ ] Menu item (link) translations
+- [ ] Metafield values on variants, pages and the shop
 - [ ] Markets and market web presences
-- [ ] File references, re-uploaded by URL
-- [ ] Collections (smart collection rules)
-- [ ] Shop policies and metafield *values* on shop and pages
-- [ ] Export or import snapshots as files, for git-tracked store config
 - [ ] Optional deletes, behind an explicit flag
 
 Ideas and PRs are welcome. Issues tagged `good first issue` are a good place to start.
@@ -275,7 +349,7 @@ Syncing definitions between stores isn't a new idea, and these tools are worth k
 | [shopify-metadata-migrator](https://github.com/warriorachilles/shopify-metadata-migrator) | CLI | Copies metafield and metaobject definitions |
 | MetaMaintain, Metora, Rewind Staging | Shopify apps (paid or freemium) | Definition and entry sync through an embedded app |
 
-What this project adds: it runs inside your AI client as an MCP server, so you can ask for a diff in plain language; it also covers pages, menus and redirects, remaps references across stores by handle, checks for drift before writing and never deletes. If you only need a scripted one-shot copy of definitions, one of the CLIs above may be all you need.
+What this project adds: it runs inside your AI client as an MCP server (or as a CLI), so you can ask for a diff in plain language; it also covers pages, menus, redirects, collections, policies, metafield values and translations, remaps references and files across stores, keeps store configuration in git, checks for drift before writing and never deletes. If you only need a scripted one-shot copy of definitions, one of the CLIs above may be all you need.
 
 ## Disclaimer
 

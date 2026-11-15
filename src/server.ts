@@ -1,16 +1,16 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { applyPlan, ApplyRefused } from "./apply.js";
-import { StoreRegistry, type StoreConfig } from "./config.js";
-import { diffItems, preview, type KeyFilter, type ResourceDiff } from "./diff.js";
-import { buildPlan, PlanStore, type Plan } from "./plan.js";
-import { RefToGidResolver } from "./refs.js";
-import { ADAPTERS, RESOURCE_KINDS, type FetchOptions, type ResourceKind } from "./resources/index.js";
+import { ApplyRefused } from "./apply.js";
+import type { StoreConfig, StoreRegistry } from "./config.js";
+import { preview, type ResourceDiff } from "./diff.js";
+import { Engine, type Scope } from "./engine.js";
+import { PlanStore, type Plan } from "./plan.js";
+import { ADAPTERS, DEFAULT_KINDS, RESOURCE_KINDS, type ResourceKind } from "./resources/index.js";
 import { DEFAULT_OWNER_TYPES } from "./resources/metafieldDefinitions.js";
-import { ShopifyAdminClient, type AdminClient } from "./shopify/client.js";
-import { takeSnapshot } from "./snapshot.js";
+import type { AdminClient } from "./shopify/client.js";
+import { DEFAULT_THEME_FILES, type ThemeDiff } from "./themes.js";
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.2.0";
 
 export interface ServerDeps {
   registry: StoreRegistry;
@@ -18,41 +18,47 @@ export interface ServerDeps {
   clientFactory?: (store: StoreConfig) => AdminClient;
 }
 
-const resourcesArg = z
-  .array(z.enum(RESOURCE_KINDS))
-  .min(1)
-  .optional()
-  .describe(`Resource types to include. Default: all (${RESOURCE_KINDS.join(", ")}).`);
+const SOURCE_HELP = 'Store alias, or "dir:<path>" for a snapshot folder made with export_snapshot.';
 
 const scopeArgs = {
-  resources: resourcesArg,
+  resources: z
+    .array(z.enum(RESOURCE_KINDS))
+    .min(1)
+    .optional()
+    .describe(`Resource types to include. Default: ${DEFAULT_KINDS.join(", ")}. metafields and translations are opt-in.`),
   owner_types: z
     .array(z.string())
     .optional()
     .describe(`Metafield owner types for metafield_definitions. Default: ${DEFAULT_OWNER_TYPES.join(", ")}.`),
   metaobject_types: z.array(z.string()).optional().describe("Limit metaobjects to these types. Default: all non-reserved types."),
+  namespaces: z.array(z.string()).optional().describe("Limit metafield values (metafields) to these namespaces."),
+  locales: z.array(z.string()).optional().describe("Limit translations to these locales, e.g. [\"fr\", \"de\"]. Default: every non-primary locale."),
   include: z
     .array(z.string())
     .optional()
-    .describe('Only keys matching one of these globs, e.g. ["PRODUCT.custom.*", "faq/*", "main-menu"].'),
+    .describe('Only keys matching one of these globs, e.g. ["PRODUCT.custom.*", "faq/*", "fr:*"].'),
   exclude: z.array(z.string()).optional().describe("Drop keys matching any of these globs."),
 };
 
-type ScopeInput = {
+type ScopeArgs = {
   resources?: ResourceKind[];
   owner_types?: string[];
   metaobject_types?: string[];
+  namespaces?: string[];
+  locales?: string[];
   include?: string[];
   exclude?: string[];
 };
 
-function scope(input: ScopeInput): { kinds: ResourceKind[]; fetch: FetchOptions; filter: KeyFilter } {
-  return {
-    kinds: input.resources ?? [...RESOURCE_KINDS],
-    fetch: { ownerTypes: input.owner_types, metaobjectTypes: input.metaobject_types },
-    filter: { include: input.include, exclude: input.exclude },
-  };
-}
+const toScope = (a: ScopeArgs): Scope => ({
+  resources: a.resources,
+  ownerTypes: a.owner_types,
+  metaobjectTypes: a.metaobject_types,
+  namespaces: a.namespaces,
+  locales: a.locales,
+  include: a.include,
+  exclude: a.exclude,
+});
 
 const json = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] });
 const fail = (message: string) => ({ content: [{ type: "text" as const, text: message }], isError: true });
@@ -69,7 +75,7 @@ function describeStore(s: StoreConfig) {
   };
 }
 
-function summarizeDiff(d: ResourceDiff, showValues: boolean, limit: number) {
+export function summarizeDiff(d: ResourceDiff, showValues: boolean, limit: number) {
   return {
     kind: d.kind,
     counts: {
@@ -81,16 +87,14 @@ function summarizeDiff(d: ResourceDiff, showValues: boolean, limit: number) {
     onlyInSource: d.onlyInSource.slice(0, limit).map((i) => i.key),
     changed: d.changed.slice(0, limit).map((c) => ({
       key: c.key,
-      changes: c.changes.map((ch) =>
-        showValues ? { path: ch.path, source: preview(ch.source), target: preview(ch.target) } : ch.path,
-      ),
+      changes: c.changes.map((ch) => (showValues ? { path: ch.path, source: preview(ch.source), target: preview(ch.target) } : ch.path)),
     })),
     onlyInTarget: d.onlyInTarget.slice(0, limit).map((i) => i.key),
     truncated: Math.max(d.onlyInSource.length, d.changed.length, d.onlyInTarget.length) > limit || undefined,
   };
 }
 
-function summarizePlan(plan: Plan, full = false) {
+export function summarizePlan(plan: Plan, full = false) {
   const count = (a: string) => plan.ops.filter((o) => o.action === a).length;
   const limit = full ? Number.POSITIVE_INFINITY : 200;
   return {
@@ -101,6 +105,7 @@ function summarizePlan(plan: Plan, full = false) {
     expiresAt: plan.expiresAt,
     totals: { create: count("create"), update: count("update"), conflict: count("conflict") },
     warnings: plan.warnings,
+    filesToUpload: Object.keys(plan.files ?? {}).length || undefined,
     ops: plan.ops.slice(0, limit).map((o) => ({
       seq: o.seq,
       kind: o.kind,
@@ -117,19 +122,25 @@ function summarizePlan(plan: Plan, full = false) {
   };
 }
 
-export function createServer(deps: ServerDeps): McpServer {
-  const { registry } = deps;
-  const plans = deps.plans ?? new PlanStore();
-  const clients = new Map<string, AdminClient>();
-  const clientFor = (alias: string): AdminClient => {
-    const store = registry.get(alias);
-    let c = clients.get(alias);
-    if (!c) {
-      c = deps.clientFactory ? deps.clientFactory(store) : new ShopifyAdminClient(store);
-      clients.set(alias, c);
-    }
-    return c;
+export function summarizeThemes(d: ThemeDiff, limit = 100) {
+  return {
+    source: d.source,
+    target: d.target,
+    counts: { onlyInSource: d.onlyInSource.length, changed: d.changed.length, onlyInTarget: d.onlyInTarget.length, identical: d.identical },
+    onlyInSource: d.onlyInSource,
+    onlyInTarget: d.onlyInTarget,
+    changed: d.changed.map((f) => ({
+      file: f.file,
+      changes: f.changes.slice(0, limit).map((c) => ({ path: c.path, source: preview(c.source), target: preview(c.target) })),
+      more: f.changes.length > limit ? f.changes.length - limit : undefined,
+    })),
+    unreadable: d.unreadable.length ? d.unreadable : undefined,
+    note: "Read-only comparison. This server never writes to themes.",
   };
+}
+
+export function createServer(deps: ServerDeps): McpServer {
+  const engine = new Engine(deps.registry, deps.plans ?? new PlanStore(), deps.clientFactory);
 
   const guard =
     <A>(fn: (args: A) => Promise<ReturnType<typeof json>>) =>
@@ -137,19 +148,10 @@ export function createServer(deps: ServerDeps): McpServer {
       try {
         return await fn(args);
       } catch (err) {
+        if (err instanceof ApplyRefused) return fail(`Refused: ${err.message}`);
         return fail(err instanceof Error ? err.message : String(err));
       }
     };
-
-  async function compare(source: string, target: string, input: ScopeInput) {
-    if (source === target) throw new Error("source and target must be different stores");
-    const { kinds, fetch, filter } = scope(input);
-    const [s, t] = [clientFor(source), clientFor(target)];
-    const [a, b] = await Promise.all([takeSnapshot(s, kinds, fetch), takeSnapshot(t, kinds, fetch)]);
-    const diffs = kinds.map((k) => diffItems(k, a.resources[k]?.items ?? [], b.resources[k]?.items ?? [], filter));
-    const skipped = kinds.flatMap((k) => (a.resources[k]?.skipped ?? []).map((x) => ({ kind: k, ...x })));
-    return { s, t, diffs, skipped };
-  }
 
   const server = new McpServer({ name: "shopify-store-sync-mcp", version: VERSION });
 
@@ -161,18 +163,20 @@ export function createServer(deps: ServerDeps): McpServer {
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    guard(async () => json({ stores: registry.list().map(describeStore) })),
+    guard(async () => json({ stores: deps.registry.list().map(describeStore) })),
   );
 
   server.registerTool(
     "list_resource_types",
     {
       title: "List syncable resource types",
-      description: "Describe each resource type that can be snapshotted, diffed and synced, and how items are keyed.",
+      description: "Describe each resource type that can be snapshotted, diffed and synced, how items are keyed, and which are read by default.",
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    guard(async () => json(RESOURCE_KINDS.map((k) => ({ kind: k, description: ADAPTERS[k].description })))),
+    guard(async () =>
+      json(RESOURCE_KINDS.map((k) => ({ kind: k, default: DEFAULT_KINDS.includes(k), description: ADAPTERS[k].description }))),
+    ),
   );
 
   server.registerTool(
@@ -180,30 +184,46 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: "Snapshot a store",
       description:
-        "Read configuration from one store in portable form (IDs replaced by handles). Returns counts and keys; set full=true to include the data.",
+        "Read configuration from one store (or a snapshot folder) in portable form (IDs replaced by handles). Returns counts and keys; set full=true to include the data.",
       inputSchema: {
-        store: z.string().describe("Store alias from list_stores"),
+        store: z.string().describe(SOURCE_HELP),
         ...scopeArgs,
         full: z.boolean().optional().describe("Include each item's data (can be large)."),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    guard(async (args: ScopeInput & { store: string; full?: boolean }) => {
-      const { kinds, fetch, filter } = scope(args);
-      const snap = await takeSnapshot(clientFor(args.store), kinds, fetch);
-      const { diffs } = { diffs: kinds.map((k) => diffItems(k, snap.resources[k]?.items ?? [], [], filter)) };
+    guard(async (args: ScopeArgs & { store: string; full?: boolean }) => {
+      const scope = toScope(args);
+      const { snapshot, diffs } = await engine.snapshot(args.store, scope);
       return json({
-        store: snap.store,
-        domain: snap.domain,
-        takenAt: snap.takenAt,
+        store: snapshot.store,
+        domain: snapshot.domain,
+        takenAt: snapshot.takenAt,
         resources: diffs.map((d) => ({
           kind: d.kind,
           count: d.onlyInSource.length,
           items: args.full ? d.onlyInSource.map((i) => ({ key: i.key, data: i.data })) : d.onlyInSource.map((i) => i.key),
-          skipped: snap.resources[d.kind]?.skipped.length ? snap.resources[d.kind]?.skipped : undefined,
+          skipped: snapshot.resources[d.kind]?.skipped.length ? snapshot.resources[d.kind]?.skipped : undefined,
         })),
+        files: Object.keys(snapshot.files).length || undefined,
       });
     }),
+  );
+
+  server.registerTool(
+    "export_snapshot",
+    {
+      title: "Export a store's configuration to files",
+      description:
+        "Write a store's configuration to a folder as one JSON file per item (sorted keys, no store IDs), ready to commit to git. Use \"dir:<path>\" as the source of diff_stores or plan_sync to compare or restore from it. Only writes local files, never to Shopify.",
+      inputSchema: {
+        store: z.string().describe("Store alias to read"),
+        dir: z.string().describe("Folder to write. Must be empty, new, or an earlier snapshot folder (its item files are replaced)."),
+        ...scopeArgs,
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    },
+    guard(async (args: ScopeArgs & { store: string; dir: string }) => json(await engine.export(args.store, args.dir, toScope(args)))),
   );
 
   server.registerTool(
@@ -211,18 +231,18 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: "Diff two stores",
       description:
-        "Compare configuration between a source and a target store: what exists only in the source, what differs (field by field), and what exists only in the target. Read-only.",
+        "Compare configuration between a source and a target: what exists only in the source, what differs (field by field), and what exists only in the target. Either side can be a snapshot folder (\"dir:<path>\"), e.g. to check whether production drifted from the committed config. Read-only.",
       inputSchema: {
-        source: z.string().describe("Store alias to copy from"),
-        target: z.string().describe("Store alias to compare against"),
+        source: z.string().describe(SOURCE_HELP),
+        target: z.string().describe(SOURCE_HELP),
         ...scopeArgs,
         show_values: z.boolean().optional().describe("Include before/after values for each changed field (default true)."),
         limit: z.number().int().min(1).max(5000).optional().describe("Max keys listed per section (default 100)."),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    guard(async (args: ScopeInput & { source: string; target: string; show_values?: boolean; limit?: number }) => {
-      const { diffs, skipped } = await compare(args.source, args.target, args);
+    guard(async (args: ScopeArgs & { source: string; target: string; show_values?: boolean; limit?: number }) => {
+      const { diffs, skipped } = await engine.compare(args.source, args.target, toScope(args));
       return json({
         source: args.source,
         target: args.target,
@@ -237,30 +257,18 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: "Plan a sync",
       description:
-        "Build a dry-run plan that would make the target match the source for the selected resources: creates, updates and conflicts, plus references that are missing in the target. Nothing is written. Returns a plan_id for apply_plan.",
+        "Build a dry-run plan that would make the target store match the source (a store or a snapshot folder) for the selected resources: creates, updates, conflicts, files to upload and references missing in the target. Nothing is written. Returns a plan_id for apply_plan.",
       inputSchema: {
-        source: z.string().describe("Store alias to copy from"),
+        source: z.string().describe(SOURCE_HELP),
         target: z.string().describe("Store alias to write to"),
         ...scopeArgs,
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    guard(async (args: ScopeInput & { source: string; target: string }) => {
-      const { s, t, diffs, skipped } = await compare(args.source, args.target, args);
-      const plan = await buildPlan({
-        source: { alias: s.store.alias, domain: s.store.domain },
-        target: { alias: t.store.alias, domain: t.store.domain },
-        diffs,
-        skipped,
-        resolver: new RefToGidResolver(t),
-      });
-      plans.save(plan);
-      const target = registry.get(args.target);
-      return json({
-        ...summarizePlan(plan),
-        targetWritable: target.allowWrites,
-        targetProtected: target.protected || undefined,
-      });
+    guard(async (args: ScopeArgs & { source: string; target: string }) => {
+      const plan = await engine.plan(args.source, args.target, toScope(args));
+      const target = deps.registry.get(args.target);
+      return json({ ...summarizePlan(plan), targetWritable: target.allowWrites, targetProtected: target.protected || undefined });
     }),
   );
 
@@ -277,14 +285,14 @@ export function createServer(deps: ServerDeps): McpServer {
     },
     guard(async (args: { plan_id?: string; full?: boolean }) => {
       if (!args.plan_id) {
-        const list = plans
+        const list = engine.plans
           .list()
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
           .slice(0, 20)
           .map((p) => ({ plan_id: p.id, createdAt: p.createdAt, status: p.status, source: p.source.alias, target: p.target.alias, ops: p.ops.length }));
         return json({ plans: list });
       }
-      const plan = plans.get(args.plan_id);
+      const plan = engine.plans.get(args.plan_id);
       if (!plan) return fail(`no plan with id ${args.plan_id}`);
       return json(summarizePlan(plan, args.full));
     }),
@@ -295,7 +303,7 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: "Apply a plan",
       description:
-        "Write a reviewed plan to the target store. Refused unless the target has allowWrites=true; protected stores also need confirm=<target myshopify domain>. Re-reads the target first and skips anything that changed since planning. Creates and updates only, never deletes. Every op is written to an audit log.",
+        "Write a reviewed plan to the target store. Refused unless the target has allowWrites=true; protected stores also need confirm=<target myshopify domain>. Re-reads the target first and skips anything that changed since planning. Uploads missing files. Creates and updates only, never deletes. Every op is written to an audit log.",
       inputSchema: {
         plan_id: z.string(),
         confirm: z.string().optional().describe("Target's myshopify domain; required for protected stores."),
@@ -304,23 +312,44 @@ export function createServer(deps: ServerDeps): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     },
     guard(async (args: { plan_id: string; confirm?: string; only?: number[] }) => {
-      const plan = plans.get(args.plan_id);
-      if (!plan) return fail(`no plan with id ${args.plan_id}`);
-      try {
-        const results = await applyPlan(plan, clientFor(plan.target.alias), { confirm: args.confirm, only: args.only });
-        plans.save(plan);
-        const tally = (o: string) => results.filter((r) => r.outcome === o).length;
-        return json({
-          plan_id: plan.id,
-          status: plan.status,
-          totals: { created: tally("created"), updated: tally("updated"), skipped: tally("skipped"), failed: tally("failed") },
-          results,
-        });
-      } catch (err) {
-        if (err instanceof ApplyRefused) return fail(`Refused: ${err.message}`);
-        throw err;
-      }
+      const { plan, results } = await engine.apply(args.plan_id, { confirm: args.confirm, only: args.only });
+      const tally = (o: string) => results.filter((r) => r.outcome === o).length;
+      return json({
+        plan_id: plan.id,
+        status: plan.status,
+        totals: { created: tally("created"), updated: tally("updated"), skipped: tally("skipped"), failed: tally("failed") },
+        results,
+      });
     }),
+  );
+
+  server.registerTool(
+    "diff_themes",
+    {
+      title: "Compare theme settings",
+      description: `Read-only comparison of theme configuration between two stores: JSON templates, section groups and settings_data.json (default files: ${DEFAULT_THEME_FILES.join(", ")}). Compares the published themes unless theme ids are given. Never writes to a theme. Needs read_themes.`,
+      inputSchema: {
+        source: z.string().describe("Store alias"),
+        target: z.string().describe("Store alias"),
+        source_theme: z.string().optional().describe('"main" (default) or a theme id'),
+        target_theme: z.string().optional().describe('"main" (default) or a theme id'),
+        files: z.array(z.string()).optional().describe('Theme file patterns, e.g. ["templates/product*.json"]'),
+        exclude: z.array(z.string()).optional(),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    guard(async (args: { source: string; target: string; source_theme?: string; target_theme?: string; files?: string[]; exclude?: string[] }) =>
+      json(
+        summarizeThemes(
+          await engine.themes(args.source, args.target, {
+            sourceTheme: args.source_theme,
+            targetTheme: args.target_theme,
+            files: args.files,
+            exclude: args.exclude,
+          }),
+        ),
+      ),
+    ),
   );
 
   return server;

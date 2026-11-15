@@ -12,8 +12,12 @@ import type { AdminClient } from "./shopify/client.js";
  *   gid://shopify/MetaobjectDefinition/1 -> shopify://MetaobjectDefinition/<type>
  *   gid://shopify/CustomerAccountPage/1  -> shopify://CustomerAccountPage/<handle>
  *   gid://shopify/ShopPolicy/1           -> shopify://ShopPolicy/<TYPE>
+ *   gid://shopify/Menu/1                 -> shopify://Menu/<handle>
+ *   gid://shopify/MetafieldDefinition/1  -> shopify://MetafieldDefinition/<OWNER>.<namespace>.<key>
+ *   gid://shopify/MediaImage/1           -> shopify://File/<filename>   (also GenericFile, Video)
  *
- * Anything we can't map (files, variants, articles...) becomes shopify://unresolved/<Type>/<id>
+ * Files keep their source URL on the side, so a missing file can be uploaded to the target.
+ * Anything we can't map (variants, articles...) becomes shopify://unresolved/<Type>/<id>
  * and is reported as a warning instead of being silently copied.
  */
 
@@ -83,9 +87,32 @@ const NODES_QUERY = /* GraphQL */ `
       ... on Metaobject { type handle }
       ... on MetaobjectDefinition { type }
       ... on ShopPolicy { policyType: type }
+      ... on Menu { handle }
+      ... on MetafieldDefinition { ownerType namespace definitionKey: key }
+      ... on MediaImage { alt image { url } }
+      ... on GenericFile { alt url }
+      ... on Video { alt filename originalSource { url } }
     }
   }
 `;
+
+/** Where a file can be downloaded from, so it can be re-uploaded to another store. */
+export interface FileSource {
+  url: string;
+  alt?: string;
+  contentType: "IMAGE" | "FILE" | "VIDEO";
+}
+
+/** The file name Shopify shows in Content > Files, taken from a CDN URL. */
+export function filenameFromUrl(url: string): string {
+  const path = url.split("?")[0]!.split("#")[0]!;
+  const last = path.slice(path.lastIndexOf("/") + 1);
+  try {
+    return decodeURIComponent(last);
+  } catch {
+    return last;
+  }
+}
 
 // Types that \`nodes\` returns null for (verified against the live Admin API), so they are listed instead.
 const LIST_LOOKUPS: Record<string, { query: string; pick: (d: any) => { id: string; key: string }[] }> = {
@@ -104,7 +131,27 @@ type RefNode =
   | { __typename: "Metaobject"; id: string; type: string; handle: string }
   | { __typename: "MetaobjectDefinition"; id: string; type: string }
   | { __typename: "ShopPolicy"; id: string; policyType: string }
+  | { __typename: "Menu"; id: string; handle: string }
+  | { __typename: "MetafieldDefinition"; id: string; ownerType: string; namespace: string; definitionKey: string }
+  | { __typename: "MediaImage"; id: string; alt: string | null; image: { url: string } | null }
+  | { __typename: "GenericFile"; id: string; alt: string | null; url: string | null }
+  | { __typename: "Video"; id: string; alt: string | null; filename: string; originalSource: { url: string } | null }
   | { __typename: string; id: string };
+
+/** The file behind a file node, if it is one we can copy. */
+export function nodeToFile(node: RefNode): (FileSource & { filename: string }) | undefined {
+  const n = node as any;
+  switch (node.__typename) {
+    case "MediaImage":
+      return n.image?.url ? { url: n.image.url, alt: n.alt ?? undefined, contentType: "IMAGE", filename: filenameFromUrl(n.image.url) } : undefined;
+    case "GenericFile":
+      return n.url ? { url: n.url, alt: n.alt ?? undefined, contentType: "FILE", filename: filenameFromUrl(n.url) } : undefined;
+    case "Video":
+      return n.originalSource?.url ? { url: n.originalSource.url, alt: n.alt ?? undefined, contentType: "VIDEO", filename: n.filename } : undefined;
+    default:
+      return undefined;
+  }
+}
 
 export function nodeToRef(node: RefNode): string | undefined {
   switch (node.__typename) {
@@ -121,8 +168,16 @@ export function nodeToRef(node: RefNode): string | undefined {
       return `${REF_PREFIX}MetaobjectDefinition/${(node as { type: string }).type}`;
     case "ShopPolicy":
       return `${REF_PREFIX}ShopPolicy/${(node as { policyType: string }).policyType}`;
-    default:
-      return undefined;
+    case "Menu":
+      return `${REF_PREFIX}Menu/${(node as { handle: string }).handle}`;
+    case "MetafieldDefinition": {
+      const n = node as { ownerType: string; namespace: string; definitionKey: string };
+      return `${REF_PREFIX}MetafieldDefinition/${n.ownerType}.${n.namespace}.${n.definitionKey}`;
+    }
+    default: {
+      const file = nodeToFile(node);
+      return file ? `${REF_PREFIX}File/${file.filename}` : undefined;
+    }
   }
 }
 
@@ -134,6 +189,8 @@ function unresolved(gid: string): string {
 /** Converts GIDs of one store into portable refs. */
 export class GidToRefMapper {
   private readonly cache = new Map<string, string>();
+  /** Source URLs of every file ref seen, keyed by ref. */
+  readonly files = new Map<string, FileSource>();
 
   constructor(private readonly client: AdminClient) {}
 
@@ -146,6 +203,8 @@ export class GidToRefMapper {
         const node = data.nodes[idx];
         const ref = node && nodeToRef(node);
         if (ref) this.cache.set(gid, ref);
+        const file = node && nodeToFile(node);
+        if (ref && file) this.files.set(ref, { url: file.url, alt: file.alt, contentType: file.contentType });
       });
     }
 
@@ -173,7 +232,21 @@ export class GidToRefMapper {
 export class RefToGidResolver {
   private readonly cache = new Map<string, string | undefined>();
 
-  constructor(private readonly client: AdminClient) {}
+  /**
+   * @param uploads files that may be uploaded when missing in this store (only set when applying).
+   */
+  constructor(
+    private readonly client: AdminClient,
+    private readonly uploads?: ReadonlyMap<string, FileSource>,
+  ) {}
+
+  /** True when a missing file ref would be uploaded instead of reported as missing. */
+  canUpload(ref: string): boolean {
+    return Boolean(this.uploads?.has(ref));
+  }
+
+  /** Files uploaded by this resolver, for the report. */
+  readonly uploaded: string[] = [];
 
   /** Forget a cached miss, e.g. after the plan created the missing resource. */
   invalidate(ref: string): void {
@@ -232,9 +305,45 @@ export class RefToGidResolver {
         const lookup = LIST_LOOKUPS[kind]!;
         return lookup.pick(await c.request(lookup.query)).find((x) => x.key === rest.join("/"))?.id;
       }
+      case "Menu": {
+        const handle = rest.join("/");
+        const d = await c.request(`query { menus(first: 100) { nodes { id handle } } }`);
+        return (d.menus.nodes as { id: string; handle: string }[]).find((n) => n.handle === handle)?.id;
+      }
+      case "MetafieldDefinition": {
+        const [ownerType, namespace, ...key] = rest.join("/").split(".");
+        const d = await c.request(
+          `query($o: MetafieldOwnerType!, $n: String!, $k: String!) { metafieldDefinitions(ownerType: $o, namespace: $n, key: $k, first: 1) { nodes { id } } }`,
+          { o: ownerType, n: namespace, k: key.join(".") },
+        );
+        return d.metafieldDefinitions.nodes[0]?.id;
+      }
+      case "File":
+        return this.findOrUploadFile(ref, rest.join("/"));
       default:
         return undefined;
     }
+  }
+
+  private async findOrUploadFile(ref: string, filename: string): Promise<string | undefined> {
+    const d = await this.client.request(
+      `query($q: String!) { files(first: 25, query: $q) { nodes { __typename id ... on MediaImage { alt image { url } } ... on GenericFile { alt url } ... on Video { alt filename originalSource { url } } } } }`,
+      { q: `filename:'${filename.replace(/'/g, "\\'")}'` },
+    );
+    const found = (d.files.nodes as RefNode[]).find((n) => nodeToFile(n)?.filename === filename);
+    if (found) return found.id;
+
+    const source = this.uploads?.get(ref);
+    if (!source) return undefined;
+    const res = await this.client.request(
+      `mutation($files: [FileCreateInput!]!) { fileCreate(files: $files) { files { id } userErrors { field message code } } }`,
+      { files: [{ originalSource: source.url, contentType: source.contentType, alt: source.alt, filename, duplicateResolutionMode: "RAISE_ERROR" }] },
+    );
+    const errors = res.fileCreate?.userErrors ?? [];
+    if (errors.length) throw new Error(`fileCreate ${filename} failed: ${errors.map((e: { message: string }) => e.message).join("; ")}`);
+    const id = res.fileCreate.files[0]?.id as string | undefined;
+    if (id) this.uploaded.push(filename);
+    return id;
   }
 
   /**

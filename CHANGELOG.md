@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0
+
+- New resources: `collections` (with smart-collection rules), `shop_policies`, and opt-in `metafields` (values on products and collections) and `translations` (pages, collections, metaobjects, menus, policies)
+- Files and images are matched by file name across stores and uploaded to the target when missing
+- Config as code: `export_snapshot` writes a store's configuration to a folder for git; `dir:<path>` works as a source anywhere
+- Read-only theme settings diff (`diff_themes`): JSON templates, section groups and settings_data.json
+- Command line: `stores`, `diff`, `plan`, `apply`, `plans`, `export`, `themes`, with `--json` and `--exit-code`
+- Collection rules on metafield definitions, menus and metafield definitions are now remapped too
+
 ## Unreleased
 
 - Remap customer account pages and shop policies (menus such as `customer-account-main-menu` now sync)

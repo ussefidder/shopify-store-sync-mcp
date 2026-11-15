@@ -150,7 +150,7 @@
     ]
   },
   "plan": {
-    "plan_id": "f1529deb-5c0e-4caf-8206-fa41f2edd92a",
+    "plan_id": "7f0a1429-c9a1-4e06-a4aa-35201302b5cd",
     "status": "pending",
     "source": {
       "alias": "dev",
@@ -160,7 +160,7 @@
       "alias": "eu",
       "domain": "eu.myshopify.com"
     },
-    "expiresAt": "2026-11-15T00:57:22.335Z",
+    "expiresAt": "2026-11-15T01:26:45.467Z",
     "totals": {
       "create": 6,
       "update": 3,
@@ -294,7 +294,7 @@
     "error": "Refused: store \"eu\" is protected. Pass confirm=\"eu.myshopify.com\" to apply."
   },
   "applied": {
-    "plan_id": "f1529deb-5c0e-4caf-8206-fa41f2edd92a",
+    "plan_id": "7f0a1429-c9a1-4e06-a4aa-35201302b5cd",
     "status": "applied",
     "totals": {
       "created": 6,

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { hashData, type FieldChange, type ResourceDiff } from "./diff.js";
-import { collectRefs, UNRESOLVED_PREFIX, type RefToGidResolver } from "./refs.js";
+import { collectRefs, REF_PREFIX, UNRESOLVED_PREFIX, type FileSource, type RefToGidResolver } from "./refs.js";
 import { ADAPTERS, orderKinds, type ResourceKind } from "./resources/index.js";
 
 export type OpAction = "create" | "update" | "conflict";
@@ -39,6 +39,8 @@ export interface Plan {
   onlyInTarget: { kind: ResourceKind; keys: string[] }[];
   skipped: { kind: ResourceKind; key: string; reason: string }[];
   warnings: string[];
+  /** Source download URLs for files the plan may need to upload to the target. */
+  files: Record<string, FileSource>;
   status: "pending" | "applied" | "partially_applied" | "failed";
 }
 
@@ -50,6 +52,8 @@ export interface BuildPlanInput {
   diffs: ResourceDiff[];
   skipped?: Plan["skipped"];
   resolver: RefToGidResolver;
+  /** File sources from the source snapshot. */
+  files?: Record<string, FileSource>;
   now?: Date;
 }
 
@@ -91,6 +95,8 @@ export async function buildPlan(input: BuildPlanInput): Promise<Plan> {
 
   const warnings: string[] = [];
   const unmappable = new Set<string>();
+  const toUpload = new Set<string>();
+  const files: Record<string, FileSource> = {};
   for (const op of ops) {
     if (op.action === "conflict") continue;
     const missing: string[] = [];
@@ -99,7 +105,13 @@ export async function buildPlan(input: BuildPlanInput): Promise<Plan> {
         unmappable.add(ref);
         missing.push(ref);
       } else if (!willCreate.has(ref) && !(await input.resolver.resolve(ref))) {
-        missing.push(ref);
+        const source = ref.startsWith(`${REF_PREFIX}File/`) ? input.files?.[ref] : undefined;
+        if (source) {
+          toUpload.add(ref);
+          files[ref] = source;
+        } else {
+          missing.push(ref);
+        }
       }
     }
     if (missing.length) {
@@ -109,8 +121,11 @@ export async function buildPlan(input: BuildPlanInput): Promise<Plan> {
   }
   if (unmappable.size) {
     warnings.unshift(
-      `${unmappable.size} reference(s) point at resource types that can't be matched across stores (files, variants...). Those values will be left out.`,
+      `${unmappable.size} reference(s) point at resource types that can't be matched across stores (variants, articles...). Those values will be left out.`,
     );
+  }
+  if (toUpload.size) {
+    warnings.push(`${toUpload.size} file(s) don't exist in the target and will be uploaded from the source when applied.`);
   }
   const conflicts = ops.filter((o) => o.action === "conflict").length;
   if (conflicts) warnings.unshift(`${conflicts} conflict(s) need a manual fix in the target; they will be skipped.`);
@@ -126,6 +141,7 @@ export async function buildPlan(input: BuildPlanInput): Promise<Plan> {
     onlyInTarget: diffs.filter((d) => d.onlyInTarget.length).map((d) => ({ kind: d.kind, keys: d.onlyInTarget.map((i) => i.key) })),
     skipped: input.skipped ?? [],
     warnings,
+    files,
     status: "pending",
   };
 }

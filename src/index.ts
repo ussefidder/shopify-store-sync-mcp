@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { COMMANDS, runCli } from "./cli.js";
 import { loadStores, StoreRegistry } from "./config.js";
 import { createServer, VERSION } from "./server.js";
 
@@ -10,16 +11,12 @@ async function main() {
     return;
   }
   if (args.includes("--help") || args.includes("-h")) {
-    console.log(`shopify-store-sync-mcp ${VERSION}
-
-Diff and sync configuration between Shopify stores over MCP (stdio).
-
-Configure stores with one of:
-  SHOPIFY_STORES        inline JSON: {"dev": {"domain": "...", "accessToken": "..."}, ...}
-  SHOPIFY_STORES_FILE   path to a stores.json file (default: ./stores.json)
-  SHOPIFY_STORE_DOMAIN + SHOPIFY_ACCESS_TOKEN   single store, alias "default"
-
-See https://github.com/ussefidder/shopify-store-sync-mcp#configuration`);
+    process.exitCode = await runCli(["help"]);
+    return;
+  }
+  // A known command runs the CLI; no arguments starts the MCP server on stdio.
+  if (args[0] && (COMMANDS as readonly string[]).includes(args[0])) {
+    process.exitCode = await runCli(args);
     return;
   }
 

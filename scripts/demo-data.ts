@@ -129,11 +129,12 @@ async function call(name: string, args: Record<string, unknown>) {
 const menuBefore = eu.state.menus[0].items.map((i: { title: string }) => i.title);
 const devPortable = await takeSnapshot(dev, ["metaobjects", "menus"]);
 
-const diff = await call("diff_stores", { source: "dev", target: "eu" });
-const plan = await call("plan_sync", { source: "dev", target: "eu" });
+const resources = ["metafield_definitions", "metaobject_definitions", "pages", "metaobjects", "menus", "redirects"];
+const diff = await call("diff_stores", { source: "dev", target: "eu", resources });
+const plan = await call("plan_sync", { source: "dev", target: "eu", resources });
 const refused = await call("apply_plan", { plan_id: plan.plan_id });
 const applied = await call("apply_plan", { plan_id: plan.plan_id, confirm: "eu.myshopify.com" });
-const again = await call("plan_sync", { source: "dev", target: "eu" });
+const again = await call("plan_sync", { source: "dev", target: "eu", resources });
 const menuAfter = eu.state.menus[0].items.map((i: { title: string; resourceId: string | null }) => [i.title, i.resourceId]);
 
 // Follow two references from dev, through the portable form, to the IDs written in eu.

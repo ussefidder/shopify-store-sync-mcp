@@ -10,13 +10,32 @@ import type { AdminClient } from "../src/shopify/client.js";
 let nextId = 1000;
 const gid = (type: string) => `gid://shopify/${type}/${nextId++}`;
 
+type FakeMetafield = { namespace: string; key: string; type: string; value: string };
+
 export interface FakeState {
-  products: { id: string; handle: string }[];
-  collections: { id: string; handle: string }[];
-  files: { id: string }[];
+  products: { id: string; handle: string; metafields?: FakeMetafield[] }[];
+  collections: {
+    id: string;
+    handle: string;
+    title?: string;
+    descriptionHtml?: string;
+    sortOrder?: string;
+    templateSuffix?: string | null;
+    seo?: { title: string | null; description: string | null };
+    ruleSet?: { appliedDisjunctively: boolean; rules: any[] } | null;
+    metafields?: FakeMetafield[];
+  }[];
+  /** A file with a url maps to shopify://File/<filename>; without one it stays unresolved. */
+  files: { id: string; url?: string; alt?: string; kind?: "MediaImage" | "GenericFile" }[];
+  shopLocales: { locale: string; primary: boolean }[];
+  /** resourceId -> locale -> key -> value */
+  translations: Record<string, Record<string, Record<string, string>>>;
+  /** resourceId -> translatable content keys with their digest in this store */
+  translatableContent: Record<string, { key: string; digest: string }[]>;
+  themes: { id: string; name: string; role: string; files: Record<string, string> }[];
   /** Built into every store. Like the live API, \`nodes\` returns null for these. */
   customerAccountPages: { id: string; handle: string }[];
-  shopPolicies: { id: string; type: string }[];
+  shopPolicies: { id: string; type: string; body?: string }[];
   metafieldDefinitions: any[];
   metaobjectDefinitions: any[];
   metaobjects: any[];
@@ -32,6 +51,10 @@ export function emptyState(): FakeState {
     files: [],
     customerAccountPages: [],
     shopPolicies: [],
+    shopLocales: [{ locale: "en", primary: true }],
+    translations: {},
+    translatableContent: {},
+    themes: [],
     metafieldDefinitions: [],
     metaobjectDefinitions: [],
     metaobjects: [],
@@ -68,7 +91,7 @@ export class FakeShop implements AdminClient {
   }
 
   mutations(): string[] {
-    return this.calls.filter((c) => /(Create|Update|Upsert)$/.test(c.field)).map((c) => c.field);
+    return this.calls.filter((c) => /(Create|Update|Upsert|Set|Register)$/.test(c.field)).map((c) => c.field);
   }
 
   async request<T = any>(query: string, v: Record<string, any> = {}): Promise<T> {
@@ -83,14 +106,24 @@ export class FakeShop implements AdminClient {
   private findNode(id: string): any {
     const s = this.state;
     const typed = (t: string, arr: any[]) => arr.filter((x) => x.id === id).map((x) => ({ __typename: t, ...x }));
+    const files = s.files
+      .filter((f) => f.id === id)
+      .map((f) =>
+        f.kind === "GenericFile"
+          ? { __typename: "GenericFile", id: f.id, alt: f.alt ?? null, url: f.url ?? null }
+          : { __typename: "MediaImage", id: f.id, alt: f.alt ?? null, image: f.url ? { url: f.url } : null },
+      );
+    const defs = s.metafieldDefinitions.filter((d) => d.id === id).map((d) => ({ ...d, __typename: "MetafieldDefinition", definitionKey: d.key }));
     return (
       [
         ...typed("Product", s.products),
         ...typed("Collection", s.collections),
-        ...typed("MediaImage", s.files),
+        ...files,
         ...typed("Page", s.pages),
         ...typed("Metaobject", s.metaobjects),
         ...typed("MetaobjectDefinition", s.metaobjectDefinitions),
+        ...typed("Menu", s.menus),
+        ...defs,
       ][0] ?? null
     );
   }
@@ -113,7 +146,63 @@ export class FakeShop implements AdminClient {
       case "metaobjectDefinitionByType":
         return s.metaobjectDefinitions.find((d) => d.type === v.t) ?? null;
       case "metafieldDefinitions":
-        return conn(s.metafieldDefinitions.filter((d) => d.ownerType === v.ownerType));
+        return conn(
+          s.metafieldDefinitions.filter(
+            (d) => d.ownerType === (v.ownerType ?? v.o) && (v.n === undefined || d.namespace === v.n) && (v.k === undefined || d.key === v.k),
+          ),
+        );
+      case "products":
+        return conn(s.products.map((p) => ({ ...p, metafields: conn(filterNs(p.metafields, v.namespace)) })));
+      case "collections":
+        return conn(
+          s.collections.map((c) => ({
+            title: c.handle,
+            descriptionHtml: "",
+            sortOrder: "BEST_SELLING",
+            templateSuffix: null,
+            seo: { title: null, description: null },
+            ruleSet: null,
+            ...c,
+            metafields: conn(filterNs(c.metafields, v.namespace)),
+          })),
+        );
+      case "shop":
+        return { shopPolicies: s.shopPolicies.map((p) => ({ body: "", ...p })) };
+      case "shopLocales":
+        return s.shopLocales;
+      case "translatableResources": {
+        const prefix = { PAGE: "Page", COLLECTION: "Collection", METAOBJECT: "Metaobject", MENU: "Menu", SHOP_POLICY: "ShopPolicy" }[v.type as string];
+        const nodes = Object.entries(s.translations)
+          .filter(([id]) => id.startsWith(`gid://shopify/${prefix}/`))
+          .map(([id, byLocale]) => ({
+            resourceId: id,
+            translations: Object.entries(byLocale[v.locale] ?? {}).map(([key, value]) => ({ key, value })),
+          }));
+        return conn(nodes);
+      }
+      case "translatableResource":
+        return s.translatableContent[v.id] ? { translatableContent: s.translatableContent[v.id] } : null;
+      case "files": {
+        const name = /filename:'(.*)'/.exec(v.q)?.[1];
+        return conn(
+          s.files
+            .filter((f) => f.url && f.url.split("?")[0]!.endsWith(`/${name}`))
+            .map((f) => ({ __typename: "MediaImage", id: f.id, alt: f.alt ?? null, image: { url: f.url } })),
+        );
+      }
+      case "themes":
+        // The only themes query in the code asks for the published (MAIN) theme.
+        return conn(s.themes.filter((t) => t.role === "MAIN"));
+      case "theme": {
+        const t = s.themes.find((x) => x.id === v.id);
+        if (!t) return null;
+        if (!/files\(/.test(query)) return { id: t.id, name: t.name, role: t.role };
+        const patterns = (v.filenames as string[]).map((p) => new RegExp(`^${p.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`));
+        const nodes = Object.entries(t.files)
+          .filter(([f]) => patterns.some((r) => r.test(f)))
+          .map(([filename, content]) => ({ filename, body: { content } }));
+        return { files: conn(nodes) };
+      }
       case "metaobjectDefinitions":
         return conn(s.metaobjectDefinitions);
       case "metaobjects":
@@ -211,6 +300,54 @@ export class FakeShop implements AdminClient {
         if (v.metaobject.capabilities?.publishable) obj.capabilities.publishable = { status: v.metaobject.capabilities.publishable.status };
         return ok({ metaobject: { id: obj.id } });
       }
+      case "collectionCreate": {
+        const c = { id: gid("Collection"), ...v.input, ruleSet: v.input.ruleSet ?? null };
+        s.collections.push(c);
+        return ok({ collection: { id: c.id } });
+      }
+      case "collectionUpdate": {
+        const c = s.collections.find((x) => x.id === v.input.id)!;
+        Object.assign(c, v.input, { ruleSet: v.input.ruleSet ?? c.ruleSet ?? null });
+        return ok({ collection: { id: c.id } });
+      }
+      case "shopPolicyUpdate": {
+        let p = s.shopPolicies.find((x) => x.type === v.p.type);
+        if (!p) {
+          p = { id: gid("ShopPolicy"), type: v.p.type };
+          s.shopPolicies.push(p);
+        }
+        p.body = v.p.body;
+        return ok({ shopPolicy: { id: p.id } });
+      }
+      case "metafieldsSet": {
+        const out = [];
+        for (const m of v.m) {
+          const owner = [...s.products, ...s.collections].find((o) => o.id === m.ownerId);
+          if (!owner) return { metafields: [], userErrors: [{ field: ["ownerId"], message: "Owner not found" }] };
+          owner.metafields ??= [];
+          const existing = owner.metafields.find((x) => x.namespace === m.namespace && x.key === m.key);
+          if (existing) Object.assign(existing, { type: m.type, value: m.value });
+          else owner.metafields.push({ namespace: m.namespace, key: m.key, type: m.type, value: m.value });
+          out.push({ id: gid("Metafield") });
+        }
+        return ok({ metafields: out });
+      }
+      case "translationsRegister": {
+        const content = s.translatableContent[v.id] ?? [];
+        for (const t of v.t) {
+          if (!content.some((c) => c.key === t.key && c.digest === t.translatableContentDigest)) {
+            return { translations: null, userErrors: [{ field: ["translations"], message: `bad digest for ${t.key}` }] };
+          }
+          ((s.translations[v.id] ??= {})[t.locale] ??= {})[t.key] = t.value;
+        }
+        return ok({ translations: v.t.map((t: { key: string }) => ({ key: t.key })) });
+      }
+      case "fileCreate": {
+        const f = v.files[0];
+        const file = { id: gid("MediaImage"), url: f.originalSource, alt: f.alt };
+        s.files.push(file);
+        return ok({ files: [{ id: file.id }] });
+      }
       case "pageCreate": {
         const p = { id: gid("Page"), templateSuffix: null, isPublished: true, body: "", ...v.page };
         s.pages.push(p);
@@ -245,6 +382,10 @@ export class FakeShop implements AdminClient {
         throw new Error(`fake: unhandled field ${field} in ${query.slice(0, 80)}`);
     }
   }
+}
+
+function filterNs(m: FakeMetafield[] | undefined, ns?: string): FakeMetafield[] {
+  return (m ?? []).filter((x) => !ns || x.namespace === ns);
 }
 
 function toFieldNode(f: any, partial = false): any {

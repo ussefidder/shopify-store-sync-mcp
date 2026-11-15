@@ -1,0 +1,33 @@
+{
+  "diff": {
+    "cmd": "shopify-store-sync-mcp diff dev eu --resources pages,collections,shop_policies,redirects,translations",
+    "output": "pages                    +1 ~1 only in target 0 = 0\n  + care-guide\n  ~ shipping body\ncollections              +1 ~0 only in target 0 = 1\n  + new-in\nshop_policies            +0 ~1 only in target 0 = 0\n  ~ REFUND_POLICY body\nredirects                +1 ~0 only in target 0 = 0\n  + /summer-sale\ntranslations             +1 ~0 only in target 0 = 0\n  + fr:Page/shipping",
+    "exit": 0
+  },
+  "plan": {
+    "cmd": "shopify-store-sync-mcp plan dev eu --resources pages,collections,shop_policies,redirects,translations",
+    "output": "Plan <plan-id>  dev -> eu (eu.myshopify.com)\n4 create · 2 update · 0 conflict\n\n   1 + collections            new-in \n   2 + pages                  care-guide \n   3 ~ pages                  shipping body\n   4 ~ shop_policies          REFUND_POLICY body\n   5 + redirects              /summer-sale \n   6 + translations           fr:Page/shipping \n\nNothing written yet. Apply with: shopify-store-sync-mcp apply <plan-id>",
+    "exit": 0
+  },
+  "themes": {
+    "cmd": "shopify-store-sync-mcp themes dev eu",
+    "output": "Themes Horizon (dev) vs Horizon (eu)\n  + templates/page.care-guide.json\n  ~ config/settings_data.json 1 setting(s): current.cart_type\n  ~ templates/product.json 1 setting(s): sections.main.settings.gap\n\n0 identical",
+    "exit": 0
+  },
+  "export": {
+    "cmd": "shopify-store-sync-mcp export dev ./store-config --resources pages,collections,shop_policies,redirects,translations",
+    "output": "collections              2 items\npages                    2 items\nshop_policies            1 item\nredirects                1 item\ntranslations             1 item\n\nWrote 7 files to ./store-config",
+    "exit": 0
+  },
+  "tree": [
+    "collections/linen.json",
+    "collections/new-in.json",
+    "pages/care-guide.json",
+    "pages/shipping.json",
+    "redirects/summer-sale.json",
+    "shop_policies/REFUND_POLICY.json",
+    "snapshot.json",
+    "translations/fr_Page_shipping.json"
+  ],
+  "sample": "{\n  \"data\": {\n    \"locale\": \"fr\",\n    \"resource\": \"shopify://Page/shipping\",\n    \"values\": {\n      \"body_html\": \"<p>Livraison offerte dès 80 EUR.</p>\",\n      \"title\": \"Livraison\"\n    }\n  },\n  \"key\": \"fr:Page/shipping\"\n}\n"
+}

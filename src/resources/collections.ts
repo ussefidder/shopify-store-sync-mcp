@@ -1,0 +1,156 @@
+import { assertNoUserErrors, paginate } from "../shopify/client.js";
+import { REF_PREFIX } from "../refs.js";
+import type { Item, ResourceAdapter } from "./types.js";
+import { compact, PAGE_INFO } from "./util.js";
+
+/*
+ * Collections: title, description, sort order, template, SEO and, for smart collections,
+ * their rules. Shopify is moving smart rules to a new "sources" model; `ruleSet` is still
+ * supported by every Admin API version this project targets (2026-04 to 2027-01).
+ * Manual collections keep their own product lists: membership is not copied.
+ */
+
+const QUERY = /* GraphQL */ `
+  query Collections($after: String) {
+    collections(first: 50, after: $after) {
+      nodes {
+        id
+        handle
+        title
+        descriptionHtml
+        sortOrder
+        templateSuffix
+        seo { title description }
+        ruleSet {
+          appliedDisjunctively
+          rules {
+            column
+            relation
+            condition
+            conditionObject {
+              __typename
+              ... on CollectionRuleMetafieldCondition { metafieldDefinition { id } }
+            }
+          }
+        }
+      }
+      ${PAGE_INFO}
+    }
+  }
+`;
+
+interface Node {
+  id: string;
+  handle: string;
+  title: string;
+  descriptionHtml: string;
+  sortOrder: string;
+  templateSuffix: string | null;
+  seo: { title: string | null; description: string | null };
+  ruleSet: {
+    appliedDisjunctively: boolean;
+    rules: {
+      column: string;
+      relation: string;
+      condition: string;
+      conditionObject: { __typename: string; metafieldDefinition?: { id: string } } | null;
+    }[];
+  } | null;
+}
+
+interface RuleData {
+  column: string;
+  relation: string;
+  condition: string;
+  /** Metafield definition the rule filters on (portable ref once mapped). */
+  definition?: string;
+}
+
+export function normalizeCollection(n: Node): Item {
+  return {
+    key: n.handle,
+    id: n.id,
+    data: compact({
+      handle: n.handle,
+      title: n.title,
+      descriptionHtml: n.descriptionHtml || undefined,
+      sortOrder: n.sortOrder,
+      templateSuffix: n.templateSuffix || undefined,
+      seo: compact({ title: n.seo?.title || undefined, description: n.seo?.description || undefined }),
+      smart: Boolean(n.ruleSet),
+      rules: n.ruleSet
+        ? {
+            appliedDisjunctively: n.ruleSet.appliedDisjunctively,
+            rules: n.ruleSet.rules.map(
+              (r): RuleData =>
+                compact({
+                  column: r.column,
+                  relation: r.relation,
+                  condition: r.condition,
+                  definition: r.conditionObject?.metafieldDefinition?.id,
+                }) as RuleData,
+            ),
+          }
+        : undefined,
+    }),
+  };
+}
+
+function input(d: Record<string, unknown>) {
+  const rules = d.rules as { appliedDisjunctively: boolean; rules: RuleData[] } | undefined;
+  const seo = (d.seo as Record<string, string> | undefined) ?? {};
+  return compact({
+    handle: d.handle,
+    title: d.title,
+    descriptionHtml: d.descriptionHtml ?? "",
+    sortOrder: d.sortOrder,
+    templateSuffix: d.templateSuffix ?? "",
+    seo: { title: seo.title ?? "", description: seo.description ?? "" },
+    ruleSet: rules
+      ? {
+          appliedDisjunctively: rules.appliedDisjunctively,
+          rules: rules.rules.map((r) => compact({ column: r.column, relation: r.relation, condition: r.condition, conditionObjectId: r.definition })),
+        }
+      : undefined,
+  });
+}
+
+export const collections: ResourceAdapter = {
+  kind: "collections",
+  description:
+    "Collections, keyed by handle: title, description, sort order, template, SEO and smart-collection rules. Manual collection membership and sales-channel publishing are not copied.",
+
+  async fetch(client) {
+    const nodes = await paginate<Node>(client, QUERY, {}, (d) => d.collections);
+    return { items: nodes.map(normalizeCollection), skipped: [] };
+  },
+
+  refFor(key) {
+    return `${REF_PREFIX}Collection/${key}`;
+  },
+
+  conflict(source, target) {
+    if (source.data.smart !== target.data.smart) {
+      return `${source.data.smart ? "smart" : "manual"} in source but ${target.data.smart ? "smart" : "manual"} in target; Shopify can't convert a collection between the two`;
+    }
+    return undefined;
+  },
+
+  async create({ client }, _key, d) {
+    const res = await client.request(
+      `mutation($input: CollectionInput!) { collectionCreate(input: $input) { collection { id } userErrors { field message } } }`,
+      { input: input(d) },
+    );
+    assertNoUserErrors(res.collectionCreate, `collectionCreate ${String(d.handle)}`);
+    return res.collectionCreate.collection.id;
+  },
+
+  async update({ client }, target, d) {
+    const { handle: _handle, ...rest } = input(d) as Record<string, unknown>;
+    const res = await client.request(
+      `mutation($input: CollectionInput!) { collectionUpdate(input: $input) { collection { id } userErrors { field message } } }`,
+      { input: { id: target.id, ...rest } },
+    );
+    assertNoUserErrors(res.collectionUpdate, `collectionUpdate ${target.key}`);
+  },
+};

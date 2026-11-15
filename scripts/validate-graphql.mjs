@@ -33,9 +33,9 @@ const introspection = JSON.parse(gunzipSync(readFileSync(schemaFile())).toString
 const schema = buildClientSchema(introspection.data);
 
 // Values for template interpolations used inside operations.
-const subs = { PAGE_INFO: "pageInfo { hasNextPage endCursor }", ITEM_FIELDS: "title type url resourceId tags" };
+const subs = { PAGE_INFO: "pageInfo { hasNextPage endCursor }", ITEM_FIELDS: "title type url resourceId tags", size: "5" };
 // Operations built with a dynamic field name are validated once per possible value.
-const variants = { field: ["pages", "blogs"] };
+const variants = { field: ["pages", "blogs"], owner: ["products", "collections"] };
 
 const walk = (dir) =>
   readdirSync(dir).flatMap((f) => {
