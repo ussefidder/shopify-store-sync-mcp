@@ -31,6 +31,11 @@ describe("config", () => {
     const single = loadStores({ SHOPIFY_STORE_DOMAIN: "s.myshopify.com", SHOPIFY_CLIENT_ID: "id", SHOPIFY_CLIENT_SECRET: "sec" }, tmpdir());
     expect(single).toMatchObject([{ alias: "default", clientId: "id", allowWrites: false }]);
     expect(loadStores({}, mkdtempSync(join(tmpdir(), "empty-")))).toEqual([]);
+
+    // Windows PowerShell and Notepad save UTF-8 with a byte order mark
+    const bom = mkdtempSync(join(tmpdir(), "bom-"));
+    writeFileSync(join(bom, "stores.json"), "﻿" + JSON.stringify({ stores: { win: { domain: "w.myshopify.com", auth: "shopify-cli" } } }));
+    expect(loadStores({}, bom).map((s) => s.alias)).toEqual(["win"]);
   });
 
   it("names known stores when an alias is wrong", () => {

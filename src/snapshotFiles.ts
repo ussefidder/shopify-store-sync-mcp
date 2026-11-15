@@ -83,7 +83,7 @@ export function readSnapshot(dir: string, kinds?: readonly ResourceKind[]): Snap
   const root = resolve(dir);
   const manifestPath = join(root, MANIFEST);
   if (!existsSync(manifestPath)) throw new Error(`${root} has no ${MANIFEST}; export a snapshot there first`);
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8").replace(/^\uFEFF/, ""));
   if (manifest.format !== SNAPSHOT_FORMAT) throw new Error(`${manifestPath}: unsupported format ${String(manifest.format)}`);
 
   const resources: Snapshot["resources"] = {};
@@ -94,7 +94,7 @@ export function readSnapshot(dir: string, kinds?: readonly ResourceKind[]): Snap
       ? readdirSync(folder)
           .filter((f) => f.endsWith(".json"))
           .map((f) => {
-            const { key, data } = JSON.parse(readFileSync(join(folder, f), "utf8"));
+            const { key, data } = JSON.parse(readFileSync(join(folder, f), "utf8").replace(/^\uFEFF/, ""));
             return { key, id: "", data };
           })
       : [];

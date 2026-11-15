@@ -65,7 +65,7 @@ export function loadStores(env: NodeJS.ProcessEnv = process.env, cwd = process.c
   if (env.SHOPIFY_STORES) {
     let json: unknown;
     try {
-      json = JSON.parse(env.SHOPIFY_STORES);
+      json = JSON.parse(env.SHOPIFY_STORES.replace(/^\uFEFF/, ""));
     } catch {
       throw new Error("SHOPIFY_STORES is not valid JSON");
     }
@@ -74,7 +74,7 @@ export function loadStores(env: NodeJS.ProcessEnv = process.env, cwd = process.c
 
   const file = env.SHOPIFY_STORES_FILE ? resolve(cwd, env.SHOPIFY_STORES_FILE) : resolve(cwd, "stores.json");
   if (existsSync(file)) {
-    const json = fileSchema.parse(JSON.parse(readFileSync(file, "utf8")));
+    const json = fileSchema.parse(JSON.parse(readFileSync(file, "utf8").replace(/^\uFEFF/, "")));
     return parseStores(json.stores, env);
   }
 
