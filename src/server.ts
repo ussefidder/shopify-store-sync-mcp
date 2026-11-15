@@ -25,7 +25,7 @@ const scopeArgs = {
     .array(z.enum(RESOURCE_KINDS))
     .min(1)
     .optional()
-    .describe(`Resource types to include. Default: ${DEFAULT_KINDS.join(", ")}. metafields and translations are opt-in.`),
+    .describe(`Resource types to include. Default: ${DEFAULT_KINDS.join(", ")}. products, metafields and translations are opt-in.`),
   owner_types: z
     .array(z.string())
     .optional()
@@ -33,6 +33,7 @@ const scopeArgs = {
   metaobject_types: z.array(z.string()).optional().describe("Limit metaobjects to these types. Default: all non-reserved types."),
   namespaces: z.array(z.string()).optional().describe("Limit metafield values (metafields) to these namespaces."),
   locales: z.array(z.string()).optional().describe("Limit translations to these locales, e.g. [\"fr\", \"de\"]. Default: every non-primary locale."),
+  prices: z.boolean().optional().describe("products: also copy variant prices and compare-at prices. Off by default, since prices usually differ per store."),
   include: z
     .array(z.string())
     .optional()
@@ -46,6 +47,7 @@ type ScopeArgs = {
   metaobject_types?: string[];
   namespaces?: string[];
   locales?: string[];
+  prices?: boolean;
   include?: string[];
   exclude?: string[];
 };
@@ -56,6 +58,7 @@ const toScope = (a: ScopeArgs): Scope => ({
   metaobjectTypes: a.metaobject_types,
   namespaces: a.namespaces,
   locales: a.locales,
+  prices: a.prices,
   include: a.include,
   exclude: a.exclude,
 });

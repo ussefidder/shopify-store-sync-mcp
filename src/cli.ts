@@ -29,6 +29,7 @@ Options
   --include  glob,glob   only keys matching, e.g. "PRODUCT.custom.*,faq/*"
   --exclude  glob,glob   drop keys matching
   --namespaces a,b       metafield value namespaces      --locales fr,de   translation locales
+  --with-prices          products: also copy variant prices
   --writes               connect: also request write scopes (default: what the store config allows)
   --confirm <domain>     required to apply to a protected store
   --only 1,2,3           apply only these plan steps
@@ -47,7 +48,7 @@ export function parseArgs(argv: string[]): { positional: string[]; flags: Flags 
       const [name, inline] = a.slice(2).split("=", 2) as [string, string | undefined];
       const next = argv[i + 1];
       if (inline !== undefined) flags[name] = inline;
-      else if (next !== undefined && !next.startsWith("--") && !["json", "exit-code", "values", "writes"].includes(name)) flags[name] = argv[++i]!;
+      else if (next !== undefined && !next.startsWith("--") && !["json", "exit-code", "values", "writes", "with-prices"].includes(name)) flags[name] = argv[++i]!;
       else flags[name] = true;
     } else positional.push(a);
   }
@@ -67,6 +68,7 @@ export function scopeFromFlags(flags: Flags): Scope {
     exclude: list(flags.exclude),
     namespaces: list(flags.namespaces),
     locales: list(flags.locales),
+    prices: flags["with-prices"] === true,
     metaobjectTypes: list(flags["metaobject-types"]),
     ownerTypes: list(flags["owner-types"]),
   };

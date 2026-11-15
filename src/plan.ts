@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { hashData, type FieldChange, type ResourceDiff } from "./diff.js";
 import { collectRefs, REF_PREFIX, UNRESOLVED_PREFIX, type FileSource, type RefToGidResolver } from "./refs.js";
-import { ADAPTERS, orderKinds, type ResourceKind } from "./resources/index.js";
+import { ADAPTERS, orderKinds, type FetchOptions, type ResourceKind } from "./resources/index.js";
 
 export type OpAction = "create" | "update" | "conflict";
 
@@ -41,6 +41,8 @@ export interface Plan {
   warnings: string[];
   /** Source download URLs for files the plan may need to upload to the target. */
   files: Record<string, FileSource>;
+  /** Read options the plan was made with, so the drift check before applying reads the target the same way. */
+  fetchOptions?: FetchOptions;
   status: "pending" | "applied" | "partially_applied" | "failed";
 }
 
@@ -54,6 +56,7 @@ export interface BuildPlanInput {
   resolver: RefToGidResolver;
   /** File sources from the source snapshot. */
   files?: Record<string, FileSource>;
+  fetchOptions?: FetchOptions;
   now?: Date;
 }
 
@@ -165,6 +168,7 @@ export async function buildPlan(input: BuildPlanInput): Promise<Plan> {
     skipped: input.skipped ?? [],
     warnings,
     files,
+    fetchOptions: input.fetchOptions,
     status: "pending",
   };
 }

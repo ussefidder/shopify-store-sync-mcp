@@ -107,7 +107,7 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
 
   // Drift check: re-read the target and skip anything that changed since the plan was made.
   const kinds = [...new Set(runnable.map((o) => o.kind))];
-  const current = await takeSnapshot(client, kinds);
+  const current = await takeSnapshot(client, kinds, plan.fetchOptions);
   const currentByKind = new Map(kinds.map((k) => [k, new Map((current.resources[k]?.items ?? []).map((i) => [i.key, i]))]));
   const ready: PlanOp[] = [];
   for (const op of runnable) {
@@ -177,7 +177,7 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
   for (const op of ready) await run(op, 1);
   if (retry.length) {
     const retryKinds = [...new Set(retry.map((o) => o.kind))];
-    const fresh = await takeSnapshot(client, retryKinds);
+    const fresh = await takeSnapshot(client, retryKinds, plan.fetchOptions);
     pass2Targets = new Map(retryKinds.flatMap((k) => (fresh.resources[k]?.items ?? []).map((i) => [`${k}:${i.key}`, i] as const)));
     for (const op of retry) {
       // An op that failed outright in pass 1 and still doesn't exist must be created, not updated.

@@ -12,8 +12,28 @@ const gid = (type: string) => `gid://shopify/${type}/${nextId++}`;
 
 type FakeMetafield = { namespace: string; key: string; type: string; value: string };
 
+export type FakeVariant = { id: string; options: Record<string, string>; sku?: string; price?: string; compareAtPrice?: string | null };
+export interface FakeProduct {
+  id: string;
+  handle: string;
+  metafields?: FakeMetafield[];
+  title?: string;
+  descriptionHtml?: string;
+  vendor?: string;
+  productType?: string;
+  tags?: string[];
+  templateSuffix?: string | null;
+  isGiftCard?: boolean;
+  status?: string;
+  seo?: { title: string | null; description: string | null };
+  options?: { name: string; values: string[] }[];
+  variants?: FakeVariant[];
+  /** File ids, in order. */
+  media?: string[];
+}
+
 export interface FakeState {
-  products: { id: string; handle: string; metafields?: FakeMetafield[] }[];
+  products: FakeProduct[];
   collections: {
     id: string;
     handle: string;
@@ -128,13 +148,49 @@ export class FakeShop implements AdminClient {
     );
   }
 
+  /** A product as the products adapter queries it. */
+  private productView(p: FakeProduct) {
+    const options = p.options ?? [{ name: "Title", values: ["Default Title"] }];
+    const variants = p.variants ?? [{ id: `${p.id}-v`, options: { Title: "Default Title" }, price: "0.00" }];
+    return {
+      id: p.id,
+      handle: p.handle,
+      title: p.title ?? p.handle,
+      descriptionHtml: p.descriptionHtml ?? "",
+      vendor: p.vendor ?? "",
+      productType: p.productType ?? "",
+      tags: p.tags ?? [],
+      templateSuffix: p.templateSuffix ?? null,
+      isGiftCard: p.isGiftCard ?? false,
+      seo: p.seo ?? { title: null, description: null },
+      options: options.map((o, i) => ({ name: o.name, position: i + 1, optionValues: o.values.map((name) => ({ name })) })),
+      media: {
+        nodes: (p.media ?? []).map((id) => {
+          const f = this.state.files.find((x) => x.id === id);
+          return { mediaContentType: "IMAGE", id, alt: f?.alt ?? null };
+        }),
+      },
+      variants: conn(
+        variants.map((x) => ({
+          id: x.id,
+          sku: x.sku ?? null,
+          price: x.price ?? "0.00",
+          compareAtPrice: x.compareAtPrice ?? null,
+          selectedOptions: Object.entries(x.options).map(([name, value]) => ({ name, value })),
+        })),
+      ),
+    };
+  }
+
   private handle(field: string, query: string, v: Record<string, any>, s: FakeState): unknown {
     switch (field) {
       // ---- reads
       case "nodes":
         return (v.ids as string[]).map((id) => this.findNode(id));
-      case "productByIdentifier":
-        return s.products.find((p) => p.handle === v.h) ?? null;
+      case "productByIdentifier": {
+        const p = s.products.find((x) => x.handle === (v.h ?? v.handle)) ?? null;
+        return p && query.includes("variants(") ? this.productView(p) : p;
+      }
       case "collectionByIdentifier":
         return s.collections.find((p) => p.handle === v.h) ?? null;
       case "metaobjectByHandle":
@@ -152,6 +208,7 @@ export class FakeShop implements AdminClient {
           ),
         );
       case "products":
+        if (query.includes("variants(")) return conn(s.products.map((p) => this.productView(p)));
         return conn(s.products.map((p) => ({ ...p, metafields: conn(filterNs(p.metafields, v.namespace)) })));
       case "collections":
         return conn(
@@ -307,6 +364,41 @@ export class FakeShop implements AdminClient {
         const c = s.collections.find((x) => x.id === v.input.id)!;
         Object.assign(c, v.input, { ruleSet: v.input.ruleSet ?? c.ruleSet ?? null });
         return ok({ collection: { id: c.id } });
+      }
+      case "productSet": {
+        const input = v.input;
+        let p = v.identifier?.handle ? s.products.find((x) => x.handle === v.identifier.handle) : undefined;
+        if (v.identifier?.handle && !p) return { product: null, userErrors: [{ field: ["identifier"], message: "Product does not exist" }] };
+        if (!p) {
+          if (s.products.some((x) => x.handle === input.handle)) return { product: null, userErrors: [{ field: ["handle"], message: "Handle has already been taken" }] };
+          p = { id: gid("Product"), handle: input.handle, status: input.status ?? "ACTIVE" };
+          s.products.push(p);
+        }
+        for (const k of ["title", "descriptionHtml", "vendor", "productType", "tags", "templateSuffix", "seo"] as const) {
+          if (input[k] !== undefined) (p as any)[k] = input[k];
+        }
+        if (input.productOptions) p.options = input.productOptions.map((o: any) => ({ name: o.name, values: o.values.map((x: any) => x.name) }));
+        if (input.variants) {
+          const old = p.variants ?? [];
+          p.variants = input.variants.map((iv: any) => {
+            const existing = iv.id ? old.find((x) => x.id === iv.id) : undefined;
+            const options = Object.fromEntries(iv.optionValues.map((o: any) => [o.optionName, o.name]));
+            return {
+              id: existing?.id ?? gid("ProductVariant"),
+              options,
+              sku: iv.sku ?? existing?.sku,
+              price: iv.price ?? existing?.price ?? "0.00",
+              compareAtPrice: iv.compareAtPrice ?? existing?.compareAtPrice ?? null,
+            };
+          });
+        }
+        if (input.files) {
+          for (const f of input.files) {
+            if (!s.files.some((x) => x.id === f.id)) return { product: null, userErrors: [{ field: ["files"], message: `File ${f.id} not found` }] };
+          }
+          p.media = input.files.map((f: any) => f.id);
+        }
+        return ok({ product: { id: p.id } });
       }
       case "shopPolicyUpdate": {
         let p = s.shopPolicies.find((x) => x.type === v.p.type);

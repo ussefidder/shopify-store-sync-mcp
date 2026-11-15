@@ -411,7 +411,7 @@ describe("CLI", () => {
   });
 
   it("rejects unknown resources with a helpful message", async () => {
-    expect(await runCli(["diff", "dev", "eu", "--resources", "products"], {}, engineFor(new FakeShop(FakeShop.config("dev")), new FakeShop(FakeShop.config("eu"))))).toBe(1);
-    expect(logs.join("\n")).toMatch(/unknown resource "products"/);
+    expect(await runCli(["diff", "dev", "eu", "--resources", "orders"], {}, engineFor(new FakeShop(FakeShop.config("dev")), new FakeShop(FakeShop.config("eu"))))).toBe(1);
+    expect(logs.join("\n")).toMatch(/unknown resource "orders"/);
   });
 });

@@ -47,16 +47,22 @@ let count = 0;
 let failed = 0;
 for (const file of walk(new URL("../src", import.meta.url).pathname)) {
   const src = readFileSync(file, "utf8");
+  // Constants defined in the same file (a shared selection set, a page size) are substituted too.
+  const local = { ...subs };
+  for (const c of src.matchAll(/const (\w+) = (?:\/\* GraphQL \*\/ )?`([^`]*)`;/g)) local[c[1]] = c[2];
+  for (const c of src.matchAll(/const (\w+) = (\d+);/g)) local[c[1]] = c[2];
+  const expand = (t, depth = 0) =>
+    t.replace(/\$\{(\w+)\}/g, (_, k) => {
+      if (!(k in local)) throw new Error(`${file}: unknown interpolation \${${k}}; add it to scripts/validate-graphql.mjs`);
+      return depth < 3 ? expand(local[k], depth + 1) : local[k];
+    });
   for (const m of src.matchAll(/`(\s*(?:query|mutation)\b[\s\S]*?)`/g)) {
     let docs = [m[1]];
     for (const [name, values] of Object.entries(variants)) {
       docs = docs.flatMap((d) => (d.includes(`\${${name}}`) ? values.map((v) => d.replaceAll(`\${${name}}`, v)) : [d]));
     }
     for (const raw of docs) {
-      const doc = raw.replace(/\$\{(\w+)\}/g, (_, k) => {
-        if (!(k in subs)) throw new Error(`${file}: unknown interpolation \${${k}}; add it to scripts/validate-graphql.mjs`);
-        return subs[k];
-      });
+      const doc = expand(raw);
       count++;
       const errors = validate(schema, parse(doc));
       if (errors.length) {

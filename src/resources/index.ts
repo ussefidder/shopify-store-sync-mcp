@@ -5,6 +5,7 @@ import { metafieldDefinitions } from "./metafieldDefinitions.js";
 import { metaobjectDefinitions } from "./metaobjectDefinitions.js";
 import { metaobjects } from "./metaobjects.js";
 import { pages } from "./pages.js";
+import { products } from "./products.js";
 import { redirects } from "./redirects.js";
 import { shopPolicies } from "./shopPolicies.js";
 import { translations } from "./translations.js";
@@ -14,6 +15,7 @@ import { RESOURCE_KINDS, type ResourceAdapter, type ResourceKind } from "./types
 export const ADAPTERS: Record<ResourceKind, ResourceAdapter> = {
   metafield_definitions: metafieldDefinitions,
   metaobject_definitions: metaobjectDefinitions,
+  products,
   collections,
   pages,
   shop_policies: shopPolicies,

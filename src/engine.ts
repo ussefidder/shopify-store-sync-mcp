@@ -18,6 +18,8 @@ export interface Scope {
   metaobjectTypes?: string[];
   namespaces?: string[];
   locales?: string[];
+  /** Copy variant prices too (products). */
+  prices?: boolean;
   include?: string[];
   exclude?: string[];
 }
@@ -51,7 +53,7 @@ export class Engine {
   }
 
   static fetchOptions(scope: Scope): FetchOptions {
-    return { ownerTypes: scope.ownerTypes, metaobjectTypes: scope.metaobjectTypes, namespaces: scope.namespaces, locales: scope.locales };
+    return { ownerTypes: scope.ownerTypes, metaobjectTypes: scope.metaobjectTypes, namespaces: scope.namespaces, locales: scope.locales, prices: scope.prices };
   }
 
   /** Languages present in a snapshot's translations. */
@@ -113,7 +115,13 @@ export class Engine {
       skipped,
       files: a.files,
       resolver: new RefToGidResolver(t),
+      fetchOptions: Engine.fetchOptions(scope),
     });
+    const newProducts = plan.ops.filter((o) => o.kind === "products" && o.action === "create").length;
+    if (newProducts) plan.warnings.push(`${newProducts} new product(s) will be created as drafts; publish them in ${t.store.alias} when they're ready.`);
+    if (plan.ops.some((o) => o.kind === "products" && o.action !== "conflict") && !scope.prices) {
+      plan.warnings.push("Prices are not copied (new variants start at 0.00 in the draft). Pass prices: true (--with-prices) to copy them.");
+    }
     if (plan.ops.some((o) => o.kind === "translations")) {
       const enabled = new Set(
         (await t.request<{ shopLocales: { locale: string }[] }>(`query { shopLocales { locale } }`)).shopLocales.map((l) => l.locale),

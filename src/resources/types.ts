@@ -5,6 +5,7 @@ import type { GidToRefMapper, RefToGidResolver } from "../refs.js";
 export const RESOURCE_KINDS = [
   "metafield_definitions",
   "metaobject_definitions",
+  "products",
   "collections",
   "pages",
   "shop_policies",
@@ -17,8 +18,9 @@ export const RESOURCE_KINDS = [
 
 export type ResourceKind = (typeof RESOURCE_KINDS)[number];
 
-/** Read by default. metafields and translations can be large, so they are opt-in. */
-export const DEFAULT_KINDS: readonly ResourceKind[] = RESOURCE_KINDS.filter((k) => k !== "metafields" && k !== "translations");
+/** Read by default. products, metafields and translations can be large, so they are opt-in. */
+export const OPT_IN_KINDS: readonly ResourceKind[] = ["products", "metafields", "translations"];
+export const DEFAULT_KINDS: readonly ResourceKind[] = RESOURCE_KINDS.filter((k) => !OPT_IN_KINDS.includes(k));
 
 /** A resource as fetched from a store. `data` is what gets compared and copied. */
 export interface Item {
@@ -38,6 +40,8 @@ export interface FetchOptions {
   namespaces?: string[];
   /** Locales to read translations for. Default: every non-primary locale of the store. */
   locales?: string[];
+  /** Include variant prices and compare-at prices (products kind). Off by default: prices usually differ per store. */
+  prices?: boolean;
 }
 
 export interface FetchResult {
