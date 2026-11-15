@@ -28,6 +28,12 @@
 </p>
 
 <p align="center">
+  <img src="docs/images/explainer.gif" alt="One-minute walkthrough: install Shopify CLI, connect two stores, describe them in stores.json, then compare, plan and apply from the terminal, or ask an AI assistant" width="100%">
+</p>
+
+<sub>Install and first sync in one minute. Every command output shown is real, from two sample stores. <a href="docs/explainer.mp4">Watch it as a video</a>.</sub>
+
+<p align="center">
   <img src="docs/images/demo.png" alt="diff_stores, plan_sync and apply_plan output: 6 created, 3 updated, 1 conflict skipped, protected store refused until a person confirms" width="100%">
 </p>
 

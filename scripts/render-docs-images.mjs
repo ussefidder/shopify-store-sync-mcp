@@ -354,7 +354,7 @@ const colorLine = (line) => {
   return l;
 };
 const block = (c) => `<div class="cmd"><span class="ps">$</span> ${esc(c.cmd)}</div><pre>${c.output.split("\n").map(colorLine).join("\n")}</pre>`;
-render("cli", 1280, 860, `
+render("cli", 1280, 950, `
 <div class="wrap"><div class="term card">
   <div class="bar"><span class="d" style="background:#f47067"></span><span class="d" style="background:#e3b341"></span><span class="d" style="background:#57c26e"></span><span class="title mono muted">terminal</span></div>
   <div class="body mono">${block(cli.diff)}${block(cli.plan)}${block(cli.themes)}</div>
@@ -368,7 +368,7 @@ render("cli", 1280, 860, `
   .body { padding: 18px 22px; font-size: 13.5px; line-height: 1.55; }
   .cmd { color: #e6edf3; margin-top: 6px; }
   .ps { color: #57c26e; }
-  pre { font-family: inherit; color: #c9d4df; margin: 4px 0 16px; white-space: pre; }
+  pre { font-family: inherit; color: #c9d4df; margin: 4px 0 16px; white-space: pre-wrap; }
   .foot { font-size: 12px; text-align: right; padding-top: 10px; }
 `);
 

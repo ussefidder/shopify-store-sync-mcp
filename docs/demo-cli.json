@@ -1,4 +1,26 @@
 {
+  "quick": {
+    "diff": {
+      "cmd": "shopify-store-sync-mcp diff dev eu",
+      "output": "metafield_definitions    +0 ~0 only in target 0 = 0\nmetaobject_definitions   +0 ~0 only in target 0 = 0\ncollections              +1 ~0 only in target 0 = 1\n  + new-in\npages                    +1 ~1 only in target 0 = 0\n  + care-guide\n  ~ shipping body\nshop_policies            +0 ~1 only in target 0 = 0\n  ~ REFUND_POLICY body\nmetaobjects              +0 ~0 only in target 0 = 0\nmenus                    +0 ~0 only in target 0 = 0\nredirects                +1 ~0 only in target 0 = 0\n  + /summer-sale",
+      "exit": 0
+    },
+    "plan": {
+      "cmd": "shopify-store-sync-mcp plan dev eu",
+      "output": "Plan <plan-id>  dev -> eu (my-brand-eu.myshopify.com)\n3 create · 2 update · 0 conflict\n\n   1 + collections            new-in \n   2 + pages                  care-guide \n   3 ~ pages                  shipping body\n   4 ~ shop_policies          REFUND_POLICY body\n   5 + redirects              /summer-sale \n\n! 1 new page(s) will be visible in eu as soon as created, because they are published in the source. Pass as_drafts: true (--as-drafts) to create them hidden instead.\n\n! 1 new collection(s) will not be published to any sales channel; publish them in eu when they're ready.\n\nNothing written yet. Apply with: shopify-store-sync-mcp apply <plan-id>",
+      "exit": 0
+    },
+    "apply": {
+      "cmd": "shopify-store-sync-mcp apply <plan-id> --confirm my-brand-eu.myshopify.com",
+      "output": "✓ created  collections            new-in\n✓ created  pages                  care-guide\n✓ updated  pages                  shipping\n✓ updated  shop_policies          REFUND_POLICY\n✓ created  redirects              /summer-sale\n\napplied: 5 written",
+      "exit": 0
+    },
+    "again": {
+      "cmd": "shopify-store-sync-mcp diff dev eu --exit-code",
+      "output": "metafield_definitions    +0 ~0 only in target 0 = 0\nmetaobject_definitions   +0 ~0 only in target 0 = 0\ncollections              +0 ~0 only in target 0 = 2\npages                    +0 ~0 only in target 0 = 2\nshop_policies            +0 ~0 only in target 0 = 1\nmetaobjects              +0 ~0 only in target 0 = 0\nmenus                    +0 ~0 only in target 0 = 0\nredirects                +0 ~0 only in target 0 = 1",
+      "exit": 0
+    }
+  },
   "diff": {
     "cmd": "shopify-store-sync-mcp diff dev eu --resources pages,collections,shop_policies,redirects,translations",
     "output": "pages                    +1 ~1 only in target 0 = 0\n  + care-guide\n  ~ shipping body\ncollections              +1 ~0 only in target 0 = 1\n  + new-in\nshop_policies            +0 ~1 only in target 0 = 0\n  ~ REFUND_POLICY body\nredirects                +1 ~0 only in target 0 = 0\n  + /summer-sale\ntranslations             +1 ~0 only in target 0 = 0\n  + fr:Page/shipping",
@@ -6,7 +28,7 @@
   },
   "plan": {
     "cmd": "shopify-store-sync-mcp plan dev eu --resources pages,collections,shop_policies,redirects,translations",
-    "output": "Plan <plan-id>  dev -> eu (eu.myshopify.com)\n4 create · 2 update · 0 conflict\n\n   1 + collections            new-in \n   2 + pages                  care-guide \n   3 ~ pages                  shipping body\n   4 ~ shop_policies          REFUND_POLICY body\n   5 + redirects              /summer-sale \n   6 + translations           fr:Page/shipping \n\nNothing written yet. Apply with: shopify-store-sync-mcp apply <plan-id>",
+    "output": "Plan <plan-id>  dev -> eu (my-brand-eu.myshopify.com)\n4 create · 2 update · 0 conflict\n\n   1 + collections            new-in \n   2 + pages                  care-guide \n   3 ~ pages                  shipping body\n   4 ~ shop_policies          REFUND_POLICY body\n   5 + redirects              /summer-sale \n   6 + translations           fr:Page/shipping \n\n! 1 new page(s) will be visible in eu as soon as created, because they are published in the source. Pass as_drafts: true (--as-drafts) to create them hidden instead.\n\n! 1 new collection(s) will not be published to any sales channel; publish them in eu when they're ready.\n\nNothing written yet. Apply with: shopify-store-sync-mcp apply <plan-id>",
     "exit": 0
   },
   "themes": {

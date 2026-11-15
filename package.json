@@ -26,7 +26,8 @@
     "docs:images": "node scripts/render-docs-images.mjs",
     "lint": "eslint .",
     "coverage": "vitest run --coverage",
-    "check": "npm run typecheck && npm run lint && npm test && npm run validate:graphql"
+    "check": "npm run typecheck && npm run lint && npm test && npm run validate:graphql",
+    "docs:video": "node scripts/render-explainer.mjs"
   },
   "keywords": [
     "mcp",

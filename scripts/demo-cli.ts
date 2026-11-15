@@ -27,7 +27,7 @@ const collection = (id: string, handle: string, title: string, smart: boolean) =
   ruleSet: smart ? { appliedDisjunctively: false, rules: [{ column: "TAG", relation: "EQUALS", condition: handle, conditionObject: null }] } : null,
 });
 
-const dev = new FakeShop(FakeShop.config("dev"), {
+const dev = new FakeShop(FakeShop.config("dev", { domain: "my-brand-dev.myshopify.com" }), {
   shopLocales: [
     { locale: "en", primary: true },
     { locale: "fr", primary: false },
@@ -51,7 +51,7 @@ const dev = new FakeShop(FakeShop.config("dev"), {
   ],
 });
 
-const eu = new FakeShop(FakeShop.config("eu", { protected: true }), {
+const eu = new FakeShop(FakeShop.config("eu", { domain: "my-brand-eu.myshopify.com", protected: true }), {
   shopLocales: [
     { locale: "en", primary: true },
     { locale: "fr", primary: false },
@@ -97,9 +97,25 @@ const walk = (d: string): string[] =>
 const tree = walk(dir);
 const sample = readFileSync(join(dir, "translations", "fr_Page_shipping.json"), "utf8");
 
+// The short session shown in the explainer video: default resources, then a real apply. Runs last, since it writes to eu.
+const anyId = (t: string) => t.replace(/[0-9a-f-]{36}/g, "<plan-id>");
+const quickDiff = await capture(["diff", "dev", "eu"]);
+const quickPlan = await capture(["plan", "dev", "eu"]);
+const planId = engine.plans.list().sort((x, y) => y.createdAt.localeCompare(x.createdAt))[0]!.id;
+// eu is a protected store here, so the person confirms with its domain.
+const quickApply = await capture(["apply", planId, "--confirm", "my-brand-eu.myshopify.com"]);
+const quickAgain = await capture(["diff", "dev", "eu", "--exit-code"]);
+const quick = {
+  diff: quickDiff,
+  plan: { ...quickPlan, output: anyId(quickPlan.output) },
+  apply: { ...quickApply, cmd: anyId(quickApply.cmd), output: anyId(quickApply.output) },
+  again: quickAgain,
+};
+
 console.log(
   JSON.stringify(
     {
+      quick,
       diff,
       plan: { ...plan, output: plan.output.replace(/[0-9a-f-]{36}/g, "<plan-id>") },
       themes,
