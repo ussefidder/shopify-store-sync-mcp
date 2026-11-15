@@ -141,9 +141,11 @@ describe("Shopify CLI sign-in", () => {
   it("connect runs store auth with the right scopes, then checks the sign-in", async () => {
     const dir = tmp("fake-cli-");
     const log = join(dir, "calls.log");
-    const bin = join(dir, "shopify");
+    const script = join(dir, "fake-shopify.js");
+    const bin = process.platform === "win32" ? join(dir, "shopify.cmd") : join(dir, "shopify");
+    if (process.platform === "win32") writeFileSync(bin, `@node "${script}" %*\r\n`);
     writeFileSync(
-      bin,
+      process.platform === "win32" ? script : bin,
       `#!/usr/bin/env node
 const fs = require("fs");
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)) + "\\n");
