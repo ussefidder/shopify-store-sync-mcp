@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { collectRefs, UNRESOLVED_PREFIX } from "./refs.js";
-import type { Item, ResourceKind } from "./resources/index.js";
+import { ADAPTERS, type Item, type ResourceKind } from "./resources/index.js";
 
 export interface FieldChange {
   path: string;
@@ -111,7 +111,9 @@ export function diffItems(kind: ResourceKind, source: Item[], target: Item[], fi
       result.onlyInSource.push(s);
       continue;
     }
-    const changes = diffValues(s.data, t.data);
+    // Content kept on purpose in the target (this tool never deletes) is set aside before comparing.
+    const align = ADAPTERS[kind]?.alignTarget;
+    const changes = diffValues(s.data, align ? align(s.data, t.data) : t.data);
     if (changes.length) result.changed.push({ key, source: s, target: t, changes });
     else result.identical++;
   }

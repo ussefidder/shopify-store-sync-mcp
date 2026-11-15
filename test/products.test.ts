@@ -118,13 +118,8 @@ describe("products", () => {
     const engine = engineFor(dev, eu);
     const plan = await engine.plan("dev", "eu", { resources: ["products"] });
     expect(plan.ops.map((o) => `${o.action} ${o.key}`)).toEqual(["update linen-shirt"]);
-    expect(plan.ops[0]!.changes!.map((c) => c.path)).toEqual([
-      "images",
-      "options[0].values[2]",
-      "title",
-      "variants[2].options.Color",
-      "variants[2].sku",
-    ]);
+    // The target's own image and its Black variant aren't differences: they're kept.
+    expect(plan.ops[0]!.changes!.map((c) => c.path)).toEqual(["options[0].values[2]", "title", "variants"]);
     const { results } = await engine.apply(plan.id);
     expect(results.map((r) => r.outcome)).toEqual(["updated"]);
 
@@ -139,6 +134,9 @@ describe("products", () => {
     ]);
     expect(p.options![0]!.values).toEqual(["Sand", "Navy", "Olive", "Black"]);
     expect(p.media).toEqual(["gid://shopify/MediaImage/900"]);
+
+    // What the target keeps on its own isn't a difference: the next plan has nothing to do.
+    expect((await engine.plan("dev", "eu", { resources: ["products"] })).ops).toEqual([]);
   });
 
   it("reports products whose options are named differently as a conflict", async () => {

@@ -86,7 +86,8 @@ function printDiff(diffs: ResourceDiff[], values: boolean) {
     for (const i of d.onlyInSource) console.log(`  ${green("+")} ${i.key}`);
     for (const ch of d.changed) {
       console.log(`  ${yellow("~")} ${ch.key} ${dim(ch.changes.map((x) => x.path).join(", "))}`);
-      if (values) for (const x of ch.changes) console.log(`      ${dim(x.path)}  ${red(String(preview(x.target, 80)))}  ->  ${green(String(preview(x.source, 80)))}`);
+      const show = (v: unknown) => { const p = preview(v, 80); return typeof p === "string" ? p : JSON.stringify(p); };
+      if (values) for (const x of ch.changes) console.log(`      ${dim(x.path)}  ${red(show(x.target))}  ->  ${green(show(x.source))}`);
     }
     for (const i of d.onlyInTarget) console.log(`  ${blue("·")} ${i.key} ${dim("(only in target, never deleted)")}`);
   }

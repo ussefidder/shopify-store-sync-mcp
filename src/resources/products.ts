@@ -245,6 +245,38 @@ async function set(client: AdminClient, d: Record<string, unknown>, create: bool
   return res.productSet.product.id;
 }
 
+/** True when `list` begins with every item of `prefix`, in order. */
+function startsWith(list: unknown[], prefix: unknown[]): boolean {
+  return prefix.length <= list.length && prefix.every((p, i) => JSON.stringify(p) === JSON.stringify(list[i]));
+}
+
+/**
+ * The target product as the source would see it: variants, images and option values that only the
+ * target has are kept by every update, so they don't count as differences.
+ */
+export function alignProduct(source: Record<string, unknown>, target: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...target };
+  const sImages = (source.images as unknown[]) ?? [];
+  const tImages = (target.images as unknown[]) ?? [];
+  if (startsWith(tImages, sImages)) out.images = sImages.length ? tImages.slice(0, sImages.length) : undefined;
+
+  const sOptions = (source.options as { name: string; values: string[] }[]) ?? [];
+  const tOptions = (target.options as { name: string; values: string[] }[]) ?? [];
+  out.options = tOptions.map((t) => {
+    const s = sOptions.find((o) => o.name === t.name);
+    return s && startsWith(t.values, s.values) ? { ...t, values: t.values.slice(0, s.values.length) } : t;
+  });
+
+  const sVariants = (source.variants as Variant[]) ?? [];
+  const tVariants = (target.variants as Variant[]) ?? [];
+  const sKeys = new Set(sVariants.map((v) => variantKey(v.options)));
+  const kept = tVariants.filter((v) => sKeys.has(variantKey(v.options)));
+  const order = new Map(sVariants.map((v, i) => [variantKey(v.options), i]));
+  out.variants = kept.sort((a, b) => order.get(variantKey(a.options))! - order.get(variantKey(b.options))!);
+  if (out.images === undefined) delete out.images;
+  return out;
+}
+
 export const products: ResourceAdapter = {
   kind: "products",
   description:
@@ -274,6 +306,10 @@ export const products: ResourceAdapter = {
 
   refFor(key) {
     return `${REF_PREFIX}Product/${key}`;
+  },
+
+  alignTarget(source, target) {
+    return alignProduct(source, target);
   },
 
   create: ({ client }, _key, d) => set(client, d, true),

@@ -81,4 +81,9 @@ export interface ResourceAdapter {
    * When it doesn't exist in the target the op can't succeed, so the plan reports a conflict.
    */
   ownerRef?(data: Record<string, unknown>): string | undefined;
+  /**
+   * Optional: the target's data with what an update would keep anyway (because nothing is ever
+   * deleted) set aside, so an item already in line with the source compares as identical.
+   */
+  alignTarget?(source: Record<string, unknown>, target: Record<string, unknown>): Record<string, unknown>;
 }
