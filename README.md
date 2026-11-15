@@ -115,7 +115,7 @@ Each `connect` opens Shopify in your browser; click **Install** to approve. It a
 { "stores": { "my-dev-store": { "domain": "my-dev-store.myshopify.com", "auth": "shopify-cli" } } }
 ```
 
-Requests then run through `shopify store execute`, Shopify CLI's supported command, using the sign-in it saved. That sign-in belongs to you and expires after a while; when it does, the tool says so and you run `connect` again. Because of that, use one of the options below for scheduled or unattended runs.
+Requests then run through `shopify store execute`, Shopify CLI's supported command, using the sign-in it saved. Each request starts Shopify CLI (about a second), so a full diff takes tens of seconds instead of one or two with an app. That sign-in belongs to you and expires after a while; when it does, the tool says so and you run `connect` again. Because of that, use one of the options below for scheduled or unattended runs.
 
 **Option 2: a Dev Dashboard app (best for automation on your own or your organization's stores).** One app covers every store in the same Shopify organization, and tokens are fetched and refreshed for you.
 
@@ -319,7 +319,7 @@ Two references followed from the source store to the target, as the sample sync 
 
 ## Tested against live stores
 
-Besides the 49 automated tests, every feature has been run end to end between two real Shopify development stores (a Shopify Plus source and a second store as target), through the real command line and the real MCP server over stdio, authenticating with a Dev Dashboard app and the client-credentials grant:
+Besides the 60 automated tests, every feature has been run end to end between two real Shopify development stores (a Shopify Plus source and a second store as target), through the real command line and the real MCP server over stdio, authenticating with a Dev Dashboard app and the client-credentials grant:
 
 | Feature | Live result |
 |---|---|
@@ -334,7 +334,7 @@ Besides the 49 automated tests, every feature has been run end to end between tw
 | Theme settings diff | read-only, 15 files compared in about 1 second |
 | Safety: write to a read-only store | refused |
 | Safety: target edited after the plan was made | step skipped, nothing overwritten |
-| Shopify CLI sign-in (`connect`) | Shopify's consent screen accepts every scope the tool needs, writes included; error handling (no sign-in, CLI missing) checked against Shopify CLI 5.0.1 |
+| Shopify CLI sign-in on Windows (CLI 4.9.4), both stores | `connect` read-only and `--writes`; plan, apply (7 creates incl. file upload and translation), update and re-diff all exact; also through the MCP server over stdio |
 
 Behaviours of the live API found this way are covered by tests: `nodes` returns `null` for customer account pages (they're looked up by listing instead), `ShopPolicy.type` has to be aliased next to `Metaobject.type`, Shopify refuses edits to auto-managed policies, and a failed token request carries its reason (such as `app_not_installed`) in an HTML page.
 

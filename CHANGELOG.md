@@ -5,6 +5,9 @@
 - Connect a store without creating an app: `connect <store>` signs in through Shopify CLI (`shopify store auth`) in the browser, and `"auth": "shopify-cli"` in `stores.json` sends requests through `shopify store execute`
 - Read-only scopes are requested unless the store allows writes (or `--writes` is passed)
 - Clear messages when Shopify CLI is missing or the sign-in has expired
+- Works with Shopify CLI 4.9 and 5.x output, on Windows too; `stores.json` saved with a byte order mark is accepted
+- Faster everywhere: resource types, both stores, metafield definition owner types, translations and reference lookups are read in parallel (a full diff with an app went from about 10 to 2 seconds)
+- Tested end to end on Windows between two live stores, through the CLI and the MCP server
 
 ## 0.2.1
 
