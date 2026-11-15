@@ -490,21 +490,47 @@ Adding a resource type means writing one adapter (`fetch`, `create`, `update`) i
 </details>
 
 <details>
-<summary><b>Roadmap</b></summary>
+<summary><b>Roadmap: what's shipped and what's next</b></summary>
 
-- [x] Translations per locale
-- [x] File references, re-uploaded by URL
-- [x] Collections with smart-collection rules
-- [x] Shop policies, and metafield values on products and collections
-- [x] Snapshots as files, for git-tracked store config
-- [x] Command line
+**Shipped**
+
+*Syncing*
+- [x] Metafield definitions, metaobject definitions and metaobject entries
+- [x] Collections with smart-collection rules, pages, menus (3 levels, customer account menus too), redirects, store policies
+- [x] Metafield values on products and collections, translations per language (opt-in)
+- [x] Images and files matched by file name, uploaded to the target when missing
+- [x] Cross-store ID remapping by handle, including list references and rules on metafield definitions
+- [x] Two-pass writes for items that point at each other or at themselves
+- [x] Filters: resource types, include and exclude patterns, namespaces, metaobject types, owner types, languages
+
+*Safety*
+- [x] Dry-run plans that expire after an hour, applied in full or step by step (`--only`)
+- [x] Drift check before every write, never deletes, read-only by default, typed confirmation for protected stores
+- [x] Conflicts reported instead of forced (type changes, manual versus smart collections, values on items missing from the target)
+- [x] Audit log of every write
+
+*Ways to use it*
+- [x] MCP server with 9 tools, read-only tools annotated for auto-approval
+- [x] Command line with `--json` output and `--exit-code` for scheduled drift checks
+- [x] Config as code: export a store to files and use the folder as a source (`dir:`)
 - [x] Read-only theme settings diff
-- [x] Connect without creating an app (Shopify CLI sign-in)
-- [x] Published on npm
+- [x] Connect without creating an app (Shopify CLI sign-in), or with a Dev Dashboard app or an access token
+- [x] Published on npm, runs with `npx`
+
+*Quality*
+- [x] 60 automated tests against an in-memory Shopify, plus MCP protocol tests
+- [x] Every GraphQL operation validated against Shopify's schema for 2026-04, 2026-10 and 2027-01
+- [x] Tested live between two stores on Linux and Windows, Shopify CLI 4.9 and 5
+- [x] Parallel reads with throttle-aware retries; clear errors for missing installs, expired sign-ins and auto-managed policies
+
+**Next**
 - [ ] Move collection rules to Shopify's new `sources` model (`ruleSet` is deprecated but supported through 2027-01)
+- [ ] Remap product variants and blog articles, so references to them sync too
+- [ ] Metafield values on variants, pages, blogs and the shop
 - [ ] Menu item (link) translations
-- [ ] Metafield values on variants, pages and the shop
 - [ ] Markets and market web presences
+- [ ] Bulk operations for very large stores
+- [ ] Undo: restore the previous values of an applied plan from the audit log
 - [ ] Optional deletes, behind an explicit flag
 
 Ideas and PRs are welcome. Issues tagged `good first issue` are a good place to start.
