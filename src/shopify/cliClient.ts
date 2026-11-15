@@ -120,7 +120,13 @@ export function parseCliOutput(text: string): CliOutput | undefined {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/** At most this many `shopify` processes run at once per store. */
+export const CLI_CONCURRENCY = 4;
+
 export class ShopifyCliClient implements AdminClient {
+  private active = 0;
+  private readonly queue: (() => void)[] = [];
+
   constructor(
     readonly store: StoreConfig,
     private readonly run: Runner = defaultRunner,
@@ -130,6 +136,17 @@ export class ShopifyCliClient implements AdminClient {
   ) {}
 
   async request<T = any>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
+    if (this.active >= CLI_CONCURRENCY) await new Promise<void>((r) => this.queue.push(r));
+    this.active++;
+    try {
+      return await this.execute<T>(query, variables);
+    } finally {
+      this.active--;
+      this.queue.shift()?.();
+    }
+  }
+
+  private async execute<T>(query: string, variables: Record<string, unknown>): Promise<T> {
     const dir = mkdtempSync(join(tmpdir(), "store-sync-cli-"));
     try {
       const queryFile = join(dir, "query.graphql");

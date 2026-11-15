@@ -21,11 +21,12 @@ export async function takeSnapshot(client: AdminClient, kinds: readonly Resource
   const mapper = new GidToRefMapper(client);
   const resources: Snapshot["resources"] = {};
 
-  for (const kind of orderKinds(kinds)) {
-    const { items, skipped } = await ADAPTERS[kind].fetch(client, opts, mapper);
-    const gids = new Set<string>();
-    for (const item of items) for (const g of collectGids(item.data)) gids.add(g);
-    await mapper.load(gids);
+  // Read every resource type at once; the requests are independent.
+  const fetched = await Promise.all(orderKinds(kinds).map(async (kind) => ({ kind, ...(await ADAPTERS[kind].fetch(client, opts, mapper)) })));
+  const gids = new Set<string>();
+  for (const f of fetched) for (const item of f.items) for (const g of collectGids(item.data)) gids.add(g);
+  await mapper.load(gids);
+  for (const { kind, items, skipped } of fetched) {
     resources[kind] = {
       items: items.map((i) => ({ ...i, data: mapper.map(i.data) })),
       skipped,

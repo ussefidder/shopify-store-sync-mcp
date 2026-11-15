@@ -76,16 +76,27 @@ export class Engine {
     return { snapshot, diffs };
   }
 
+  private emptySnapshot(spec: string): Snapshot {
+    const store = isDirSpec(spec) ? undefined : this.registry.get(spec);
+    return { store: store?.alias ?? spec, domain: store?.domain ?? spec, takenAt: new Date().toISOString(), resources: {}, files: {} };
+  }
+
   async compare(source: string, target: string, scope: Scope) {
     if (source === target) throw new Error("source and target must be different");
     const kinds = Engine.kinds(scope);
-    const a = await this.load(source, scope);
-    // Read the target's translations in the source's languages, so both sides are comparable.
-    const targetScope =
-      kinds.includes("translations") && !scope.locales?.length
-        ? { ...scope, locales: Engine.locales(a) }
-        : scope;
-    const b = await this.load(target, targetScope);
+    // Read both stores at once. The target's translations are read afterwards, in the
+    // source's languages, so both sides are comparable.
+    const laterTranslations = kinds.includes("translations") && !scope.locales?.length;
+    const firstKinds = laterTranslations ? kinds.filter((k) => k !== "translations") : kinds;
+    const [a, b] = await Promise.all([
+      this.load(source, scope),
+      firstKinds.length ? this.load(target, { ...scope, resources: firstKinds }) : Promise.resolve(this.emptySnapshot(target)),
+    ]);
+    if (laterTranslations) {
+      const t = await this.load(target, { ...scope, resources: ["translations"], locales: Engine.locales(a) });
+      b.resources.translations = t.resources.translations;
+      Object.assign(b.files, t.files);
+    }
     const diffs = kinds.map((k) => diffItems(k, a.resources[k]?.items ?? [], b.resources[k]?.items ?? [], Engine.filter(scope)));
     const skipped = kinds.flatMap((k) => (a.resources[k]?.skipped ?? []).map((x) => ({ kind: k, ...x })));
     return { source: a, target: b, diffs, skipped };

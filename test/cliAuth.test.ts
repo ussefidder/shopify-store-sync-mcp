@@ -90,6 +90,21 @@ describe("Shopify CLI sign-in", () => {
     );
   });
 
+  it("runs at most a few CLI processes at once", async () => {
+    let running = 0;
+    let peak = 0;
+    const run: Runner = async () => {
+      running++;
+      peak = Math.max(peak, running);
+      await new Promise((r) => setTimeout(r, 5));
+      running--;
+      return { code: 0, stdout: JSON.stringify({ data: { ok: true } }), stderr: "" };
+    };
+    const client = new ShopifyCliClient(cliStore("dev"), run, "shopify");
+    await Promise.all(Array.from({ length: 12 }, () => client.request("query { shop { name } }")));
+    expect(peak).toBe(4);
+  });
+
   it("retries throttled requests", async () => {
     let n = 0;
     const run: Runner = async () =>
