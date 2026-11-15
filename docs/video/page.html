@@ -129,6 +129,13 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+/*
+ * Sound cues. The same calls that place things on screen also say when they happen, so the sound
+ * design (sound.py) is cut to the picture without a second list of timings to keep in step.
+ */
+let REC = null;
+const cue = (kind, at, more = {}) => { if (REC) REC.push({ kind, at: Math.round(at * 1000) / 1000, ...more }); };
+
 /** Fade and slide an element in: k goes 0 to 1. */
 function enter(el, k, { y = 34, x = 0, from = 1 } = {}) {
   if (!el) return;
@@ -136,8 +143,9 @@ function enter(el, k, { y = 34, x = 0, from = 1 } = {}) {
   el.style.transform = `translate(${x * (1 - k)}px, ${y * (1 - k)}px) scale(${from + (1 - from) * k})`;
 }
 /** Pop in with a little overshoot. */
-function pop(el, t, start, dur = 0.45) {
+function pop(el, t, start, dur = 0.45, sound = "pop") {
   if (!el) return;
+  if (sound) cue(sound, start);
   const k = clamp((t - start) / dur);
   el.style.opacity = clamp(k * 2.2);
   el.style.transform = `scale(${0.82 + 0.18 * back(k)})`;
@@ -145,6 +153,7 @@ function pop(el, t, start, dur = 0.45) {
 /** Text typed at a steady pace, with a blinking cursor while and just after typing. */
 function type(el, text, t, start, cps = 30, cursor = true) {
   if (!el) return;
+  cue("type", start, { dur: text.length / cps, cps });
   const n = Math.floor(clamp((t - start) * cps, 0, text.length));
   const typing = t >= start && n < text.length;
   const blink = Math.floor(t * 2.2) % 2 === 0;
@@ -299,6 +308,8 @@ const DRAW = {
     const [a, b, c] = s.lines.map((l) => l.start);
     enter($("#p-h"), prog(t, s.start + 0.1, 0.6));
     enter($("#p-dev"), prog(t, a - 0.1, 0.6), { y: 50 });
+    cue("swish", a - 0.1);
+    cue("swish", b - 0.25);
     $$("#p-dev .it").forEach((el, i) => enter(el, prog(t, a + 0.25 + i * 0.16, 0.45), { x: -30, y: 0 }));
     enter($("#p-eu"), prog(t, b - 0.25, 0.6), { y: 50 });
     $$("#p-eu .it").forEach((el, i) => enter(el, prog(t, b + 0.1 + i * 0.2, 0.45), { x: 30, y: 0 }));
@@ -309,6 +320,8 @@ const DRAW = {
     type($("#a-bubble"), "Compare dev with eu, then sync what's missing.", t, a - 0.35, 24);
     enter($("#a-note"), prog(t, b + 1.3, 0.7));
     enter($("#a-diff"), prog(t, b - 0.15, 0.55), { x: 60, y: 0 });
+    cue("swish", b - 0.15);
+    cue("swish", c - 0.15);
     $$("#a-diff .dr").forEach((el, i) => enter(el, prog(t, b + 0.25 + i * 0.22, 0.4), { y: 14 }));
     enter($("#a-plan"), prog(t, c - 0.15, 0.55), { x: 60, y: 0 });
     $$("#a-plan .po").forEach((el, i) => enter(el, prog(t, c + 0.45 + i * 0.2, 0.4), { y: 12 }));
@@ -323,6 +336,10 @@ const DRAW = {
     dialog.style.transform = `translateY(${30 * (1 - k) - 30 * gone}px) scale(${0.94 + 0.06 * back(clamp((t - a + 0.1) / 0.5)) - 0.04 * gone})`;
     const typedAt = type($("#y-field"), EU, t, a + 1.6, 22);
     const press = clamp((t - typedAt - 0.25) / 0.25);
+    cue("dialog", a - 0.1);
+    cue("press", typedAt + 0.36);
+    cue("swish", b - 0.15);
+    cue("swish", c - 0.25);
     $("#y-field").style.borderColor = t > typedAt ? "#57c26e" : "#3a4656";
     $("#y-go").style.transform = `scale(${1 - 0.08 * Math.sin(Math.PI * press)})`;
     $("#y-go").style.filter = `brightness(${1 + 0.35 * Math.sin(Math.PI * press)})`;
@@ -337,7 +354,7 @@ const DRAW = {
     rows.forEach((el, i) => {
       const at = b + 0.75 + i * 0.36;
       enter(el, prog(t, at - 0.2, 0.35), { y: 12 });
-      pop($(".tk", el), t, at, 0.35);
+      pop($(".tk", el), t, at, 0.35, "tick");
       if (t >= at + 0.1) done++;
     });
     $("#y-w").textContent = Math.round((done / rows.length) * written);
@@ -345,8 +362,8 @@ const DRAW = {
 
     const pair = prog(t, c - 0.25, 0.6);
     enter($("#y-pair"), pair, { y: 40 });
-    $$("#y-eu .it").forEach((el, i) => pop($(".tag", el), t, c + 0.15 + i * 0.12, 0.4));
-    pop($("#y-sync"), t, c + 0.75, 0.5);
+    $$("#y-eu .it").forEach((el, i) => pop($(".tag", el), t, c + 0.15 + i * 0.12, 0.4, "blip"));
+    pop($("#y-sync"), t, c + 0.75, 0.5, "success");
   },
   setup(t, s) {
     const [a, b, c, d] = s.lines.map((l) => l.start);
@@ -360,6 +377,8 @@ const DRAW = {
     type($("#u-c1"), "$ npm install -g @shopify/cli", t, b, 26, t < c);
     const end2 = type($("#u-c2"), "$ npx shopify-store-sync-mcp \\\n    connect my-brand-dev", t, c, 30, t < d);
     enter($("#u-ok2"), prog(t, end2 + 0.5, 0.4), { y: 10 });
+    cue("swish", a + 0.2);
+    cue("ok", end2 + 0.5);
     $$("#s-setup .up").forEach((el, i) => pop(el, t, c + 3.4 + i * 0.75));
     const config = '"shopify-store-sync": {\n  "command": "npx",\n  "args": ["-y",\n    "shopify-store-sync-mcp"]\n}';
     type($("#u-c3"), config, t, d, 42, true);
@@ -370,6 +389,7 @@ const DRAW = {
     rows.forEach((r, i) => {
       const el = $(`#tl${i}`);
       if (r.cmd) {
+        cue("type", r.at, { dur: r.cmd.length / CPS, cps: CPS });
         const n = Math.floor(clamp((t - r.at) * CPS, 0, r.cmd.length));
         const cur = t >= r.at - 0.3 && n < r.cmd.length ? '<span class="cursor" style="width:12px"></span>' : "";
         el.innerHTML = t >= r.at - 0.3 ? `<span class="g">$</span> <span style="color:#e6edf3">${esc(r.cmd.slice(0, n))}</span>${cur}` : "";
@@ -385,7 +405,7 @@ const DRAW = {
       scroll = Math.max(scroll, y * prog(t, (r.cmd ? r.at - 0.3 : r.at) - 0.05, 0.35, inOut));
     });
     $("#t-lines").style.transform = `translateY(${-scroll}px)`;
-    pop($("#t-exit"), t, s.exitAt + 0.15, 0.5);
+    pop($("#t-exit"), t, s.exitAt + 0.15, 0.5, "ok");
   },
   coverage(t, s) {
     const l = s.lines[0];
@@ -396,7 +416,7 @@ const DRAW = {
   safety(t, s) {
     const l = s.lines[0];
     const at = [l.start + 1.75, l.start + 3.2, l.start + 4.9];
-    $$("#s-safety .sb").forEach((el, i) => pop(el, t, Math.min(at[i], l.end - 0.6), 0.55));
+    $$("#s-safety .sb").forEach((el, i) => pop(el, t, Math.min(at[i], l.end - 0.6), 0.55, "card"));
   },
   cta(t, s) {
     const l = s.lines[0];
@@ -411,6 +431,16 @@ window.setup = (data) => {
   T = data.timeline;
   build();
   return T.total;
+};
+
+/** Every sound cue in the video, in order. Drawing each scene once is enough to collect them. */
+window.cues = () => {
+  REC = [];
+  for (const s of Object.values(SCENES)) DRAW[s.id](s.start + 0.01, s);
+  for (const s of T.scenes.slice(1)) cue(s.id === "cta" ? "swell" : "whoosh", s.start);
+  const all = REC.sort((x, y) => x.at - y.at);
+  REC = null;
+  return all;
 };
 
 window.seek = (t) => {
