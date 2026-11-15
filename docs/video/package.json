@@ -1,0 +1,12 @@
+{
+  "name": "shopify-store-sync-mcp-video",
+  "private": true,
+  "type": "module",
+  "description": "Builds docs/explainer.mp4. Kept apart from the package so the tool itself needs none of this.",
+  "scripts": {
+    "render": "node render.mjs"
+  },
+  "dependencies": {
+    "puppeteer-core": "^25.17.0"
+  }
+}

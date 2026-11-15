@@ -8,3 +8,5 @@ coverage/
 # Real store configs hold credentials
 stores.json
 !stores.example.json
+# Explainer video build output
+docs/video/build/

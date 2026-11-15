@@ -1,0 +1,443 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: #0b0f14; }
+  body { font-family: Inter, system-ui, sans-serif; color: #e6edf3; -webkit-font-smoothing: antialiased; }
+  .mono { font-family: "DejaVu Sans Mono", ui-monospace, monospace; }
+  .g { color: #57c26e; } .a { color: #e3b341; } .r { color: #f47067; } .b { color: #6cb6ff; } .muted { color: #8b98a8; }
+  #stage { position: absolute; inset: 0; background: radial-gradient(1500px 800px at 0% 0%, #14232e 0%, #0b0f14 62%); }
+  #glow { position: absolute; right: -300px; bottom: -380px; width: 1100px; height: 1100px; border-radius: 50%;
+          background: radial-gradient(circle, rgba(87,194,110,.17), transparent 65%); }
+  .scene { position: absolute; inset: 0; padding: 70px 100px 0; opacity: 0; will-change: opacity, transform; }
+  .eyebrow { font-size: 22px; letter-spacing: .16em; color: #57c26e; text-transform: uppercase; }
+  h1 { font-size: 76px; font-weight: 800; letter-spacing: -0.025em; line-height: 1.06; margin-top: 14px; }
+  .card { background: #11161d; border: 1px solid #243040; border-radius: 22px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 44px; margin-top: 44px; }
+
+  /* captions and progress */
+  #caption { position: absolute; left: 0; right: 0; bottom: 64px; display: flex; justify-content: center; pointer-events: none; }
+  #caption span { max-width: 1560px; text-align: center; font-size: 36px; line-height: 1.3; font-weight: 600; color: #f2f6fa;
+                  background: rgba(8,12,17,.82); border: 1px solid #263342; border-radius: 16px; padding: 14px 28px; }
+  #bar { position: absolute; left: 0; bottom: 0; height: 6px; background: #57c26e; }
+  #brand { position: absolute; right: 100px; top: 74px; font-size: 20px; color: #6b7785; }
+
+  /* store cards */
+  .store { padding: 30px 34px 26px; }
+  .store .name { display: flex; align-items: baseline; gap: 16px; margin-bottom: 18px; }
+  .store .name b { font-size: 38px; font-weight: 800; }
+  .store .name span { font-size: 21px; color: #8b98a8; }
+  .item { display: flex; align-items: center; justify-content: space-between; height: 68px; padding: 0 22px; margin-top: 12px;
+          border-radius: 14px; background: #0d1319; border: 1px solid #1f2935; font-size: 26px; }
+  .item .k { color: #8b98a8; margin-right: 14px; }
+  .tag { font-size: 19px; font-weight: 700; padding: 5px 14px; border-radius: 999px; }
+  .tag.ok { color: #0b0f14; background: #57c26e; } .tag.miss { color: #0b0f14; background: #f47067; } .tag.diff { color: #0b0f14; background: #e3b341; }
+  .item.ghost { border-style: dashed; border-color: #5a2e2c; background: rgba(244,112,103,.05); }
+  .ids { position: absolute; left: 0; right: 0; top: 842px; display: flex; justify-content: center; gap: 22px; align-items: center; font-size: 27px; }
+  .chip { background: #16202b; border: 1px solid #2a3848; border-radius: 12px; padding: 10px 18px; }
+
+  /* chat and tool cards */
+  .chat { padding: 30px; height: 640px; position: relative; }
+  .who { font-size: 20px; color: #8b98a8; margin-bottom: 16px; }
+  .bubble { display: inline-block; max-width: 100%; background: #1b2a3a; border: 1px solid #2f4862; border-radius: 22px 22px 22px 6px;
+            padding: 22px 26px; font-size: 34px; line-height: 1.4; min-height: 92px; }
+  .cursor { display: inline-block; width: 4px; height: 1em; background: #e6edf3; vertical-align: -0.14em; margin-left: 3px; }
+  .tool { padding: 22px 28px; margin-bottom: 22px; }
+  .tool .th { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; font-size: 26px; }
+  .tool .th span:last-child { font-size: 20px; }
+  .drow { display: grid; grid-template-columns: 1fr 170px 210px; font-size: 25px; padding: 7px 0; border-top: 1px solid #1c2530; white-space: nowrap; }
+  .drow span:nth-child(n+2) { text-align: right; }
+  .op { font-size: 23px; padding: 3px 0; display: grid; grid-template-columns: 40px 300px 1fr; }
+  .sum { font-size: 32px; font-weight: 800; margin: 2px 0 8px; }
+
+  /* confirm dialog */
+  .dialog { position: absolute; left: 50%; top: 256px; width: 1060px; margin-left: -530px; padding: 40px 44px; border-color: #5a4a17;
+            background: #15130c; box-shadow: 0 40px 120px rgba(0,0,0,.6); }
+  .dialog .lock { font-size: 22px; letter-spacing: .12em; color: #e3b341; text-transform: uppercase; }
+  .dialog p { font-size: 32px; line-height: 1.4; margin-top: 16px; }
+  .field { margin-top: 26px; height: 78px; border-radius: 14px; background: #0b0f14; border: 2px solid #3a4656; padding: 0 22px; display: flex; align-items: center; font-size: 30px; }
+  .btns { display: flex; justify-content: flex-end; gap: 16px; margin-top: 26px; }
+  .btn { font-size: 26px; font-weight: 700; padding: 14px 30px; border-radius: 12px; background: #1c2530; color: #c9d4df; }
+  .btn.go { background: #57c26e; color: #0b0f14; }
+  .applied { position: absolute; left: 50%; top: 246px; width: 1160px; margin-left: -580px; padding: 34px 40px; }
+  .arow { display: grid; grid-template-columns: 54px 190px 330px 1fr; font-size: 30px; padding: 12px 0; border-top: 1px solid #1c2530; align-items: center; }
+  .tick { width: 36px; height: 36px; border-radius: 50%; background: #57c26e; color: #0b0f14; font-weight: 900; font-size: 22px; display: flex; align-items: center; justify-content: center; }
+  .totals { display: flex; gap: 56px; margin-top: 22px; font-size: 30px; }
+  .totals b { font-size: 60px; font-weight: 800; display: block; line-height: 1.05; }
+  .insync { position: absolute; left: 0; right: 0; top: 850px; text-align: center; font-size: 40px; font-weight: 800; color: #57c26e; }
+
+  /* setup */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 34px; margin-top: 50px; }
+  .step { padding: 34px 34px 30px; height: 560px; position: relative; }
+  .n { width: 62px; height: 62px; border-radius: 50%; color: #0b0f14; font-weight: 800; font-size: 30px; display: flex; align-items: center; justify-content: center; }
+  .step h3 { font-size: 36px; margin: 22px 0 18px; }
+  .code { background: #0b1016; border: 1px solid #1c2530; border-radius: 14px; padding: 18px 20px; font-size: 22px; line-height: 1.6; color: #c9d4df; white-space: pre-wrap; min-height: 112px; }
+  .step .ok { font-size: 24px; margin-top: 18px; }
+  .pills { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
+  .pill { display: inline-flex; align-items: center; gap: 10px; padding: 9px 18px; border-radius: 999px; background: #16202b; border: 1px solid #263342; font-size: 22px; color: #c9d4df; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+
+  /* terminal */
+  .term { margin-top: 30px; height: 690px; overflow: hidden; position: relative; }
+  .tbar { display: flex; align-items: center; gap: 11px; height: 58px; padding: 0 24px; border-bottom: 1px solid #1c2530; background: #0c1116; }
+  .tbar i { width: 16px; height: 16px; border-radius: 50%; display: inline-block; }
+  .tbar span { margin-left: 12px; font-size: 19px; color: #8b98a8; }
+  .tview { position: absolute; left: 0; right: 0; top: 58px; bottom: 0; overflow: hidden; }
+  .tlines { position: absolute; left: 30px; right: 30px; top: 22px; font-size: 25px; line-height: 38px; white-space: pre; color: #c9d4df; }
+  .tl { height: 38px; }
+  .exit { position: absolute; right: 150px; top: 712px; font-size: 30px; font-weight: 800; padding: 14px 26px; border-radius: 14px; background: #57c26e; color: #0b0f14; }
+
+  /* coverage and safety */
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 28px; margin-top: 50px; }
+  .tile { padding: 30px 30px; height: 250px; }
+  .tile .ic { width: 64px; height: 64px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 24px; color: #0b0f14; }
+  .tile h3 { font-size: 34px; margin-top: 22px; }
+  .tile p { font-size: 22px; color: #8b98a8; margin-top: 8px; line-height: 1.35; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 34px; margin-top: 56px; }
+  .big { padding: 44px 40px; height: 430px; }
+  .big .ic { width: 92px; height: 92px; border-radius: 22px; font-size: 40px; display: flex; align-items: center; justify-content: center; color: #0b0f14; font-weight: 900; }
+  .big h3 { font-size: 46px; margin-top: 30px; line-height: 1.1; }
+  .big p { font-size: 26px; color: #9aa7b5; margin-top: 14px; line-height: 1.4; }
+  .note { margin-top: 34px; font-size: 27px; color: #aab6c4; text-align: center; }
+
+  /* cta */
+  .center { height: 860px; display: flex; flex-direction: column; justify-content: center; }
+  .cmd { margin-top: 44px; display: inline-block; align-self: flex-start; background: #0d1319; border: 1px solid #263342; border-radius: 18px; padding: 24px 32px; font-size: 40px; min-width: 1180px; }
+  .url { margin-top: 30px; font-size: 34px; color: #b5c2cf; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="glow"></div></div>
+<div id="scenes"></div>
+<div id="brand" class="mono">shopify-store-sync-mcp</div>
+<div id="caption"><span></span></div>
+<div id="bar"></div>
+<script>
+/*
+ * The whole video is a pure function of time: seek(t) lays out frame t. Nothing runs on a clock,
+ * so frames can be captured one by one and the result is identical every time.
+ * DATA (timeline from the voice-over, real CLI output) is injected by render.mjs.
+ */
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const out3 = (x) => 1 - Math.pow(1 - x, 3);
+const inOut = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+const back = (x) => 1 + 2.70158 * Math.pow(x - 1, 3) + 1.70158 * Math.pow(x - 1, 2);
+const prog = (t, start, dur, ease = out3) => ease(clamp((t - start) / dur));
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** Fade and slide an element in: k goes 0 to 1. */
+function enter(el, k, { y = 34, x = 0, from = 1 } = {}) {
+  if (!el) return;
+  el.style.opacity = clamp(k);
+  el.style.transform = `translate(${x * (1 - k)}px, ${y * (1 - k)}px) scale(${from + (1 - from) * k})`;
+}
+/** Pop in with a little overshoot. */
+function pop(el, t, start, dur = 0.45) {
+  if (!el) return;
+  const k = clamp((t - start) / dur);
+  el.style.opacity = clamp(k * 2.2);
+  el.style.transform = `scale(${0.82 + 0.18 * back(k)})`;
+}
+/** Text typed at a steady pace, with a blinking cursor while and just after typing. */
+function type(el, text, t, start, cps = 30, cursor = true) {
+  if (!el) return;
+  const n = Math.floor(clamp((t - start) * cps, 0, text.length));
+  const typing = t >= start && n < text.length;
+  const blink = Math.floor(t * 2.2) % 2 === 0;
+  el.innerHTML = esc(text.slice(0, n)) + (cursor && t >= start - 0.4 && (typing || blink) ? '<span class="cursor"></span>' : "");
+  return start + text.length / cps;
+}
+
+let DATA, T, SCENES = {};
+const CPS = 80; // typing speed in the terminal scene, characters per second
+
+function build() {
+  const cli = DATA.cli;
+  // Parsed from the real CLI output, so the pictures say what the tool said.
+  const applied = cli.apply.output.split("\n").filter((l) => l.startsWith("✓")).map((l) => {
+    const [, outcome, kind, key] = /^✓ (\w+)\s+(\S+)\s+(\S+)/.exec(l);
+    return { outcome, kind, key };
+  });
+  const diff = cli.diff.output.split("\n").filter((l) => /^\w/.test(l)).map((l) => {
+    const [, kind, add, change] = /^(\S+)\s+\+(\d+) ~(\d+)/.exec(l);
+    return { kind, add: +add, change: +change };
+  }).filter((d) => d.add || d.change);
+  const totals = /(\d+) create · (\d+) update · (\d+) conflict/.exec(cli.plan.output);
+  const written = /(\d+) written/.exec(cli.apply.output)[1];
+  const EU = /\((\S+\.myshopify\.com)\)/.exec(cli.plan.output)[1];
+  const nice = (k) => k.replace(/_/g, " ");
+  DATA.parsed = { applied, diff, totals, written, EU };
+
+  const storeCard = (id, name, sub, rows) => `
+    <div class="card store" id="${id}"><div class="name"><b>${name}</b><span class="mono">${sub}</span></div>${rows}</div>`;
+  const devRows = applied.map((a) => `<div class="item it"><span><span class="k mono">${nice(a.kind)}</span>${esc(a.key)}</span><span class="tag ok">ready</span></div>`).join("");
+  const euRows = applied.map((a) => a.outcome === "created"
+    ? `<div class="item ghost it"><span class="muted"><span class="k mono">${nice(a.kind)}</span>${esc(a.key)}</span><span class="tag miss">missing</span></div>`
+    : `<div class="item it"><span><span class="k mono">${nice(a.kind)}</span>${esc(a.key)}</span><span class="tag diff">different</span></div>`).join("");
+  const euDone = applied.map((a) => `<div class="item it"><span><span class="k mono">${nice(a.kind)}</span>${esc(a.key)}</span><span class="tag ok">in sync</span></div>`).join("");
+
+  const scenes = {
+    problem: `
+      <div class="eyebrow mono">The chore</div>
+      <h1 id="p-h">Built on dev. Rebuilt by hand on production.</h1>
+      <div class="row2">${storeCard("p-dev", "dev store", "my-brand-dev", devRows)}${storeCard("p-eu", "production", "my-brand-eu", euRows)}</div>
+      <div class="ids mono"><span class="chip idc">gid://shopify/Page/2</span><span class="r idc" style="font-size:40px;font-weight:800">≠</span><span class="chip idc">gid://shopify/Page/91</span><span class="muted idc" style="font-family:Inter">every ID is different, so nothing copies across</span></div>`,
+    ask: `
+      <div class="eyebrow mono">Or just ask</div>
+      <h1>Compare. Then plan. Nothing written yet.</h1>
+      <div class="row2" style="grid-template-columns: 0.92fr 1.08fr">
+        <div class="card chat"><div class="who mono">you, in Claude or Cursor</div><div class="bubble" id="a-bubble"></div>
+          <div id="a-note" style="position:absolute;left:30px;right:30px;bottom:30px;font-size:25px;line-height:1.45;color:#9aa7b5">References between items are carried across <b style="color:#e6edf3">by handle</b>, so a menu link or a size guide lands on the right page, not on a broken ID.</div></div>
+        <div>
+          <div class="card tool" id="a-diff"><div class="th"><span class="mono b">diff_stores</span><span class="muted">read-only</span></div>
+            ${diff.map((d) => `<div class="drow dr"><span>${nice(d.kind)}</span><span class="g mono">+${d.add} new</span><span class="a mono">~${d.change} changed</span></div>`).join("")}</div>
+          <div class="card tool" id="a-plan"><div class="th"><span class="mono b">plan_sync</span><span class="muted">dry run</span></div>
+            <div class="sum"><span class="g">${totals[1]} create</span> · <span class="a">${totals[2]} update</span> · <span class="muted">${totals[3]} conflict</span></div>
+            ${applied.map((a, i) => `<div class="op mono po"><span class="${a.outcome === "created" ? "g" : "a"}">${a.outcome === "created" ? "+" : "~"}</span><span class="muted">${a.kind}</span><span>${esc(a.key)}</span></div>`).join("")}</div>
+        </div>
+      </div>`,
+    apply: `
+      <div class="eyebrow mono">You stay in control</div>
+      <h1 id="y-h">A person confirms production.</h1>
+      <div class="card dialog" id="y-dialog"><div class="lock mono">Protected store · confirmation needed</div>
+        <p>Apply ${totals[1]} create(s) and ${totals[2]} update(s) from dev to the protected store eu? Type <b class="mono">${EU}</b> to confirm.</p>
+        <div class="field mono" id="y-field"></div>
+        <div class="btns"><span class="btn">Cancel</span><span class="btn go" id="y-go">Confirm</span></div></div>
+      <div class="card applied" id="y-applied"><div class="th" style="display:flex;justify-content:space-between;font-size:26px;margin-bottom:10px"><span class="mono b">apply_plan</span><span class="muted">target re-read first, drifted items skipped</span></div>
+        ${applied.map((a) => `<div class="arow ar"><span class="tick tk">✓</span><span class="g">${a.outcome}</span><span class="muted mono">${a.kind}</span><span class="mono">${esc(a.key)}</span></div>`).join("")}
+        <div class="totals"><div><b class="g" id="y-w">0</b>written</div><div><b id="y-s">0</b>skipped</div><div><b id="y-d">0</b>deleted</div></div></div>
+      <div id="y-pair" class="row2" style="position:absolute;left:100px;right:100px;top:250px;margin:0">${storeCard("y-dev", "dev store", "my-brand-dev", devRows)}${storeCard("y-eu", "production", "my-brand-eu", euDone)}</div>
+      <div class="insync" id="y-sync">${written} written · 0 skipped · 0 deleted</div>`,
+    setup: `
+      <div class="eyebrow mono">Setup</div>
+      <h1>Three steps. About a minute.</h1>
+      <div class="steps">
+        <div class="card step" id="u-1"><div class="n" style="background:#57c26e">1</div><h3>Install Shopify CLI</h3>
+          <div class="code mono" id="u-c1"></div><div class="ok muted">Once. It handles the sign-in.</div></div>
+        <div class="card step" id="u-2"><div class="n" style="background:#6cb6ff">2</div><h3>Connect your stores</h3>
+          <div class="code mono" id="u-c2"></div><div class="ok g" id="u-ok2">✓ Connected to My Brand Dev</div>
+          <div class="pills"><span class="pill up"><span class="dot" style="background:#57c26e"></span>No app to create</span><span class="pill up"><span class="dot" style="background:#57c26e"></span>No tokens to paste</span></div></div>
+        <div class="card step" id="u-3"><div class="n" style="background:#a371f7">3</div><h3>Add it to your AI client</h3>
+          <div class="code mono" id="u-c3" style="font-size:20.5px"></div>
+          <div class="pills"><span class="pill uc">Claude</span><span class="pill uc">Cursor</span><span class="pill uc">any MCP client</span></div></div>
+      </div>`,
+    terminal: `
+      <div class="eyebrow mono">Or from the terminal</div>
+      <h1 style="font-size:62px">The same engine, as a command-line tool.</h1>
+      <div class="card term"><div class="tbar"><i style="background:#f47067"></i><i style="background:#e3b341"></i><i style="background:#57c26e"></i><span class="mono">terminal</span></div>
+        <div class="tview"><div class="tlines mono" id="t-lines"></div></div></div>
+      <div class="exit mono" id="t-exit">exit 0 · in sync</div>`,
+    coverage: `
+      <div class="eyebrow mono">What it syncs</div>
+      <h1>The setup you usually rebuild by hand.</h1>
+      <div class="grid4">${[
+        ["PR", "#f47067", "Products", "Variants, images, as drafts"], ["CO", "#6cb6ff", "Collections", "With smart rules"],
+        ["PG", "#e3b341", "Pages", "Body, template, state"], ["NV", "#e3b341", "Menus", "Three levels deep"],
+        ["RD", "#39c5cf", "Redirects", "Thousands, no CSV"], ["MF", "#57c26e", "Metafields", "Definitions and values"],
+        ["MO", "#57c26e", "Metaobjects", "Schemas and entries"], ["TR", "#a371f7", "Translations", "Per language"],
+      ].map(([ic, c, h, p]) => `<div class="card tile ct"><div class="ic" style="background:${c}">${ic}</div><h3>${h}</h3><p>${p}</p></div>`).join("")}</div>
+      <div class="note" id="c-note">Missing images are uploaded, and every reference is remapped to the target's own IDs.</div>`,
+    safety: `
+      <div class="eyebrow mono">Safe on production</div>
+      <h1>Built so nothing happens by surprise.</h1>
+      <div class="grid3">${[
+        ["RO", "#57c26e", "Read-only by default", "Writing stays off until you turn it on, store by store."],
+        ["✓", "#e3b341", "Every change reviewed first", "Only a dry-run plan you have seen is ever applied."],
+        ["∅", "#f47067", "It never deletes", "What only the target has stays: items, menu links, tags, media."],
+      ].map(([ic, c, h, p]) => `<div class="card big sb"><div class="ic" style="background:${c}">${ic}</div><h3>${h}</h3><p>${p}</p></div>`).join("")}</div>`,
+    cta: `
+      <div class="center"><div class="eyebrow mono">Free · MIT · open source</div>
+        <h1 style="font-size:110px">Try it on a dev store.</h1>
+        <div class="cmd mono"><span class="g">$</span> <span id="z-cmd"></span></div>
+        <div class="url mono" id="z-url">github.com/ussefidder/shopify-store-sync-mcp</div>
+        <div class="pills" style="margin-top:34px"><span class="pill zp" style="font-size:26px"><span class="dot" style="background:#57c26e"></span>Read-only by default</span><span class="pill zp" style="font-size:26px"><span class="dot" style="background:#e3b341"></span>Dry-run plan first</span><span class="pill zp" style="font-size:26px"><span class="dot" style="background:#f47067"></span>Never deletes</span><span class="pill zp" style="font-size:26px"><span class="dot" style="background:#6cb6ff"></span>A person confirms production</span></div></div>`,
+  };
+  const root = $("#scenes");
+  for (const s of T.scenes) {
+    const el = document.createElement("div");
+    el.className = "scene";
+    el.id = `s-${s.id}`;
+    el.innerHTML = scenes[s.id];
+    root.appendChild(el);
+    SCENES[s.id] = { ...s, el, lines: T.lines.filter((l) => l.scene === s.id) };
+  }
+
+  // Terminal: every line with the moment it shows up, laid out once.
+  const term = SCENES.terminal;
+  const L = term.lines.map((l) => l.start);
+  const color = (line) => {
+    const l = esc(line);
+    if (/^\s+(\d+ )?\+ /.test(line) || /^✓/.test(line)) return `<span class="g">${l}</span>`;
+    if (/^\s+(\d+ )?~ /.test(line) || /^! /.test(line)) return `<span class="a">${l}</span>`;
+    if (/^(Plan|applied) /.test(line)) return `<b style="color:#e6edf3">${l}</b>`;
+    return l;
+  };
+  const rows = [];
+  const block = (cmd, output, at, spread) => {
+    rows.push({ cmd, at });
+    // The long warning lines are left out here (they are in the README's CLI picture); blank runs are squeezed.
+    const lines = output.split("\n").filter((l) => !/^! /.test(l)).join("\n").replace(/\n{3,}/g, "\n\n").split("\n");
+    const t0 = at + cmd.length / CPS + 0.1;
+    lines.forEach((line, i) => rows.push({ html: color(line), at: t0 + (spread * i) / lines.length }));
+    rows.push({ html: "", at: t0 + spread });
+    return t0 + spread;
+  };
+  let end = block("npx shopify-store-sync-mcp diff dev eu", cli.diff.output, L[0] - 0.1, 1.1);
+  end = block("npx shopify-store-sync-mcp plan dev eu", cli.plan.output, end + 0.45, 0.8);
+  end = block(`npx ${cli.apply.cmd}`, cli.apply.output, end + 0.45, 0.7);
+  term.exitAt = block("npx shopify-store-sync-mcp diff dev eu --exit-code", cli.again.output, Math.max(end + 0.4, L[2] + 0.2), 0.6);
+  term.rows = rows;
+  $("#t-lines").innerHTML = rows.map((r, i) => `<div class="tl" id="tl${i}">${r.cmd ? "" : r.html}</div>`).join("");
+}
+
+const DRAW = {
+  problem(t, s) {
+    const [a, b, c] = s.lines.map((l) => l.start);
+    enter($("#p-h"), prog(t, s.start + 0.1, 0.6));
+    enter($("#p-dev"), prog(t, a - 0.1, 0.6), { y: 50 });
+    $$("#p-dev .it").forEach((el, i) => enter(el, prog(t, a + 0.25 + i * 0.16, 0.45), { x: -30, y: 0 }));
+    enter($("#p-eu"), prog(t, b - 0.25, 0.6), { y: 50 });
+    $$("#p-eu .it").forEach((el, i) => enter(el, prog(t, b + 0.1 + i * 0.2, 0.45), { x: 30, y: 0 }));
+    $$("#s-problem .idc").forEach((el, i) => pop(el, t, c + 2.1 + i * 0.28));
+  },
+  ask(t, s) {
+    const [a, b, c] = s.lines.map((l) => l.start);
+    type($("#a-bubble"), "Compare dev with eu, then sync what's missing.", t, a - 0.35, 24);
+    enter($("#a-note"), prog(t, b + 1.3, 0.7));
+    enter($("#a-diff"), prog(t, b - 0.15, 0.55), { x: 60, y: 0 });
+    $$("#a-diff .dr").forEach((el, i) => enter(el, prog(t, b + 0.25 + i * 0.22, 0.4), { y: 14 }));
+    enter($("#a-plan"), prog(t, c - 0.15, 0.55), { x: 60, y: 0 });
+    $$("#a-plan .po").forEach((el, i) => enter(el, prog(t, c + 0.45 + i * 0.2, 0.4), { y: 12 }));
+  },
+  apply(t, s) {
+    const [a, b, c] = s.lines.map((l) => l.start);
+    const { EU, written } = DATA.parsed;
+    const gone = prog(t, b - 0.45, 0.4, inOut);
+    const dialog = $("#y-dialog");
+    const k = prog(t, a - 0.1, 0.5);
+    dialog.style.opacity = k * (1 - gone);
+    dialog.style.transform = `translateY(${30 * (1 - k) - 30 * gone}px) scale(${0.94 + 0.06 * back(clamp((t - a + 0.1) / 0.5)) - 0.04 * gone})`;
+    const typedAt = type($("#y-field"), EU, t, a + 1.6, 22);
+    const press = clamp((t - typedAt - 0.25) / 0.25);
+    $("#y-field").style.borderColor = t > typedAt ? "#57c26e" : "#3a4656";
+    $("#y-go").style.transform = `scale(${1 - 0.08 * Math.sin(Math.PI * press)})`;
+    $("#y-go").style.filter = `brightness(${1 + 0.35 * Math.sin(Math.PI * press)})`;
+
+    const away = prog(t, c - 0.5, 0.45, inOut);
+    const card = $("#y-applied");
+    const ka = prog(t, b - 0.15, 0.5);
+    card.style.opacity = ka * (1 - away);
+    card.style.transform = `translateY(${40 * (1 - ka) - 30 * away}px)`;
+    const rows = $$("#y-applied .ar");
+    let done = 0;
+    rows.forEach((el, i) => {
+      const at = b + 0.75 + i * 0.36;
+      enter(el, prog(t, at - 0.2, 0.35), { y: 12 });
+      pop($(".tk", el), t, at, 0.35);
+      if (t >= at + 0.1) done++;
+    });
+    $("#y-w").textContent = Math.round((done / rows.length) * written);
+    $("#y-h").textContent = t < b - 0.3 ? "A person confirms production." : t < c - 0.3 ? "Then it writes. Nothing deleted." : "Both stores, in sync.";
+
+    const pair = prog(t, c - 0.25, 0.6);
+    enter($("#y-pair"), pair, { y: 40 });
+    $$("#y-eu .it").forEach((el, i) => pop($(".tag", el), t, c + 0.15 + i * 0.12, 0.4));
+    pop($("#y-sync"), t, c + 0.75, 0.5);
+  },
+  setup(t, s) {
+    const [a, b, c, d] = s.lines.map((l) => l.start);
+    const dim = (el, on) => { el.style.borderColor = on ? "#3d5a48" : "#243040"; el.style.background = on ? "#131b22" : "#11161d"; };
+    [["#u-1", b], ["#u-2", c], ["#u-3", d]].forEach(([id, at], i) => {
+      const el = $(id);
+      enter(el, prog(t, a + 0.2 + i * 0.18, 0.55), { y: 60 });
+      const active = t >= at - 0.2 && (i === 2 || t < [c, d][i] - 0.2);
+      dim(el, active);
+    });
+    type($("#u-c1"), "$ npm install -g @shopify/cli", t, b, 26, t < c);
+    const end2 = type($("#u-c2"), "$ npx shopify-store-sync-mcp \\\n    connect my-brand-dev", t, c, 30, t < d);
+    enter($("#u-ok2"), prog(t, end2 + 0.5, 0.4), { y: 10 });
+    $$("#s-setup .up").forEach((el, i) => pop(el, t, c + 3.4 + i * 0.75));
+    const config = '"shopify-store-sync": {\n  "command": "npx",\n  "args": ["-y",\n    "shopify-store-sync-mcp"]\n}';
+    type($("#u-c3"), config, t, d, 42, true);
+    $$("#s-setup .uc").forEach((el, i) => pop(el, t, d + 1.5 + i * 0.55));
+  },
+  terminal(t, s) {
+    const rows = s.rows;
+    rows.forEach((r, i) => {
+      const el = $(`#tl${i}`);
+      if (r.cmd) {
+        const n = Math.floor(clamp((t - r.at) * CPS, 0, r.cmd.length));
+        const cur = t >= r.at - 0.3 && n < r.cmd.length ? '<span class="cursor" style="width:12px"></span>' : "";
+        el.innerHTML = t >= r.at - 0.3 ? `<span class="g">$</span> <span style="color:#e6edf3">${esc(r.cmd.slice(0, n))}</span>${cur}` : "";
+      } else {
+        el.style.opacity = prog(t, r.at, 0.18);
+      }
+    });
+    // Smooth scroll, computed from time alone: each line pushes the view up as it arrives.
+    const fit = 15;
+    let scroll = 0;
+    rows.forEach((r, i) => {
+      const y = Math.max(0, i + 1 - fit) * 38;
+      scroll = Math.max(scroll, y * prog(t, (r.cmd ? r.at - 0.3 : r.at) - 0.05, 0.35, inOut));
+    });
+    $("#t-lines").style.transform = `translateY(${-scroll}px)`;
+    pop($("#t-exit"), t, s.exitAt + 0.15, 0.5);
+  },
+  coverage(t, s) {
+    const l = s.lines[0];
+    const span = (l.end - l.start - 1.3) / 8;
+    $$("#s-coverage .ct").forEach((el, i) => pop(el, t, l.start + 0.75 + i * span, 0.5));
+    enter($("#c-note"), prog(t, l.end - 0.4, 0.6));
+  },
+  safety(t, s) {
+    const l = s.lines[0];
+    const at = [l.start + 1.75, l.start + 3.2, l.start + 4.9];
+    $$("#s-safety .sb").forEach((el, i) => pop(el, t, Math.min(at[i], l.end - 0.6), 0.55));
+  },
+  cta(t, s) {
+    const l = s.lines[0];
+    type($("#z-cmd"), "npx shopify-store-sync-mcp connect my-store", t, l.start + 1.5, 26);
+    enter($("#z-url"), prog(t, l.start + 3.3, 0.6));
+    $$("#s-cta .zp").forEach((el, i) => pop(el, t, l.start + 3.8 + i * 0.16));
+  },
+};
+
+window.setup = (data) => {
+  DATA = data;
+  T = data.timeline;
+  build();
+  return T.total;
+};
+
+window.seek = (t) => {
+  for (const s of Object.values(SCENES)) {
+    const first = s.start <= 0.001;
+    const last = s.end >= T.total - 0.001;
+    const fadeIn = first ? 1 : prog(t, s.start - 0.22, 0.5, inOut);
+    const fadeOut = last ? 0 : prog(t, s.end - 0.28, 0.5, inOut);
+    const o = fadeIn * (1 - fadeOut);
+    s.el.style.opacity = o;
+    s.el.style.visibility = o < 0.002 ? "hidden" : "visible";
+    s.el.style.transform = `translateY(${26 * (1 - fadeIn) - 22 * fadeOut}px) scale(${0.985 + 0.015 * fadeIn})`;
+    if (o >= 0.002) DRAW[s.id](t, s);
+  }
+  // Caption: the line being spoken, eased in and out.
+  const line = T.lines.find((l) => t >= l.start - 0.12 && t <= l.end + 0.22);
+  const cap = $("#caption span");
+  if (line) {
+    cap.textContent = line.caption;
+    const k = prog(t, line.start - 0.12, 0.22) * (1 - prog(t, line.end + 0.04, 0.18));
+    cap.style.opacity = k;
+    cap.style.transform = `translateY(${10 * (1 - k)}px)`;
+  } else cap.style.opacity = 0;
+  $("#bar").style.width = `${(t / T.total) * 1920}px`;
+  // A slow drift of the background glow keeps still moments alive.
+  $("#glow").style.transform = `translate(${-70 * Math.sin(t / 9)}px, ${-50 * Math.cos(t / 11)}px)`;
+};
+</script>
+</body>
+</html>
