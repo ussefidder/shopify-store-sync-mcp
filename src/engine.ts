@@ -53,7 +53,30 @@ export class Engine {
   }
 
   static fetchOptions(scope: Scope): FetchOptions {
-    return { ownerTypes: scope.ownerTypes, metaobjectTypes: scope.metaobjectTypes, namespaces: scope.namespaces, locales: scope.locales, prices: scope.prices };
+    return {
+      ownerTypes: scope.ownerTypes,
+      metaobjectTypes: scope.metaobjectTypes,
+      namespaces: scope.namespaces,
+      locales: scope.locales,
+      prices: scope.prices,
+      productHandles: Engine.productHandles(scope.include),
+    };
+  }
+
+  /**
+   * When every include pattern is a plain handle or a handle prefix, only those products need reading.
+   * Anything else (a pattern for another resource type, a wildcard in the middle) means a full read.
+   */
+  static productHandles(include?: string[]): FetchOptions["productHandles"] {
+    if (!include?.length) return undefined;
+    const exact: string[] = [];
+    const prefixes: string[] = [];
+    for (const p of include) {
+      const m = /^([a-z0-9][a-z0-9-]*)(\*?)$/.exec(p);
+      if (!m) return undefined;
+      (m[2] ? prefixes : exact).push(m[1]!);
+    }
+    return { exact, prefixes };
   }
 
   /** Languages present in a snapshot's translations. */

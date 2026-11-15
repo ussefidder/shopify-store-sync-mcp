@@ -205,6 +205,29 @@ export function productSetInput(d: Record<string, unknown>, target: Node | undef
   });
 }
 
+const SEARCH = /* GraphQL */ `
+  query ProductSearch($query: String!, $after: String) {
+    products(first: 10, after: $after, query: $query) {
+      nodes { ${NODE_FIELDS} }
+      ${PAGE_INFO}
+    }
+  }
+`;
+
+/** Every product, or only the handles the include patterns name (exact handles are looked up directly, prefixes searched). */
+async function readProducts(client: AdminClient, opts: FetchOptions): Promise<Node[]> {
+  const h = opts.productHandles;
+  if (!h) return paginate<Node>(client, QUERY, {}, (d) => d.products);
+  const exact = await Promise.all(
+    h.exact.map(async (handle) => (await client.request<{ productByIdentifier: Node | null }>(BY_HANDLE, { handle })).productByIdentifier),
+  );
+  const searched = h.prefixes.length
+    ? await paginate<Node>(client, SEARCH, { query: h.prefixes.map((p) => `handle:${p}*`).join(" OR ") }, (d) => d.products)
+    : [];
+  const seen = new Set<string>();
+  return [...exact, ...searched].filter((n): n is Node => Boolean(n) && !seen.has(n!.id) && Boolean(seen.add(n!.id)));
+}
+
 async function readTarget(client: AdminClient, handle: string): Promise<Node | undefined> {
   const res = await client.request<{ productByIdentifier: Node | null }>(BY_HANDLE, { handle });
   return res.productByIdentifier ? allVariants(client, res.productByIdentifier) : undefined;
@@ -228,7 +251,7 @@ export const products: ResourceAdapter = {
     "Products, keyed by handle: title, description, vendor, type, tags, template, SEO, options, variants (matched by option values, with SKU) and images. Prices only with prices: true; inventory and sales channels are never copied. New products are created as drafts. Opt-in (not in the default set).",
 
   async fetch(client, opts) {
-    const nodes = await paginate<Node>(client, QUERY, {}, (d) => d.products);
+    const nodes = await readProducts(client, opts);
     const items: Item[] = [];
     const skipped: { key: string; reason: string }[] = [];
     for (const n of nodes) {

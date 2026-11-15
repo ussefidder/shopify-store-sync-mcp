@@ -42,6 +42,11 @@ export interface FetchOptions {
   locales?: string[];
   /** Include variant prices and compare-at prices (products kind). Off by default: prices usually differ per store. */
   prices?: boolean;
+  /**
+   * Narrows which products are read, taken from include patterns that are plain handles
+   * ("linen-shirt") or handle prefixes ("linen-*"). Undefined means every product.
+   */
+  productHandles?: { exact: string[]; prefixes: string[] };
 }
 
 export interface FetchResult {
