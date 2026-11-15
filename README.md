@@ -23,6 +23,8 @@ It copies the store setup that usually gets rebuilt by hand: **metafield and met
 </tr>
 </table>
 
+> **What you need:** Node 20+, and a private Shopify app on each store so the server can call the Admin API. Shopify gives API access to apps only, so this step can't be skipped, but it's free, takes about 5 minutes, and nothing is published on the App Store. You choose its exact permissions. [Setup steps below](#1-create-a-private-app-on-each-store).
+
 <p align="center">
   <img src="docs/images/demo.png" alt="diff_stores, plan_sync and apply_plan output: 6 created, 3 updated, 1 conflict skipped, protected store refused without confirmation" width="100%">
 </p>
@@ -95,9 +97,21 @@ What `diff_stores` reports, field by field (real output):
 
 ## Quick start
 
-### 1. Get Admin API access for each store
+### 1. Create a private app on each store
 
-Use a Dev Dashboard app (client ID and secret) or a custom app access token (`shpat_…`). Grant the scopes for what you'll sync:
+This server is a program you run yourself, so it can't borrow the Shopify login of your AI client. It reaches each store through the Admin API, and Shopify only grants that to an app installed on the store. Pick the option that matches who owns the stores.
+
+**Option A: your own or your organization's stores (Dev Dashboard app, recommended).** One app covers every store in the same Shopify organization, and tokens are fetched and refreshed for you.
+
+1. Open the [Dev Dashboard](https://dev.shopify.com/dashboard), go to **Apps**, click **Create app**, then **Create app manually**.
+2. Give it a name, for example `Store Sync`. Any URL works as the App URL (it's never opened); untick **Embed app in Shopify admin**.
+3. In **Scopes**, paste the scopes from the table below for what you'll sync, then click **Create app** and **Release**.
+4. Install it on each store: open `https://admin.shopify.com/store/<store-handle>/oauth/install?client_id=<your client ID>` and click **Install**.
+5. Under the app's **Settings**, copy the **Client ID** and **Client secret** into environment variables (step 2 reads them from there).
+
+Adding a scope later means releasing a new version and approving the update on each store (same install link).
+
+**Option B: a store owned by someone else (a client's store, for example).** Client credentials only work on stores in the app's own organization; elsewhere Shopify answers `shop_not_permitted`. Ask the store owner to create a custom app in their admin (**Settings > Apps > Develop apps**), grant the scopes below, install it and share the Admin API access token (`shpat_...`). Use it as `accessToken` in step 2.
 
 | Resource | Read scope | Write scope |
 |---|---|---|
@@ -113,6 +127,12 @@ Use a Dev Dashboard app (client ID and secret) or a custom app access token (`sh
 | files | `read_files` | `write_files` (to upload missing files) |
 | theme diff | `read_themes` | none, never writes |
 | ID remapping | `read_products`, `read_content` | none |
+
+Everything at once (the set used for the live tests), ready to paste:
+
+```text
+read_products,write_products,read_metaobjects,write_metaobjects,read_metaobject_definitions,write_metaobject_definitions,read_online_store_pages,write_online_store_pages,read_online_store_navigation,write_online_store_navigation,read_legal_policies,write_legal_policies,read_translations,write_translations,read_locales,read_files,write_files,read_themes,read_content
+```
 
 Give source stores read-only scopes when you can.
 
@@ -365,7 +385,7 @@ Syncing definitions between stores isn't a new idea, and these tools are worth k
 | [shopify-metadata-migrator](https://github.com/warriorachilles/shopify-metadata-migrator) | CLI | Copies metafield and metaobject definitions |
 | MetaMaintain, Metora, Rewind Staging | Shopify apps (paid or freemium) | Definition and entry sync through an embedded app |
 
-What this project adds: it runs inside your AI client as an MCP server (or as a CLI), so you can ask for a diff in plain language; it also covers pages, menus, redirects, collections, policies, metafield values and translations, remaps references and files across stores, keeps store configuration in git, checks for drift before writing and never deletes. If you only need a scripted one-shot copy of definitions, one of the CLIs above may be all you need.
+What this project adds: it runs inside your AI client as an MCP server (or as a CLI) with a private app you create yourself, so there's no third-party app to install from the App Store and no data leaves your machine except to Shopify. You can ask for a diff in plain language; it also covers pages, menus, redirects, collections, policies, metafield values and translations, remaps references and files across stores, keeps store configuration in git, checks for drift before writing and never deletes. If you only need a scripted one-shot copy of definitions, one of the CLIs above may be all you need.
 
 ## Disclaimer
 
