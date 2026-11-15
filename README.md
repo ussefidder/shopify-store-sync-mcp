@@ -280,9 +280,25 @@ Two references followed from the source store to the target, as the sample sync 
   <img src="docs/images/remapping.png" alt="gid://shopify/Product/101 in dev becomes shopify://Product/linen-shirt, then gid://shopify/Product/9101 in eu" width="100%">
 </p>
 
-## Tested against a live store
+## Tested against live stores
 
-Besides the unit and integration tests, every read query and the write payloads for metaobject definitions (including a self-referencing one), metaobjects, metafield definitions and redirects have been run against a real Shopify Plus development store. Read-backs from it normalize to exactly the same portable data as the source, so a second sync is a no-op. Two behaviours of the live API found this way are covered by tests: the `nodes` query returns `null` for customer account pages (they're looked up by listing instead), and `ShopPolicy.type` has to be aliased next to `Metaobject.type`. The read queries for collections, policies, metafield values, languages, translations, files (including lookup by file name) and theme files have been run on the same store.
+Besides the 49 automated tests, every feature has been run end to end between two real Shopify development stores (a Shopify Plus source and a second store as target), through the real command line and the real MCP server over stdio, authenticating with a Dev Dashboard app and the client-credentials grant:
+
+| Feature | Live result |
+|---|---|
+| Diff of all default resource types | both stores read in about 10 seconds |
+| Create: metafield and metaobject definitions, metaobjects, smart collection, page, redirect, French translation | applied, second diff empty |
+| File reference on a metaobject | image uploaded to the target by file name and linked |
+| Update: page title and body, collection description | applied, second diff empty |
+| Shop policies | synced; a policy Shopify manages automatically is reported with how to unblock it |
+| Metafield values, including a `product_reference` | applied, reference remapped to the target's own product |
+| Values on products missing from the target | skipped up front with the reason |
+| Export to a folder, then diff that folder against the store | no differences |
+| Theme settings diff | read-only, 15 files compared in about 1 second |
+| Safety: write to a read-only store | refused |
+| Safety: target edited after the plan was made | step skipped, nothing overwritten |
+
+Behaviours of the live API found this way are covered by tests: `nodes` returns `null` for customer account pages (they're looked up by listing instead), `ShopPolicy.type` has to be aliased next to `Metaobject.type`, Shopify refuses edits to auto-managed policies, and a failed token request carries its reason (such as `app_not_installed`) in an HTML page.
 
 ## Development
 

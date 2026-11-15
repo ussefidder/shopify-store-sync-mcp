@@ -67,4 +67,9 @@ export interface ResourceAdapter {
   conflict?(source: Item, target: Item): string | undefined;
   /** Portable ref the created resource can be found by, so later ops in the same plan can point at it. */
   refFor?(key: string): string | undefined;
+  /**
+   * Portable ref of the resource this item hangs off (a metafield value's product, say).
+   * When it doesn't exist in the target the op can't succeed, so the plan reports a conflict.
+   */
+  ownerRef?(data: Record<string, unknown>): string | undefined;
 }

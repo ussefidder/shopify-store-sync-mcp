@@ -1,6 +1,6 @@
 {
   "name": "shopify-store-sync-mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "MCP server and CLI to diff and sync configuration between Shopify stores: metafield and metaobject definitions, metaobjects, collections, pages, menus, redirects, policies, metafield values and translations. Config as code, dry-run plans, never deletes.",
   "type": "module",
   "bin": {

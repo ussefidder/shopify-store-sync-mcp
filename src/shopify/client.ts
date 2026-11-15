@@ -62,7 +62,18 @@ export class ShopifyAdminClient implements AdminClient {
       body: new URLSearchParams({ grant_type: "client_credentials", client_id: clientId, client_secret: clientSecret }).toString(),
     });
     if (!res.ok) {
-      throw new ShopifyError(`token request for ${domain} failed with HTTP ${res.status}`, await res.text().catch(() => undefined));
+      const text = await res.text().catch(() => "");
+      // Shopify answers with an HTML page whose title carries the OAuth error code.
+      const code = /Oauth error ([a-z_]+)/i.exec(text)?.[1] ?? /"error"\s*:\s*"([^"]+)"/.exec(text)?.[1];
+      const hint =
+        code === "app_not_installed"
+          ? ": the app isn't installed on this store yet (install it from the Dev Dashboard, then retry)"
+          : code === "shop_not_permitted"
+            ? ": client credentials only work on stores owned by the same organization as the app; use an access token instead"
+            : code
+              ? ` (${code})`
+              : "";
+      throw new ShopifyError(`token request for ${domain} failed with HTTP ${res.status}${hint}`, text || undefined);
     }
     const body = (await res.json()) as { access_token?: string; expires_in?: number };
     if (!body.access_token) throw new ShopifyError(`token response for ${domain} had no access_token`);

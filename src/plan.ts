@@ -97,8 +97,16 @@ export async function buildPlan(input: BuildPlanInput): Promise<Plan> {
   const unmappable = new Set<string>();
   const toUpload = new Set<string>();
   const files: Record<string, FileSource> = {};
+  let missingOwners = 0;
   for (const op of ops) {
     if (op.action === "conflict") continue;
+    const owner = ADAPTERS[op.kind].ownerRef?.(op.data);
+    if (owner && !owner.startsWith(UNRESOLVED_PREFIX) && !willCreate.has(owner) && !(await input.resolver.resolve(owner))) {
+      op.action = "conflict";
+      op.reason = `${owner.slice(REF_PREFIX.length)} doesn't exist in the target; create it first`;
+      missingOwners++;
+      continue;
+    }
     const missing: string[] = [];
     for (const ref of collectRefs(op.data)) {
       if (ref.startsWith(UNRESOLVED_PREFIX)) {
@@ -128,7 +136,11 @@ export async function buildPlan(input: BuildPlanInput): Promise<Plan> {
     warnings.push(`${toUpload.size} file(s) don't exist in the target and will be uploaded from the source when applied.`);
   }
   const conflicts = ops.filter((o) => o.action === "conflict").length;
-  if (conflicts) warnings.unshift(`${conflicts} conflict(s) need a manual fix in the target; they will be skipped.`);
+  if (missingOwners) {
+    warnings.unshift(`${missingOwners} value(s) belong to products or collections that don't exist in the target; they will be skipped.`);
+  }
+  const otherConflicts = conflicts - missingOwners;
+  if (otherConflicts) warnings.unshift(`${otherConflicts} conflict(s) need a manual fix in the target; they will be skipped.`);
 
   return {
     id: randomUUID(),

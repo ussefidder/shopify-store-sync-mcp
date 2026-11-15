@@ -107,6 +107,17 @@ describe("shop policies", () => {
     expect(results.map((r) => `${r.outcome} ${r.key}`)).toEqual(["created PRIVACY_POLICY", "updated REFUND_POLICY"]);
     expect(eu.state.shopPolicies.find((p) => p.type === "REFUND_POLICY")!.body).toBe("<p>30 days</p>");
   });
+
+  it("says how to unblock a policy Shopify manages automatically", async () => {
+    const dev = new FakeShop(FakeShop.config("dev"), { shopPolicies: [{ id: "gid://shopify/ShopPolicy/2", type: "PRIVACY_POLICY", body: "<p>Ours</p>" }] });
+    const eu = new FakeShop(FakeShop.config("eu"), {
+      shopPolicies: [{ id: "gid://shopify/ShopPolicy/9", type: "PRIVACY_POLICY", body: "<p>Generated</p>", autoManaged: true }],
+    });
+    const { results } = await sync(engineFor(dev, eu), "dev", "eu", ["shop_policies"]);
+    expect(results[0]!.outcome).toBe("failed");
+    expect(results[0]!.message).toContain("managed automatically by Shopify in the target");
+    expect(results[0]!.message).toContain("--exclude PRIVACY_POLICY");
+  });
 });
 
 describe("metafield values", () => {
@@ -145,11 +156,15 @@ describe("metafield values", () => {
     const { plan, results } = await sync(engine, "dev", "eu", ["metafields"]);
 
     expect(plan.skipped).toEqual([{ kind: "metafields", key: "PRODUCT/linen-shirt/app--123--reviews.rating", reason: "app-owned" }]);
-    expect(plan.ops.find((o) => o.key === "PRODUCT/dev-only/custom.material")!.missingRefs).toEqual(["shopify://Product/dev-only"]);
+    const orphan = plan.ops.find((o) => o.key === "PRODUCT/dev-only/custom.material")!;
+    expect(orphan.action).toBe("conflict");
+    expect(orphan.reason).toBe("Product/dev-only doesn't exist in the target; create it first");
+    expect(plan.warnings[0]).toMatch(/^1 value\(s\) belong to products or collections that don't exist/);
+    expect(plan.warnings.some((w) => /conflict\(s\) need a manual fix/.test(w))).toBe(false);
     expect(results.map((r) => `${r.outcome} ${r.key}`).sort()).toEqual([
       "created COLLECTION/linen/custom.banner_text",
       "created PRODUCT/linen-shirt/custom.pairs_with",
-      "failed PRODUCT/dev-only/custom.material",
+      "skipped PRODUCT/dev-only/custom.material",
       "updated PRODUCT/linen-shirt/custom.material",
     ]);
     const shirt = eu.state.products.find((p) => p.handle === "linen-shirt")!;

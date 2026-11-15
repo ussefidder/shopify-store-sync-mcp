@@ -96,6 +96,8 @@ export const metafields: ResourceAdapter = {
     return undefined;
   },
 
+  ownerRef: (d) => (typeof d.owner === "string" ? d.owner : undefined),
+
   create: (ctx, _key, d) => set(ctx, d),
   async update(ctx, _target, d) {
     await set(ctx, d);

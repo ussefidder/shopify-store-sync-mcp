@@ -26,6 +26,12 @@ export const shopPolicies: ResourceAdapter = {
       `mutation($p: ShopPolicyInput!) { shopPolicyUpdate(shopPolicy: $p) { shopPolicy { id } userErrors { field message } } }`,
       { p: { type: d.type, body: d.body } },
     );
+    const errors: { message: string }[] = res.shopPolicyUpdate?.userErrors ?? [];
+    if (errors.some((e) => /automatic management/i.test(e.message))) {
+      throw new Error(
+        `${String(d.type)} is managed automatically by Shopify in the target. Turn that off under Settings > Policies to sync it, or leave it out with --exclude ${String(d.type)}.`,
+      );
+    }
     assertNoUserErrors(res.shopPolicyUpdate, `shopPolicyUpdate ${String(d.type)}`);
     return res.shopPolicyUpdate.shopPolicy.id;
   },

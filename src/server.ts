@@ -10,7 +10,7 @@ import { DEFAULT_OWNER_TYPES } from "./resources/metafieldDefinitions.js";
 import type { AdminClient } from "./shopify/client.js";
 import { DEFAULT_THEME_FILES, type ThemeDiff } from "./themes.js";
 
-export const VERSION = "0.2.0";
+export const VERSION = "0.2.1";
 
 export interface ServerDeps {
   registry: StoreRegistry;

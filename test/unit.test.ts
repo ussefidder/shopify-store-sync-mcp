@@ -129,6 +129,14 @@ describe("ShopifyAdminClient", () => {
     expect(calls[2]!.url).toBe("https://s.myshopify.com/admin/api/2026-10/graphql.json");
   });
 
+  it("explains why a token request was refused", async () => {
+    const html = "<html><head><title>400 - Oauth error app_not_installed</title></head></html>";
+    const fn: FetchLike = async () => ({ ok: false, status: 400, headers: { get: () => null }, json: async () => ({}), text: async () => html });
+    await expect(new ShopifyAdminClient(store, fn).request("query { shop { name } }")).rejects.toThrow(
+      "token request for s.myshopify.com failed with HTTP 400: the app isn't installed on this store yet",
+    );
+  });
+
   it("refreshes the token once on 401", async () => {
     const { fn, calls } = fakeFetch([
       { body: { access_token: "old", expires_in: 86399 } },

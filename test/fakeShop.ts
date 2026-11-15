@@ -35,7 +35,7 @@ export interface FakeState {
   themes: { id: string; name: string; role: string; files: Record<string, string> }[];
   /** Built into every store. Like the live API, \`nodes\` returns null for these. */
   customerAccountPages: { id: string; handle: string }[];
-  shopPolicies: { id: string; type: string; body?: string }[];
+  shopPolicies: { id: string; type: string; body?: string; autoManaged?: boolean }[];
   metafieldDefinitions: any[];
   metaobjectDefinitions: any[];
   metaobjects: any[];
@@ -166,8 +166,6 @@ export class FakeShop implements AdminClient {
             metafields: conn(filterNs(c.metafields, v.namespace)),
           })),
         );
-      case "shop":
-        return { shopPolicies: s.shopPolicies.map((p) => ({ body: "", ...p })) };
       case "shopLocales":
         return s.shopLocales;
       case "translatableResources": {
@@ -312,6 +310,9 @@ export class FakeShop implements AdminClient {
       }
       case "shopPolicyUpdate": {
         let p = s.shopPolicies.find((x) => x.type === v.p.type);
+        if (p?.autoManaged) {
+          return { shopPolicy: null, userErrors: [{ field: ["shopPolicy"], message: "Automatic management for Privacy Policy must be turned off in order to make changes." }] };
+        }
         if (!p) {
           p = { id: gid("ShopPolicy"), type: v.p.type };
           s.shopPolicies.push(p);

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+- Verified every feature end to end between two live development stores, through the CLI and the MCP server
+- Metafield values whose product or collection doesn't exist in the target are now planned as skipped conflicts with the reason, instead of failing at apply
+- A failed token request says why (for example, the app isn't installed on the store yet)
+- A policy that Shopify manages automatically fails with how to unblock it
+- `apply` on the command line says how many steps were written and skipped
+
 ## 0.2.0
 
 - New resources: `collections` (with smart-collection rules), `shop_policies`, and opt-in `metafields` (values on products and collections) and `translations` (pages, collections, metaobjects, menus, policies)

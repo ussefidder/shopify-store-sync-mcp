@@ -155,7 +155,13 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.en
             const mark = r.outcome === "failed" ? red("✗") : r.outcome === "skipped" ? dim("-") : green("✓");
             console.log(`${mark} ${r.outcome.padEnd(8)} ${r.kind.padEnd(22)} ${r.key}${r.message ? dim(`  ${r.message}`) : ""}`);
           }
-          console.log(`\n${bold(plan.status)}`);
+          const written = results.filter((r) => r.outcome === "created" || r.outcome === "updated").length;
+          const skipped = results.filter((r) => r.outcome === "skipped").length;
+          const summary =
+            plan.status === "applied" && written === 0 && skipped > 0
+              ? `nothing written: ${skipped} step(s) skipped`
+              : `${plan.status.replace("_", " ")}: ${written} written${skipped ? `, ${skipped} skipped` : ""}`;
+          console.log(`\n${bold(summary)}`);
         }
         return results.some((r) => r.outcome === "failed") ? 1 : 0;
       }
