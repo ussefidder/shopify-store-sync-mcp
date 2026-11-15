@@ -46,12 +46,11 @@ export const translations: ResourceAdapter = {
         .map((l) => l.locale);
 
     const found: { locale: string; node: Node }[] = [];
-    for (const type of TRANSLATABLE_TYPES) {
-      for (const locale of locales) {
-        const nodes = await paginate<Node>(client, QUERY, { type, locale }, (d) => d.translatableResources);
-        for (const node of nodes) if (node.translations.some((t) => t.value)) found.push({ locale, node });
-      }
-    }
+    const pairs = TRANSLATABLE_TYPES.flatMap((type) => locales.map((locale) => ({ type, locale })));
+    const lists = await Promise.all(pairs.map((v) => paginate<Node>(client, QUERY, v, (d) => d.translatableResources)));
+    lists.forEach((nodes, i) => {
+      for (const node of nodes) if (node.translations.some((t) => t.value)) found.push({ locale: pairs[i]!.locale, node });
+    });
 
     await mapper.load(found.map((f) => f.node.resourceId));
     const items: Item[] = [];

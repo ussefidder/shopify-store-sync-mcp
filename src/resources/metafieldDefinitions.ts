@@ -107,8 +107,11 @@ export const metafieldDefinitions: ResourceAdapter = {
   async fetch(client, opts) {
     const items: Item[] = [];
     const skipped: { key: string; reason: string }[] = [];
-    for (const ownerType of opts.ownerTypes ?? DEFAULT_OWNER_TYPES) {
-      const nodes = await paginate<Node>(client, QUERY, { ownerType }, (d) => d.metafieldDefinitions);
+    // One list per owner type; they're independent, so read them in parallel.
+    const lists = await Promise.all(
+      (opts.ownerTypes ?? DEFAULT_OWNER_TYPES).map((ownerType) => paginate<Node>(client, QUERY, { ownerType }, (d) => d.metafieldDefinitions)),
+    );
+    for (const nodes of lists) {
       for (const n of nodes) {
         const reason = reservedPrefix(n.namespace);
         if (reason) skipped.push({ key: `${n.ownerType}.${n.namespace}.${n.key}`, reason });

@@ -98,6 +98,17 @@ export async function buildPlan(input: BuildPlanInput): Promise<Plan> {
   const toUpload = new Set<string>();
   const files: Record<string, FileSource> = {};
   let missingOwners = 0;
+  // Look every reference up in the target at once; the loop below then reads from the cache.
+  const lookups = new Set<string>();
+  for (const op of ops) {
+    if (op.action === "conflict") continue;
+    const owner = ADAPTERS[op.kind].ownerRef?.(op.data);
+    if (owner) lookups.add(owner);
+    for (const ref of collectRefs(op.data)) lookups.add(ref);
+  }
+  await Promise.all(
+    [...lookups].filter((r) => !r.startsWith(UNRESOLVED_PREFIX) && !willCreate.has(r)).map((r) => input.resolver.resolve(r)),
+  );
   for (const op of ops) {
     if (op.action === "conflict") continue;
     const owner = ADAPTERS[op.kind].ownerRef?.(op.data);
