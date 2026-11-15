@@ -3,6 +3,7 @@
 </p>
 
 <p align="center">
+  <a href="https://www.npmjs.com/package/shopify-store-sync-mcp"><img src="https://img.shields.io/npm/v/shopify-store-sync-mcp?color=cb3837" alt="npm version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-57c26e" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/node-%3E%3D20-6cb6ff" alt="Node 20+">
   <img src="https://img.shields.io/badge/MCP-server-a371f7" alt="MCP server">
