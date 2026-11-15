@@ -55,6 +55,14 @@ There are plenty of Shopify Admin MCP servers that read and write a *single* sto
 | Production guardrails | ❌ | ✅ writes are off by default; protected stores need typed confirmation |
 | Audit trail | ❌ | ✅ JSONL log of every write |
 
+### Why not just use Shopify CLI?
+
+Shopify CLI is how this tool can sign in, but on its own it only runs one GraphQL query you wrote against one store. Syncing two stores with it means fetching each side by hand, comparing the JSON yourself, swapping every ID for the target's, ordering the writes so definitions exist before entries, uploading the images, and hoping nobody edited the target in between. That is the work this tool does, from one sentence to your AI assistant.
+
+<p align="center">
+  <img src="docs/images/vs-shopify-cli.png" alt="Left: raw shopify store execute commands per store with manual comparison and ID rewriting. Right: diff_stores, plan_sync and apply_plan doing it with remapping, ordering, uploads and drift checks" width="100%">
+</p>
+
 ## What it syncs
 
 | Resource | Keyed by | Notes |
@@ -100,7 +108,11 @@ What `diff_stores` reports, field by field (real output):
 
 ### 1. Connect your stores
 
-This server is a program you run yourself, so it can't borrow the Shopify login of your AI client. Pick one of three ways to give it access.
+This server is a program you run yourself, so it can't borrow the Shopify login of your AI client. Most people only need option 1, which creates no app. Options 2 and 3 are for scheduled or unattended runs.
+
+<p align="center">
+  <img src="docs/images/connect.png" alt="connect output: browser approval, Connected, and the stores.json line to add; then the three ways to connect compared" width="100%">
+</p>
 
 **Option 1: sign in with Shopify CLI (fastest, no app to create).** Works on any store where your Shopify account can approve app access, including client stores you collaborate on.
 
@@ -118,7 +130,7 @@ Each `connect` opens Shopify in your browser; click **Install** to approve. It a
 
 Requests then run through `shopify store execute`, Shopify CLI's supported command, using the sign-in it saved. Each request starts Shopify CLI (about a second), so a full diff takes tens of seconds instead of one or two with an app. That sign-in belongs to you and expires after a while; when it does, the tool says so and you run `connect` again. Because of that, use one of the options below for scheduled or unattended runs.
 
-**Option 2: a Dev Dashboard app (best for automation on your own or your organization's stores).** One app covers every store in the same Shopify organization, and tokens are fetched and refreshed for you.
+**Option 2 (for automation): a Dev Dashboard app, on your own or your organization's stores.** One app covers every store in the same Shopify organization, and tokens are fetched and refreshed for you.
 
 1. Open the [Dev Dashboard](https://dev.shopify.com/dashboard), go to **Apps**, click **Create app**, then **Create app manually**.
 2. Give it a name, for example `Store Sync`. Any URL works as the App URL (it's never opened); untick **Embed app in Shopify admin**.
@@ -128,7 +140,7 @@ Requests then run through `shopify store execute`, Shopify CLI's supported comma
 
 Adding a scope later means releasing a new version and approving the update on each store (same install link).
 
-**Option 3: an access token from a custom app (a store owned by someone else, for automation).** Client credentials only work on stores in the app's own organization; elsewhere Shopify answers `shop_not_permitted`. For unattended runs on such a store, ask the owner to create a custom app in their admin (**Settings > Apps > Develop apps**), grant the scopes below, install it and share the Admin API access token (`shpat_...`). Use it as `accessToken` in step 2.
+**Option 3 (for automation): an access token from a custom app, on a store owned by someone else.** Client credentials only work on stores in the app's own organization; elsewhere Shopify answers `shop_not_permitted`. For unattended runs on such a store, ask the owner to create a custom app in their admin (**Settings > Apps > Develop apps**), grant the scopes below, install it and share the Admin API access token (`shpat_...`). Use it as `accessToken` in step 2.
 
 | Resource | Read scope | Write scope |
 |---|---|---|
@@ -385,6 +397,8 @@ Adding a resource type means writing one adapter (`fetch`, `create`, `update`) i
 - [x] Snapshots as files, for git-tracked store config
 - [x] Command line
 - [x] Read-only theme settings diff
+- [x] Connect without creating an app (Shopify CLI sign-in)
+- [x] Published on npm
 - [ ] Move collection rules to Shopify's new `sources` model (`ruleSet` is deprecated but supported through 2027-01)
 - [ ] Menu item (link) translations
 - [ ] Metafield values on variants, pages and the shop

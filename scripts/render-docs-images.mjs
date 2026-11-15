@@ -417,3 +417,82 @@ render("config-as-code", 1280, 490, `
   .file-view pre { padding: 14px 16px; font-size: 13px; line-height: 1.6; color: #c9d4df; white-space: pre-wrap; }
   .notes { margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; }
 `);
+
+// ---------------------------------------------------------------- connect without an app
+// Output of `connect` as printed on a live store (Windows, Shopify CLI 4.9.4); store and email made generic.
+const connectLines = [
+  ["$", "npx shopify-store-sync-mcp connect my-staging-store --writes"],
+  ["", "Opening Shopify in your browser to approve access to my-staging-store.myshopify.com (read and write)..."],
+  ["", "Shopify CLI will open the app authorization page in your browser."],
+  ["g", "✔ Logged in."],
+  ["g", "✔ Authenticated as you@example.com against my-staging-store.myshopify.com."],
+  ["g", "Connected to My Staging Store (my-staging-store.myshopify.com)."],
+  ["", ""],
+  ["", "Add it to stores.json:"],
+  ["b", '  "my-staging-store": { "domain": "my-staging-store.myshopify.com", "auth": "shopify-cli", "allowWrites": true }'],
+];
+const opt = (title, tag, cls, rows) => `<div class="opt card"><div class="ot"><span class="b2">${title}</span><span class="tag ${cls}">${tag}</span></div>${rows.map(([k, v]) => `<div class="row"><span class="muted">${k}</span><span>${v}</span></div>`).join("")}</div>`;
+render("connect", 1280, 500, `
+<div class="wrap">
+  <div class="hd"><span class="b2">Connect a store in one click, no app to create</span><span class="muted">uses Shopify CLI's own sign-in</span></div>
+  <div class="term card mono">
+    ${connectLines.map(([c, t]) => (c === "$" ? `<div><span class="g">$</span> ${esc(t)}</div>` : `<div class="${c}">${esc(t) || "&nbsp;"}</div>`)).join("")}
+  </div>
+  <div class="opts">
+    ${opt("Shopify CLI sign-in", "no app", "bg-g", [["Setup", "<span class='mono'>connect</span>, click Install"], ["Works on", "any store you can approve apps on"], ["Speed", "a full diff in tens of seconds"], ["Best for", "working at your keyboard"]])}
+    ${opt("Dev Dashboard app", "client ID + secret", "bg-b", [["Setup", "create one app, install per store"], ["Works on", "stores in your own organization"], ["Speed", "a full diff in about 2 seconds"], ["Best for", "scheduled and unattended runs"]])}
+    ${opt("Custom app token", "shpat_...", "bg-a", [["Setup", "store owner creates it and shares the token"], ["Works on", "any store whose owner shares a token"], ["Speed", "a full diff in about 2 seconds"], ["Best for", "automation on a client's store"]])}
+  </div>
+</div>`, `
+  .wrap { width: 1280px; padding: 26px 32px; }
+  .hd { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; font-size: 15px; }
+  .b2 { font-weight: 700; }
+  .term { padding: 16px 20px; font-size: 13.5px; line-height: 1.65; color: #c9d4df; }
+  .term div { white-space: pre; }
+  .opts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 16px; }
+  .opt { padding: 14px 16px; font-size: 13.5px; }
+  .ot { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .tag { font-size: 11.5px; color: #0b0f14; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+  .row { display: grid; grid-template-columns: 78px 1fr; gap: 8px; padding: 4px 0; border-top: 1px solid #1c2530; }
+`);
+
+// ---------------------------------------------------------------- Shopify CLI alone vs this tool
+render("vs-shopify-cli", 1280, 362, `
+<div class="wrap">
+  <div class="cols">
+    <div class="col card">
+      <div class="ch"><span class="b2">Shopify CLI alone</span><span class="muted">one raw query, one store</span></div>
+      <pre class="mono">$ shopify store execute --store dev.myshopify.com \\
+    --query 'query { metaobjects(type: "size_guide", first: 50) { nodes { id handle fields { key value } } } }'
+$ shopify store execute --store prod.myshopify.com --query '...'
+<span class="muted"># now compare the two JSON blobs by hand</span>
+<span class="muted"># find gid://shopify/Product/101 in dev, look up its handle,</span>
+<span class="muted"># find that handle's ID in prod, rewrite every reference</span>
+$ shopify store execute --store prod.myshopify.com --allow-mutations \\
+    --query 'mutation { metaobjectCreate(...) }'
+<span class="muted"># repeat for each definition, entry, page, menu, redirect...</span>
+<span class="r"># no plan, no drift check, no record of what changed</span></pre>
+    </div>
+    <div class="col card">
+      <div class="ch"><span class="b2">shopify-store-sync-mcp</span><span class="muted">uses that same sign-in</span></div>
+      <pre class="mono"><span class="muted">You:</span> Compare dev with prod and sync the size guides.
+
+<span class="g">diff_stores</span>  field-level differences, both stores
+<span class="g">plan_sync</span>    dry-run plan you review first
+<span class="g">apply_plan</span>   writes in dependency order:
+             definitions before entries,
+             two passes for self-references
+             IDs remapped by handle
+             images uploaded when missing
+             target re-read, drifted items skipped
+             never deletes, every write logged</pre>
+    </div>
+  </div>
+</div>`, `
+  .wrap { width: 1280px; padding: 26px 32px; }
+  .cols { display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px; }
+  .col { overflow: hidden; }
+  .ch { display: flex; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #1c2530; background: #0e1319; font-size: 14px; }
+  .b2 { font-weight: 700; }
+  pre { padding: 16px; font-size: 13px; line-height: 1.65; color: #c9d4df; white-space: pre-wrap; }
+`);
