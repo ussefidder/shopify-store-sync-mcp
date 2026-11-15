@@ -496,3 +496,115 @@ $ shopify store execute --store prod.myshopify.com --allow-mutations \\
   .b2 { font-weight: 700; }
   pre { padding: 16px; font-size: 13px; line-height: 1.65; color: #c9d4df; white-space: pre-wrap; }
 `);
+
+// ---------------------------------------------------------------- shared card styles for the overview images
+const CARD_CSS = `
+  .wrap { width: 1280px; padding: 26px 32px; }
+  .title { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 16px; }
+  .title h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.2px; }
+  .title span { font-size: 14px; }
+  .grid { display: grid; gap: 14px; }
+  .tile { padding: 16px 18px; }
+  .tile h3 { font-size: 16px; font-weight: 700; margin: 10px 0 6px; }
+  .tile p { font-size: 13.5px; line-height: 1.5; color: #aab6c4; }
+  .ico { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
+         font-weight: 700; font-size: 13px; color: #0b0f14; }
+  .tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid #2c3a4a; color: #8b98a8; margin-left: 6px; vertical-align: middle; font-weight: 500; }
+`;
+const tile = (abbr, color, title, text, tag = "") =>
+  `<div class="tile card"><div class="ico" style="background:${color}">${abbr}</div><h3>${title}${tag ? `<span class="tag">${tag}</span>` : ""}</h3><p>${text}</p></div>`;
+const G = "#57c26e", B = "#6cb6ff", A = "#e3b341", R = "#f47067", P = "#a371f7", T = "#39c5cf";
+
+// ---------------------------------------------------------------- quick start in 3 steps
+render("quickstart", 1280, 330, `
+<div class="wrap">
+  <div class="title"><h2>Up and running in 3 steps</h2><span class="muted">no app to create, nothing to host</span></div>
+  <div class="grid" style="grid-template-columns: repeat(3, 1fr)">
+    <div class="step card"><div class="n" style="background:${G}">1</div><h3>Connect your stores</h3>
+      <pre class="mono"><span class="g">$</span> npx shopify-store-sync-mcp \\
+    connect my-dev-store
+<span class="g">$</span> npx shopify-store-sync-mcp \\
+    connect my-prod-store --writes</pre><p>Approve in the browser. Done.</p></div>
+    <div class="step card"><div class="n" style="background:${B}">2</div><h3>Add it to your AI client</h3>
+      <pre class="mono">"shopify-store-sync": {
+  "command": "npx",
+  "args": ["-y", "shopify-store-sync-mcp"]
+}</pre><p>Claude, Cursor or any MCP client.</p></div>
+    <div class="step card"><div class="n" style="background:${P}">3</div><h3>Ask in plain language</h3>
+      <div class="bubble">Compare dev with prod, then sync the size guides and the main menu.</div>
+      <p>You review a dry-run plan before anything is written.</p></div>
+  </div>
+</div>`, CARD_CSS + `
+  .step { padding: 16px 18px; position: relative; }
+  .n { width: 30px; height: 30px; border-radius: 50%; color: #0b0f14; font-weight: 800; display: flex; align-items: center; justify-content: center; font-size: 15px; }
+  .step h3 { font-size: 16px; margin: 10px 0 10px; }
+  .step pre { background: #0b1016; border: 1px solid #1c2530; border-radius: 10px; padding: 10px 12px; font-size: 12.5px; line-height: 1.55; color: #c9d4df; white-space: pre; }
+  .step p { font-size: 13px; color: #8b98a8; margin-top: 10px; }
+  .bubble { background: #1b2a3a; border: 1px solid #2a4058; border-radius: 14px 14px 14px 4px; padding: 12px 14px; font-size: 14px; line-height: 1.5; }
+`);
+
+// ---------------------------------------------------------------- what it syncs
+render("what-it-syncs", 1280, 448, `
+<div class="wrap">
+  <div class="title"><h2>What it syncs</h2><span class="muted">with the images they use, and every reference remapped</span></div>
+  <div class="grid" style="grid-template-columns: repeat(5, 1fr)">
+    ${tile("MF", G, "Metafield definitions", "Types, validations, access, pinning and capabilities, per owner type.")}
+    ${tile("MO", G, "Metaobject definitions", "Schemas, access and capabilities, self-references included.")}
+    ${tile("ME", B, "Metaobject entries", "Every field value, references to products, pages and entries remapped.")}
+    ${tile("CO", B, "Collections", "Descriptions, SEO, sort order and smart-collection rules.")}
+    ${tile("PG", A, "Pages", "Title, body, template and published state.")}
+    ${tile("NV", A, "Menus", "Full 3-level trees, customer account menus included.")}
+    ${tile("RD", T, "Redirects", "Thousands of URL redirects, no CSV.")}
+    ${tile("PL", T, "Store policies", "Refund, privacy, terms, shipping and contact text.")}
+    ${tile("MV", P, "Metafield values", "On products and collections, matched by handle.", "opt-in")}
+    ${tile("TR", P, "Translations", "Pages, collections, metaobjects, menus and policies, per language.", "opt-in")}
+  </div>
+</div>`, CARD_CSS);
+
+// ---------------------------------------------------------------- use cases
+render("use-cases", 1280, 212, `
+<div class="wrap">
+  <div class="grid" style="grid-template-columns: repeat(4, 1fr)">
+    ${tile("→", G, "Dev to production", "Build a new metaobject type on a dev store, review the diff against production, ship it with one plan.")}
+    ${tile("EU", B, "Multi-region brands", "Keep the EU, UK and US stores on the same definitions, menus and redirects.")}
+    ${tile("+", A, "New market launch", "Seed a new store with an existing one's setup, then see exactly what still differs.")}
+    ${tile("?", P, "Drift audits", "Ask which stores have drifted, or run it on a schedule. Every check is read-only.")}
+  </div>
+</div>`, CARD_CSS);
+
+// ---------------------------------------------------------------- safety
+render("safety", 1280, 432, `
+<div class="wrap">
+  <div class="title"><h2>Safe on production by design</h2><span class="muted">checked again before every single write</span></div>
+  <div class="grid" style="grid-template-columns: repeat(4, 1fr)">
+    ${tile("RO", G, "Read-only by default", "Writes stay off until you allow them, per store.")}
+    ${tile("PL", G, "Plan, then apply", "Only a reviewed dry-run plan is ever applied. Plans expire after an hour.")}
+    ${tile("DR", B, "Drift protection", "The target is re-read; anything edited since the plan is skipped, not overwritten.")}
+    ${tile("∅", B, "Never deletes", "Items and fields that exist only in the target are always left alone.")}
+    ${tile("!", A, "Protected stores", "Production needs its exact domain typed as confirmation.")}
+    ${tile("≠", A, "Conflicts not forced", "A type change Shopify can't apply is reported and skipped.")}
+    ${tile("LOG", T, "Audit log", "Every write is appended to a local JSON lines log.")}
+    ${tile("ID", T, "No broken IDs", "References that can't be matched are flagged, never copied raw.")}
+  </div>
+</div>`, CARD_CSS);
+
+// ---------------------------------------------------------------- tested
+render("tested", 1280, 288, `
+<div class="wrap">
+  <div class="title"><h2>Tested on real stores, not just in theory</h2><span class="muted">two live Shopify stores, on Linux and Windows</span></div>
+  <div class="stats">
+    <div class="stat card"><b class="g">60</b><span>automated tests</span></div>
+    <div class="stat card"><b class="b">47</b><span>GraphQL operations validated against Shopify's schema</span></div>
+    <div class="stat card"><b class="a">10</b><span>resource types written to a live store</span></div>
+    <div class="stat card"><b style="color:${P}">2</b><span>sign-in methods used live: Shopify CLI and an app</span></div>
+  </div>
+  <div class="checks">
+    ${["Create and update across 7 resource types", "Image uploaded to the target by file name", "French translation registered", "Product reference remapped to the target's own ID", "Read-only store refused a write", "Target edited after planning: step skipped", "Same results through the MCP server over stdio", "Shopify CLI sign-in on Windows, end to end"].map((t) => `<div class="ck"><span class="g">✓</span> ${t}</div>`).join("")}
+  </div>
+</div>`, CARD_CSS + `
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .stat { padding: 14px 18px; display: flex; align-items: center; gap: 14px; }
+  .stat b { font-size: 34px; font-weight: 800; }
+  .stat span { font-size: 13.5px; color: #aab6c4; line-height: 1.4; }
+  .checks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px 14px; margin-top: 16px; font-size: 13.5px; color: #c9d4df; }
+`);

@@ -10,60 +10,38 @@
   <img src="https://img.shields.io/badge/Shopify%20Admin%20API-2026--10-e3b341" alt="Shopify Admin API 2026-10">
 </p>
 
-# shopify-store-sync-mcp
+<h3 align="center">Keep your Shopify stores in sync by asking for it.</h3>
 
-**Keep your Shopify stores in sync by asking for it.** Compare a dev store with production, see every difference field by field, review a dry-run plan, then apply it, from Claude, Cursor or any MCP client.
+<p align="center">Compare a dev store with production, see every difference field by field, review a dry-run plan, then apply it.<br>From Claude, Cursor or any MCP client, or straight from the command line.</p>
 
-It copies the store setup that usually gets rebuilt by hand: **metafield and metaobject definitions, metaobject entries, collections, pages, menus, redirects, store policies, metafield values and translations**, with the images they use. References between them (a size guide pointing at a product, a menu linking to a page) are carried across by handle, so they land on the right item in the target store instead of a broken ID.
+<p align="center">
+  <a href="#get-started">Get started</a> ·
+  <a href="#what-it-syncs">What it syncs</a> ·
+  <a href="#why-this-tool">Why this tool</a> ·
+  <a href="#safe-on-production">Safety</a> ·
+  <a href="#tested-on-real-stores">Tested</a>
+</p>
 
-<table>
-<tr>
-<td width="33%" valign="top"><b>See it before it happens</b><br>Field-level diffs and a dry-run plan for every sync. Nothing is written until you apply a reviewed plan.</td>
-<td width="33%" valign="top"><b>Safe on production</b><br>Writes are off by default, protected stores need typed confirmation, drifted items are skipped, and nothing is ever deleted.</td>
-<td width="33%" valign="top"><b>References that survive</b><br>Product, collection, page, metaobject and definition IDs are remapped by handle between stores.</td>
-</tr>
-</table>
-
-> **What you need:** Node 20+ and access to the stores' admin. The quickest way to connect needs no app at all: run `shopify-store-sync-mcp connect my-store`, approve in the browser, done (it uses [Shopify CLI](https://shopify.dev/docs/api/shopify-cli)'s own sign-in). For scheduled or unattended runs, a private app works too. [Setup below](#1-connect-your-stores).
+<p align="center">
+  <img src="docs/images/quickstart.png" alt="Three steps: connect your stores with npx shopify-store-sync-mcp connect, add the server to your AI client, ask in plain language" width="100%">
+</p>
 
 <p align="center">
   <img src="docs/images/demo.png" alt="diff_stores, plan_sync and apply_plan output: 6 created, 3 updated, 1 conflict skipped, protected store refused without confirmation" width="100%">
 </p>
 
-<sub>Real output of the server's tools on two sample stores. Regenerate with <code>npm run docs:demo && npm run docs:images</code>.</sub>
-
-## Use cases
-
-- **Dev → staging → production.** Build a new metaobject type and its entries on a dev store, check the diff against production, ship it with one reviewed plan.
-- **Multi-region brands.** Keep the EU, UK and US stores on the same definitions, menus and redirects without exporting CSVs.
-- **New market launch.** Seed a new store with the setup of an existing one, then see exactly what still differs.
-- **Drift audits.** Ask which stores have fallen out of line, without changing anything (every tool except `apply_plan` is read-only).
-
-## Why this exists
-
-Most Shopify Plus brands run more than one store: a dev store, a staging store, one per region or currency. Anyone who has kept them in step knows the routine: rebuild metaobject definitions by hand, copy FAQ entries one by one, re-link every menu item, export and import redirects through CSV. It's slow, and it breaks in quiet ways, because **every ID is different in every store**.
-
-There are plenty of Shopify Admin MCP servers that read and write a *single* store. This one is built for the job *between* stores:
-
-| | Generic Admin MCP servers | shopify-store-sync-mcp |
-|---|---|---|
-| Compare two stores | ❌ | ✅ field-level diff |
-| Cross-store ID remapping | ❌ you copy raw IDs | ✅ products, collections, pages, blogs, metaobjects, definitions, customer account pages and shop policies |
-| Dry run before writing | ❌ | ✅ every write goes through a reviewed plan |
-| Detects changes made after planning | ❌ | ✅ re-reads the target and skips anything that drifted |
-| Deletes | sometimes | **never** |
-| Production guardrails | ❌ | ✅ writes are off by default; protected stores need typed confirmation |
-| Audit trail | ❌ | ✅ JSONL log of every write |
-
-### Why not just use Shopify CLI?
-
-Shopify CLI is how this tool can sign in, but on its own it only runs one GraphQL query you wrote against one store. Syncing two stores with it means fetching each side by hand, comparing the JSON yourself, swapping every ID for the target's, ordering the writes so definitions exist before entries, uploading the images, and hoping nobody edited the target in between. That is the work this tool does, from one sentence to your AI assistant.
-
-<p align="center">
-  <img src="docs/images/vs-shopify-cli.png" alt="Left: raw shopify store execute commands per store with manual comparison and ID rewriting. Right: diff_stores, plan_sync and apply_plan doing it with remapping, ordering, uploads and drift checks" width="100%">
-</p>
+<sub>Real output of the server's tools on two sample stores.</sub>
 
 ## What it syncs
+
+The store setup that usually gets rebuilt by hand, plus the images it uses. References between items (a size guide pointing at a product, a menu linking to a page) are carried across by handle, so they land on the right item instead of a broken ID.
+
+<p align="center">
+  <img src="docs/images/what-it-syncs.png" alt="Metafield definitions, metaobject definitions and entries, collections, pages, menus, redirects, store policies, and opt-in metafield values and translations" width="100%">
+</p>
+
+<details>
+<summary><b>Details per resource</b></summary>
 
 | Resource | Keyed by | Notes |
 |---|---|---|
@@ -76,45 +54,66 @@ Shopify CLI is how this tool can sign in, but on its own it only runs one GraphQ
 | `collections` | `handle` | Title, description, sort order, template, SEO and smart-collection rules (rules on a metafield definition are remapped). Manual collections keep their own product list; sales-channel publishing is not copied. Manual versus smart is reported as a conflict. |
 | `shop_policies` | `type` | Refund, privacy, terms, shipping and contact policy text. |
 | `metafields` *(opt-in)* | `OWNER/handle/namespace.key` | Metafield **values** on products and collections, landed on the item with the same handle. Reference values are remapped. Filter with `namespaces`. |
-| `translations` *(opt-in)* | `locale:Type/handle` | Translations of pages, collections, metaobjects, menus and policies. Registered against the target's own text, after the content itself is synced. The plan warns when a language isn't added to the target. |
-
-`metafields` and `translations` can be large, so they're read only when you ask for them (`resources: ["metafields"]`). App-owned (`app--…`) and Shopify-reserved (`shopify--…`) data is skipped and listed in the report.
+| `translations` *(opt-in)* | `locale:Type/handle` | Translations of pages, collections, metaobjects, menus and policies. Registered against the target's own text, after the content itself is synced. The plan warns when a language isn't added to the target. |\n\n`metafields` and `translations` can be large, so they're read only when you ask for them (`resources: ["metafields"]`). App-owned (`app--…`) and Shopify-reserved (`shopify--…`) data is skipped and listed in the report.
 
 **Files and images** referenced by any of the above are matched by file name in the target. When one is missing, the plan says so and `apply_plan` uploads it from the source store.
 
-## Tools
+</details>
 
-| Tool | Writes? | What it does |
-|---|---|---|
-| `list_stores` | no | Configured stores and their write permissions. Secrets are never returned. |
-| `list_resource_types` | no | What can be synced and how it's keyed. |
-| `snapshot_store` | no | Read one store's configuration in portable form. |
-| `diff_stores` | no | Only-in-source, changed (field by field), only-in-target. |
-| `plan_sync` | no | Dry-run plan: creates, updates, conflicts, missing references. Returns a `plan_id`. |
-| `get_plan` | no | Show a plan, or list recent ones. |
-| `apply_plan` | **yes** | Execute a plan, with every safety check below. |
-| `export_snapshot` | local files only | Write a store's configuration to a folder for git ([config as code](#config-as-code)). |
-| `diff_themes` | no | Compare theme templates and settings between two stores ([theme settings](#theme-settings-diff)). |
-
-Every tool except `apply_plan` is read-only toward Shopify and annotated as such, so clients can auto-approve them.
-
-What `diff_stores` reports, field by field (real output):
+## Use cases
 
 <p align="center">
-  <img src="docs/images/field-diff.png" alt="Field-level diff: page body, menu items, definition name, and a type conflict reported but not forced" width="100%">
+  <img src="docs/images/use-cases.png" alt="Dev to production, multi-region brands, new market launch, drift audits" width="100%">
 </p>
 
-## Quick start
+## Why this tool
+
+Plenty of Shopify MCP servers read and write *one* store. This one is built for the job *between* stores, where every ID is different:
+
+| | Generic Admin MCP servers | shopify-store-sync-mcp |
+|---|---|---|
+| Compare two stores | ❌ | ✅ field-level diff |
+| Cross-store ID remapping | ❌ you copy raw IDs | ✅ products, collections, pages, blogs, metaobjects, definitions, customer account pages and shop policies |
+| Dry run before writing | ❌ | ✅ every write goes through a reviewed plan |
+| Detects changes made after planning | ❌ | ✅ re-reads the target and skips anything that drifted |
+| Deletes | sometimes | **never** |
+| Production guardrails | ❌ | ✅ writes are off by default; protected stores need typed confirmation |
+| Audit trail | ❌ | ✅ JSONL log of every write |
+
+**Why not just Shopify CLI?** The CLI runs one query you wrote, on one store. This tool uses the CLI only to sign in, and does the comparing, ID remapping, ordering, uploads and safety checks for you.
+
+<p align="center">
+  <img src="docs/images/vs-shopify-cli.png" alt="Left: raw shopify store execute commands per store with manual comparison and ID rewriting. Right: diff_stores, plan_sync and apply_plan doing it with remapping, ordering, uploads and drift checks" width="100%">
+</p>
+
+## Safe on production
+
+<p align="center">
+  <img src="docs/images/safety.png" alt="Read-only by default, plan then apply, drift protection, never deletes, protected stores, conflicts not forced, audit log, no broken IDs" width="100%">
+</p>
+
+<details>
+<summary><b>How each safeguard works</b></summary>
+
+1. **Read-only by default.** `allowWrites` is `false` until you set it, per store.
+2. **Plan, then apply.** `apply_plan` only runs a plan produced by `plan_sync`. Plans expire after an hour.
+3. **Drift protection.** Before writing, the target is re-read. Any item that changed since planning is skipped, not overwritten.
+4. **No deletes.** Items that exist only in the target are listed, never removed. Fields that exist only in the target are left alone.
+5. **Protected stores.** Production needs the exact domain typed as confirmation.
+6. **Conflicts aren't forced.** A metafield definition whose type differs is reported and skipped.
+7. **Audit log.** Every write is appended to `~/.shopify-store-sync/audit.log` (override with `SYNC_AUDIT_LOG`).
+
+</details>
+
+## Get started
 
 ### 1. Connect your stores
 
-This server is a program you run yourself, so it can't borrow the Shopify login of your AI client. Most people only need option 1, which creates no app. Options 2 and 3 are for scheduled or unattended runs.
+Most people only need the first option: no app to create. The other two are for scheduled or unattended runs.
 
 <p align="center">
   <img src="docs/images/connect.png" alt="connect output: browser approval, Connected, and the stores.json line to add; then the three ways to connect compared" width="100%">
 </p>
-
-**Option 1: sign in with Shopify CLI (fastest, no app to create).** Works on any store where your Shopify account can approve app access, including client stores you collaborate on.
 
 ```bash
 npm install -g @shopify/cli
@@ -122,25 +121,43 @@ npx shopify-store-sync-mcp connect my-dev-store            # read-only
 npx shopify-store-sync-mcp connect my-staging-store --writes
 ```
 
+<details>
+<summary><b>More about the Shopify CLI sign-in</b></summary>
+
 Each `connect` opens Shopify in your browser; click **Install** to approve. It asks for read-only scopes unless you pass `--writes` (or the store is configured with `"allowWrites": true`), then prints the line to add to `stores.json`:
 
 ```json
 { "stores": { "my-dev-store": { "domain": "my-dev-store.myshopify.com", "auth": "shopify-cli" } } }
 ```
 
-Requests then run through `shopify store execute`, Shopify CLI's supported command, using the sign-in it saved. Each request starts Shopify CLI (about a second), so a full diff takes tens of seconds instead of one or two with an app. That sign-in belongs to you and expires after a while; when it does, the tool says so and you run `connect` again. Because of that, use one of the options below for scheduled or unattended runs.
+Requests then run through `shopify store execute`, Shopify CLI's supported command, using the sign-in it saved. Each request starts Shopify CLI (about a second), so a full diff takes tens of seconds instead of one or two with an app. That sign-in belongs to you and expires after a while; when it does, the tool says so and you run `connect` again. Because of that, use option 2 or 3 for scheduled or unattended runs.
 
-**Option 2 (for automation): a Dev Dashboard app, on your own or your organization's stores.** One app covers every store in the same Shopify organization, and tokens are fetched and refreshed for you.
+</details>
+
+<details>
+<summary><b>Option 2: a Dev Dashboard app (automation on your own stores)</b></summary>
+
+One app covers every store in the same Shopify organization, and tokens are fetched and refreshed for you.
 
 1. Open the [Dev Dashboard](https://dev.shopify.com/dashboard), go to **Apps**, click **Create app**, then **Create app manually**.
 2. Give it a name, for example `Store Sync`. Any URL works as the App URL (it's never opened); untick **Embed app in Shopify admin**.
-3. In **Scopes**, paste the scopes from the table below for what you'll sync, then click **Create app** and **Release**.
+3. In **Scopes**, paste the scopes from "Scopes needed per resource" below, then click **Create app** and **Release**.
 4. Install it on each store: open `https://admin.shopify.com/store/<store-handle>/oauth/install?client_id=<your client ID>` and click **Install**.
 5. Under the app's **Settings**, copy the **Client ID** and **Client secret** into environment variables (step 2 reads them from there).
 
 Adding a scope later means releasing a new version and approving the update on each store (same install link).
 
-**Option 3 (for automation): an access token from a custom app, on a store owned by someone else.** Client credentials only work on stores in the app's own organization; elsewhere Shopify answers `shop_not_permitted`. For unattended runs on such a store, ask the owner to create a custom app in their admin (**Settings > Apps > Develop apps**), grant the scopes below, install it and share the Admin API access token (`shpat_...`). Use it as `accessToken` in step 2.
+</details>
+
+<details>
+<summary><b>Option 3: an access token from a custom app (automation on a client's store)</b></summary>
+
+Client credentials only work on stores in the app's own organization; elsewhere Shopify answers `shop_not_permitted`. For unattended runs on such a store, ask the owner to create a custom app in their admin (**Settings > Apps > Develop apps**), grant the scopes listed below, install it and share the Admin API access token (`shpat_...`). Use it as `accessToken` in step 2.
+
+</details>
+
+<details>
+<summary><b>Scopes needed per resource</b></summary>
 
 | Resource | Read scope | Write scope |
 |---|---|---|
@@ -165,7 +182,24 @@ read_products,write_products,read_metaobjects,write_metaobjects,read_metaobject_
 
 Give source stores read-only scopes when you can.
 
+</details>
+
 ### 2. Describe your stores
+
+`connect` prints the line to add. A `stores.json` mixing all three ways to connect:
+
+```json
+{
+  "stores": {
+    "dev":  { "domain": "my-brand-dev.myshopify.com", "auth": "shopify-cli" },
+    "eu":   { "domain": "my-brand-eu.myshopify.com", "clientId": "env:EU_CLIENT_ID", "clientSecret": "env:EU_CLIENT_SECRET", "allowWrites": true, "protected": true },
+    "uk":   { "domain": "my-brand-uk.myshopify.com", "accessToken": "env:UK_TOKEN" }
+  }
+}
+```
+
+<details>
+<summary><b>All store options</b></summary>
 
 Create `stores.json`. Secrets can come from environment variables with `env:NAME`:
 
@@ -200,7 +234,24 @@ Create `stores.json`. Secrets can come from environment variables with `env:NAME
 
 You can also pass the whole config as JSON in `SHOPIFY_STORES`, or point `SHOPIFY_STORES_FILE` at a file elsewhere. For a single store, `SHOPIFY_STORE_DOMAIN` plus `SHOPIFY_ACCESS_TOKEN` works.
 
-### 3. Add it to your MCP client
+</details>
+
+### 3. Add it to your AI client
+
+```json
+{
+  "mcpServers": {
+    "shopify-store-sync": {
+      "command": "npx",
+      "args": ["-y", "shopify-store-sync-mcp"],
+      "env": { "SHOPIFY_STORES_FILE": "/absolute/path/to/stores.json" }
+    }
+  }
+}
+```
+
+<details>
+<summary><b>Claude Desktop, Claude Code and Cursor</b></summary>
 
 **Claude Desktop** (`claude_desktop_config.json`):
 
@@ -232,6 +283,8 @@ claude mcp add shopify-store-sync \
 
 **Cursor** (`.cursor/mcp.json`) takes the same `command`, `args` and `env` as Claude Desktop.
 
+</details>
+
 ### 4. Ask
 
 - *"Compare dev and eu. Only metaobjects and menus."*
@@ -243,7 +296,43 @@ claude mcp add shopify-store-sync \
 - *"Has eu drifted from ./store-config?"*
 - *"What's different in the theme settings between dev and eu?"*
 
+## Tools
+
+What `diff_stores` reports, field by field (real output):
+
+<p align="center">
+  <img src="docs/images/field-diff.png" alt="Field-level diff: page body, menu items, definition name, and a type conflict reported but not forced" width="100%">
+</p>
+
+<details>
+<summary><b>All 9 tools</b></summary>
+
+| Tool | Writes? | What it does |
+|---|---|---|
+| `list_stores` | no | Configured stores and their write permissions. Secrets are never returned. |
+| `list_resource_types` | no | What can be synced and how it's keyed. |
+| `snapshot_store` | no | Read one store's configuration in portable form. |
+| `diff_stores` | no | Only-in-source, changed (field by field), only-in-target. |
+| `plan_sync` | no | Dry-run plan: creates, updates, conflicts, missing references. Returns a `plan_id`. |
+| `get_plan` | no | Show a plan, or list recent ones. |
+| `apply_plan` | **yes** | Execute a plan, with every safety check below. |
+| `export_snapshot` | local files only | Write a store's configuration to a folder for git ([config as code](#config-as-code)). |
+| `diff_themes` | no | Compare theme templates and settings between two stores ([theme settings](#theme-settings-diff)). |
+
+Every tool except `apply_plan` is read-only toward Shopify and annotated as such, so clients can auto-approve them.
+
+</details>
+
 ## Command line
+
+Everything also works without an AI client, and `--exit-code` turns `diff` into a scheduled drift check.
+
+<p align="center">
+  <img src="docs/images/cli.png" alt="CLI output of diff, plan and themes commands" width="100%">
+</p>
+
+<details>
+<summary><b>Commands</b></summary>
 
 Everything also works without an AI client. Run a command instead of starting the server:
 
@@ -258,11 +347,18 @@ npx shopify-store-sync-mcp themes dev eu
 
 `--json` gives machine-readable output and `--exit-code` makes `diff` and `themes` exit with 2 when they find differences, handy for a scheduled drift check. Run `npx shopify-store-sync-mcp help` for every option.
 
-<p align="center">
-  <img src="docs/images/cli.png" alt="CLI output of diff, plan and themes commands" width="100%">
-</p>
+</details>
 
 ## Config as code
+
+Export a store's setup as small, sorted JSON files, commit it, and use the folder as a source anywhere (`dir:./store-config`) to spot drift, review changes as a pull request, or restore.
+
+<p align="center">
+  <img src="docs/images/config-as-code.png" alt="Exported store-config folder and one translation file" width="100%">
+</p>
+
+<details>
+<summary><b>How to use it</b></summary>
 
 Export a store's configuration as one small JSON file per item, with sorted keys and no store-specific IDs, then commit it:
 
@@ -277,13 +373,14 @@ Any command or tool that takes a source also takes `dir:<path>`:
 - **Review changes:** edit the files or re-export from staging, and review the change as a pull request.
 - **Restore or promote:** `plan dir:./store-config prod`, then `apply`, with all the usual safety checks.
 
-<p align="center">
-  <img src="docs/images/config-as-code.png" alt="Exported store-config folder and one translation file" width="100%">
-</p>
+</details>
 
-## Theme settings diff
+<details>
+<summary><b>Theme settings diff (read-only)</b></summary>
 
 `diff_themes` (or `themes` on the command line) compares the published themes of two stores: JSON templates, section groups and `config/settings_data.json`, setting by setting. Pass theme ids to compare other themes, and `files` to narrow it down (for example `templates/product*.json`). It is read-only: themes are never written to.
+
+</details>
 
 ## How it works
 
@@ -291,17 +388,12 @@ Any command or tool that takes a source also takes `dir:<path>`:
   <img src="docs/images/how-it-works.png" alt="Snapshot, diff, plan, apply, with safety checks before every write" width="100%">
 </p>
 
-## How it stays safe
+<p align="center">
+  <img src="docs/images/remapping.png" alt="gid://shopify/Product/101 in dev becomes shopify://Product/linen-shirt, then gid://shopify/Product/9101 in eu" width="100%">
+</p>
 
-1. **Read-only by default.** `allowWrites` is `false` until you set it, per store.
-2. **Plan, then apply.** `apply_plan` only runs a plan produced by `plan_sync`. Plans expire after an hour.
-3. **Drift protection.** Before writing, the target is re-read. Any item that changed since planning is skipped, not overwritten.
-4. **No deletes.** Items that exist only in the target are listed, never removed. Fields that exist only in the target are left alone.
-5. **Protected stores.** Production needs the exact domain typed as confirmation.
-6. **Conflicts aren't forced.** A metafield definition whose type differs is reported and skipped.
-7. **Audit log.** Every write is appended to `~/.shopify-store-sync/audit.log` (override with `SYNC_AUDIT_LOG`).
-
-## How ID remapping works
+<details>
+<summary><b>How ID remapping works</b></summary>
 
 Every Shopify ID is store-specific, so the server never compares or copies raw IDs. When it reads a store, each `gid://shopify/...` value is rewritten into a portable reference:
 
@@ -326,13 +418,16 @@ Files (images, generic files and videos) are matched by file name and uploaded t
 
 Two references followed from the source store to the target, as the sample sync above wrote them:
 
+</details>
+
+## Tested on real stores
+
 <p align="center">
-  <img src="docs/images/remapping.png" alt="gid://shopify/Product/101 in dev becomes shopify://Product/linen-shirt, then gid://shopify/Product/9101 in eu" width="100%">
+  <img src="docs/images/tested.png" alt="60 automated tests, 47 GraphQL operations validated, 10 resource types written live, 2 sign-in methods used live" width="100%">
 </p>
 
-## Tested against live stores
-
-Besides the 60 automated tests, every feature has been run end to end between two real Shopify development stores (a Shopify Plus source and a second store as target), through the real command line and the real MCP server over stdio, authenticating with a Dev Dashboard app and the client-credentials grant:
+<details>
+<summary><b>Every live test and its result</b></summary>
 
 | Feature | Live result |
 |---|---|
@@ -351,7 +446,10 @@ Besides the 60 automated tests, every feature has been run end to end between tw
 
 Behaviours of the live API found this way are covered by tests: `nodes` returns `null` for customer account pages (they're looked up by listing instead), `ShopPolicy.type` has to be aliased next to `Metaobject.type`, Shopify refuses edits to auto-managed policies, and a failed token request carries its reason (such as `app_not_installed`) in an HTML page.
 
-## Development
+</details>
+
+<details>
+<summary><b>Development</b></summary>
 
 ```bash
 npm install
@@ -376,6 +474,7 @@ src/
   themes.ts           read-only theme settings diff
   config.ts           store config loading and validation
   shopify/client.ts   Admin GraphQL client (token refresh, throttling, retries)
+  shopify/cliClient.ts  the same requests through Shopify CLI's sign-in (`shopify store execute`)
   refs.ts             GID <-> portable reference mapping
   snapshot.ts         read a store into portable form
   diff.ts             field-level diff
@@ -388,7 +487,10 @@ test/
 
 Adding a resource type means writing one adapter (`fetch`, `create`, `update`) in `src/resources/`. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Roadmap
+</details>
+
+<details>
+<summary><b>Roadmap</b></summary>
 
 - [x] Translations per locale
 - [x] File references, re-uploaded by URL
@@ -407,7 +509,10 @@ Adding a resource type means writing one adapter (`fetch`, `create`, `update`) i
 
 Ideas and PRs are welcome. Issues tagged `good first issue` are a good place to start.
 
-## Related projects
+</details>
+
+<details>
+<summary><b>Related projects</b></summary>
 
 Syncing definitions between stores isn't a new idea, and these tools are worth knowing:
 
@@ -418,7 +523,9 @@ Syncing definitions between stores isn't a new idea, and these tools are worth k
 | [shopify-metadata-migrator](https://github.com/warriorachilles/shopify-metadata-migrator) | CLI | Copies metafield and metaobject definitions |
 | MetaMaintain, Metora, Rewind Staging | Shopify apps (paid or freemium) | Definition and entry sync through an embedded app |
 
-What this project adds: it runs inside your AI client as an MCP server (or as a CLI) with a private app you create yourself, so there's no third-party app to install from the App Store and no data leaves your machine except to Shopify. You can ask for a diff in plain language; it also covers pages, menus, redirects, collections, policies, metafield values and translations, remaps references and files across stores, keeps store configuration in git, checks for drift before writing and never deletes. If you only need a scripted one-shot copy of definitions, one of the CLIs above may be all you need.
+What this project adds: it runs inside your AI client as an MCP server (or as a CLI) on your own machine, signed in as you through Shopify CLI or with your own private app, so there's no third-party app from the App Store and no data goes anywhere except Shopify. You can ask for a diff in plain language; it also covers pages, menus, redirects, collections, policies, metafield values and translations, remaps references and files across stores, keeps store configuration in git, checks for drift before writing and never deletes. If you only need a scripted one-shot copy of definitions, one of the CLIs above may be all you need.
+
+</details>
 
 ## Disclaimer
 
