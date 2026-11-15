@@ -258,7 +258,7 @@ export function alignProduct(source: Record<string, unknown>, target: Record<str
   const out = { ...target };
   const sImages = (source.images as unknown[]) ?? [];
   const tImages = (target.images as unknown[]) ?? [];
-  if (startsWith(tImages, sImages)) out.images = sImages.length ? tImages.slice(0, sImages.length) : undefined;
+  if (startsWith(tImages, sImages) && Array.isArray(target.images)) out.images = tImages.slice(0, sImages.length);
 
   const sOptions = (source.options as { name: string; values: string[] }[]) ?? [];
   const tOptions = (target.options as { name: string; values: string[] }[]) ?? [];
@@ -273,7 +273,6 @@ export function alignProduct(source: Record<string, unknown>, target: Record<str
   const kept = tVariants.filter((v) => sKeys.has(variantKey(v.options)));
   const order = new Map(sVariants.map((v, i) => [variantKey(v.options), i]));
   out.variants = kept.sort((a, b) => order.get(variantKey(a.options))! - order.get(variantKey(b.options))!);
-  if (out.images === undefined) delete out.images;
   return out;
 }
 
