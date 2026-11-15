@@ -31,7 +31,7 @@
   <img src="docs/images/explainer.gif" alt="An AI assistant compares two stores, shows the plan, and a person confirms the protected store before anything is written" width="100%">
 </p>
 
-<sub>Compare, plan, confirm, apply. Every output shown is real, from two sample stores. <a href="docs/explainer.mp4">Watch the full 70-second walkthrough with voice-over</a>.</sub>
+<sub>Compare, plan, confirm, apply. Every output shown is real, from two sample stores. <a href="docs/explainer.mp4">Watch the full walkthrough with voice-over and sound</a>.</sub>
 
 <p align="center">
   <img src="docs/images/demo.png" alt="diff_stores, plan_sync and apply_plan output: 6 created, 3 updated, 1 conflict skipped, protected store refused until a person confirms" width="100%">

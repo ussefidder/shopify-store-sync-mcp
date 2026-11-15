@@ -1,23 +1,46 @@
-"""Voice-over for the explainer, made locally with Kokoro (open-source text to speech).
+"""Voice-over for the explainer.
 
     pip install kokoro-onnx soundfile numpy
-    python tts.py <model.onnx> <voices.bin> <out-dir>
+    python tts.py <model.onnx> <voices.bin> <out-dir>      made locally with Kokoro (open-source text to speech)
+    python tts.py --lines <lines-dir> <out-dir>            from one recorded file per line (01.mp3, 02.mp3, ...),
+                                                           for example the ones tts-elevenlabs.mjs makes
 
 Writes voice.wav and timeline.json. The timeline (when each line and scene starts and ends) is
 what the animation is timed to, so picture and voice can't drift apart.
 """
 import json
 import os
+import subprocess
 import sys
 
 import numpy as np
 import soundfile as sf
-from kokoro_onnx import Kokoro
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-model, voices, out = sys.argv[1], sys.argv[2], sys.argv[3]
 script = json.load(open(os.path.join(HERE, "narration.json"), encoding="utf-8"))
-kokoro = Kokoro(model, voices)
+out = sys.argv[3]
+if sys.argv[1] == "--lines":
+    SR = 48000
+    files = sorted(f for f in os.listdir(sys.argv[2]) if f[:2].isdigit())
+    count = sum(len(s["lines"]) for s in script["scenes"])
+    if len(files) != count:
+        sys.exit(f"{len(files)} files in {sys.argv[2]}, but narration.json has {count} lines")
+    takes = iter(files)
+
+    def speak(_line):
+        """The next recorded line, decoded to mono samples by ffmpeg."""
+        raw = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", os.path.join(sys.argv[2], next(takes)), "-ac", "1", "-ar", str(SR), "-f", "f32le", "-"],
+            check=True, capture_output=True,
+        ).stdout
+        return np.frombuffer(raw, dtype=np.float32), SR
+else:
+    from kokoro_onnx import Kokoro
+
+    kokoro = Kokoro(sys.argv[1], sys.argv[2])
+
+    def speak(line):
+        return kokoro.create(line["say"], voice=script["voice"], speed=script["speed"], lang="en-us")
 
 LEAD_IN = 0.6      # silence before the first word
 LINE_GAP = 0.30    # between lines of a scene
@@ -33,14 +56,13 @@ def trim(samples, sr, floor=0.012, pad=0.03):
     b = min(len(samples), loud[-1] + int(pad * sr))
     return samples[a:b]
 
-sr = 24000
 t = LEAD_IN
 pieces = []          # (start_sample, samples)
 scenes, lines = [], []
 for scene in script["scenes"]:
     start = t - (LEAD_IN if not scenes else SCENE_GAP / 2)
     for i, line in enumerate(scene["lines"]):
-        samples, sr = kokoro.create(line["say"], voice=script["voice"], speed=script["speed"], lang="en-us")
+        samples, sr = speak(line)
         samples = trim(np.asarray(samples, dtype=np.float32), sr)
         dur = len(samples) / sr
         pieces.append((int(t * sr), samples))

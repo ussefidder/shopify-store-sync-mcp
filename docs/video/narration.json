@@ -1,6 +1,7 @@
 {
   "voice": "af_heart",
   "speed": 1.0,
+  "elevenlabs": { "voice": "Bella", "model": "eleven_multilingual_v2" },
   "scenes": [
     { "id": "problem", "lines": [
       { "say": "You built it on your dev store.", "caption": "You built it on your dev store." },

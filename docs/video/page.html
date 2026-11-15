@@ -313,7 +313,8 @@ const DRAW = {
     $$("#p-dev .it").forEach((el, i) => enter(el, prog(t, a + 0.25 + i * 0.16, 0.45), { x: -30, y: 0 }));
     enter($("#p-eu"), prog(t, b - 0.25, 0.6), { y: 50 });
     $$("#p-eu .it").forEach((el, i) => enter(el, prog(t, b + 0.1 + i * 0.2, 0.45), { x: 30, y: 0 }));
-    $$("#s-problem .idc").forEach((el, i) => pop(el, t, c + 2.1 + i * 0.28));
+    const cd = s.lines[2].end - c; // offsets inside a spoken line scale with its length, whatever the voice
+    $$("#s-problem .idc").forEach((el, i) => pop(el, t, c + 0.375 * cd + i * 0.28));
   },
   ask(t, s) {
     const [a, b, c] = s.lines.map((l) => l.start);
@@ -379,10 +380,11 @@ const DRAW = {
     enter($("#u-ok2"), prog(t, end2 + 0.5, 0.4), { y: 10 });
     cue("swish", a + 0.2);
     cue("ok", end2 + 0.5);
-    $$("#s-setup .up").forEach((el, i) => pop(el, t, c + 3.4 + i * 0.75));
+    const cd = s.lines[2].end - c, dd = s.lines[3].end - d;
+    $$("#s-setup .up").forEach((el, i) => pop(el, t, c + (0.667 + i * 0.147) * cd));
     const config = '"shopify-store-sync": {\n  "command": "npx",\n  "args": ["-y",\n    "shopify-store-sync-mcp"]\n}';
     type($("#u-c3"), config, t, d, 42, true);
-    $$("#s-setup .uc").forEach((el, i) => pop(el, t, d + 1.5 + i * 0.55));
+    $$("#s-setup .uc").forEach((el, i) => pop(el, t, d + (0.373 + i * 0.137) * dd));
   },
   terminal(t, s) {
     const rows = s.rows;
@@ -415,14 +417,14 @@ const DRAW = {
   },
   safety(t, s) {
     const l = s.lines[0];
-    const at = [l.start + 1.75, l.start + 3.2, l.start + 4.9];
+    const at = [0.285, 0.52, 0.8].map((k) => l.start + k * (l.end - l.start));
     $$("#s-safety .sb").forEach((el, i) => pop(el, t, Math.min(at[i], l.end - 0.6), 0.55, "card"));
   },
   cta(t, s) {
     const l = s.lines[0];
-    type($("#z-cmd"), "npx shopify-store-sync-mcp connect my-store", t, l.start + 1.5, 26);
-    enter($("#z-url"), prog(t, l.start + 3.3, 0.6));
-    $$("#s-cta .zp").forEach((el, i) => pop(el, t, l.start + 3.8 + i * 0.16));
+    type($("#z-cmd"), "npx shopify-store-sync-mcp connect my-store", t, l.start + 1.5, 34);
+    enter($("#z-url"), prog(t, l.start + 2.8, 0.6));
+    $$("#s-cta .zp").forEach((el, i) => pop(el, t, l.start + 3.2 + i * 0.14));
   },
 };
 
