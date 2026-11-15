@@ -4,6 +4,7 @@
 
 - Listed in the official MCP Registry as `io.github.ussefidder/shopify-store-sync-mcp` (`mcpName` in `package.json`, `server.json` in the repo)
 - No code changes
+- README: a 74-second explainer video with voice-over (source and build scripts in `docs/video`), and an MCP Registry badge
 
 ## 0.5.0
 
