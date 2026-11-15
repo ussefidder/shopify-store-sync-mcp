@@ -6,7 +6,7 @@
   <a href="https://www.npmjs.com/package/shopify-store-sync-mcp"><img src="https://img.shields.io/npm/v/shopify-store-sync-mcp?color=cb3837" alt="npm version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-57c26e" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/node-%3E%3D22-6cb6ff" alt="Node 22+">
-  <a href="https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.ussefidder/shopify-store-sync-mcp"><img src="https://img.shields.io/badge/MCP%20Registry-listed-a371f7" alt="Listed on the MCP Registry"></a>
+  <a href="https://registry.modelcontextprotocol.io/?q=shopify-store-sync-mcp"><img src="https://img.shields.io/badge/MCP%20Registry-listed-a371f7" alt="Listed on the MCP Registry"></a>
   <img src="https://img.shields.io/badge/Shopify%20Admin%20API-2026--10-e3b341" alt="Shopify Admin API 2026-10">
 </p>
 
