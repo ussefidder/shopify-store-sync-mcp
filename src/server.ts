@@ -1,21 +1,50 @@
+import { readFileSync } from "node:fs";
+import { isAbsolute, parse as parsePath, relative, resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { ElicitResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { ApplyRefused } from "./apply.js";
 import type { StoreConfig, StoreRegistry } from "./config.js";
 import { preview, type ResourceDiff } from "./diff.js";
-import { Engine, type Scope } from "./engine.js";
+import { DIR_PREFIX, Engine, isDirSpec, type Scope } from "./engine.js";
 import { PlanStore, type Plan } from "./plan.js";
 import { ADAPTERS, DEFAULT_KINDS, RESOURCE_KINDS, type ResourceKind } from "./resources/index.js";
 import { DEFAULT_OWNER_TYPES } from "./resources/metafieldDefinitions.js";
 import type { AdminClient } from "./shopify/client.js";
 import { DEFAULT_THEME_FILES, type ThemeDiff } from "./themes.js";
 
-export const VERSION = "0.4.0";
+/** Read from package.json, so there is one place to bump. */
+export const VERSION: string = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
 
 export interface ServerDeps {
   registry: StoreRegistry;
   plans?: PlanStore;
   clientFactory?: (store: StoreConfig) => AdminClient;
+  /** Defaults to process.env. */
+  env?: NodeJS.ProcessEnv;
+  /** Defaults to the working directory. */
+  cwd?: string;
+}
+
+/**
+ * Over MCP, folder arguments come from the assistant, so they are kept inside one base folder:
+ * SYNC_SNAPSHOT_DIR when set, otherwise the folder the server was started in. The command line,
+ * run by a person, has no such limit.
+ */
+export function snapshotBase(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): string {
+  return resolve(cwd, env.SYNC_SNAPSHOT_DIR || ".");
+}
+
+export function resolveInBase(dir: string, base: string): string {
+  if (parsePath(base).root === base) {
+    throw new Error("snapshot folders are limited to one base folder, and the server was started in the filesystem root. Set SYNC_SNAPSHOT_DIR to the folder that holds your snapshots.");
+  }
+  const full = resolve(base, dir);
+  const rel = relative(base, full);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error(`"${dir}" is outside the snapshot base folder (${base}). Use a path inside it, or set SYNC_SNAPSHOT_DIR.`);
+  }
+  return full;
 }
 
 const SOURCE_HELP = 'Store alias, or "dir:<path>" for a snapshot folder made with export_snapshot.';
@@ -34,6 +63,10 @@ const scopeArgs = {
   namespaces: z.array(z.string()).optional().describe("Limit metafield values (metafields) to these namespaces."),
   locales: z.array(z.string()).optional().describe("Limit translations to these locales, e.g. [\"fr\", \"de\"]. Default: every non-primary locale."),
   prices: z.boolean().optional().describe("products: also copy variant prices and compare-at prices. Off by default, since prices usually differ per store."),
+  as_drafts: z
+    .boolean()
+    .optional()
+    .describe("Leave the published state alone: new pages are created hidden and new metaobject entries as drafts, existing ones keep their state. Products are always created as drafts."),
   include: z
     .array(z.string())
     .optional()
@@ -48,6 +81,7 @@ type ScopeArgs = {
   namespaces?: string[];
   locales?: string[];
   prices?: boolean;
+  as_drafts?: boolean;
   include?: string[];
   exclude?: string[];
 };
@@ -59,6 +93,7 @@ const toScope = (a: ScopeArgs): Scope => ({
   namespaces: a.namespaces,
   locales: a.locales,
   prices: a.prices,
+  drafts: a.as_drafts,
   include: a.include,
   exclude: a.exclude,
 });
@@ -121,7 +156,7 @@ export function summarizePlan(plan: Plan, full = false) {
     opsTruncated: plan.ops.length > limit ? plan.ops.length - limit : undefined,
     onlyInTarget: plan.onlyInTarget.map((x) => ({ kind: x.kind, count: x.keys.length, keys: x.keys.slice(0, 50) })),
     skipped: plan.skipped.length ? plan.skipped : undefined,
-    note: "Nothing has been written. Review, then call apply_plan with this plan_id. Items only in the target are never deleted.",
+    note: "Nothing has been written. Review, then call apply_plan with this plan_id. Items only in the target are never deleted, and menu links, product tags, variants and media that only the target has are kept.",
   };
 }
 
@@ -142,21 +177,91 @@ export function summarizeThemes(d: ThemeDiff, limit = 100) {
   };
 }
 
+/** What a tool handler gets besides its arguments (the part of the SDK's "extra" used here). */
+interface ToolExtra {
+  _meta?: { progressToken?: string | number };
+  sendNotification?: (n: { method: "notifications/progress"; params: { progressToken: string | number; progress: number; total?: number; message?: string } }) => Promise<void>;
+}
+
+/**
+ * Progress for long calls. Only sent when the client asked for it (a progress token on the request);
+ * clients can use it to keep the call alive instead of giving up at their timeout.
+ */
+function progressOf(extra: ToolExtra | undefined) {
+  const token = extra?._meta?.progressToken;
+  const send = extra?.sendNotification;
+  if (token === undefined || !send) return undefined;
+  let last = 0;
+  return (message: string, done?: number, total?: number) => {
+    last = done ?? last + 1;
+    void send({ method: "notifications/progress", params: { progressToken: token, progress: last, total, message } }).catch(() => undefined);
+  };
+}
+
 export function createServer(deps: ServerDeps): McpServer {
   const engine = new Engine(deps.registry, deps.plans ?? new PlanStore(), deps.clientFactory);
+  const env = deps.env ?? process.env;
+  const base = () => snapshotBase(env, deps.cwd);
+  /** A store alias is passed through; a "dir:<path>" is pinned inside the snapshot base folder. */
+  const spec = (s: string) => (isDirSpec(s) ? `${DIR_PREFIX}${resolveInBase(s.slice(DIR_PREFIX.length), base())}` : s);
 
   const guard =
-    <A>(fn: (args: A) => Promise<ReturnType<typeof json>>) =>
-    async (args: A) => {
+    <A>(fn: (args: A, extra?: ToolExtra) => Promise<ReturnType<typeof json>>) =>
+    async (args: A, extra?: unknown) => {
       try {
-        return await fn(args);
+        return await fn(args, extra as ToolExtra | undefined);
       } catch (err) {
         if (err instanceof ApplyRefused) return fail(`Refused: ${err.message}`);
         return fail(err instanceof Error ? err.message : String(err));
       }
     };
+  const reading = (extra: ToolExtra | undefined) => {
+    const report = progressOf(extra);
+    return report ? (store: string, kind: ResourceKind, items: number) => report(`read ${items} ${kind} from ${store}`) : undefined;
+  };
 
   const server = new McpServer({ name: "shopify-store-sync-mcp", version: VERSION });
+
+  /**
+   * The confirmation for a protected store has to come from a person. The assistant can read the
+   * store's domain (list_stores returns it), so a value it passes proves nothing: the person is
+   * asked directly through the client instead. Clients that can't ask get pointed to the command line.
+   */
+  async function confirmProtected(plan: Plan, target: StoreConfig, fromModel: string | undefined): Promise<string> {
+    if (env.SYNC_ALLOW_AGENT_CONFIRM === "true") {
+      if (fromModel) return fromModel;
+      throw new ApplyRefused(`store "${target.alias}" is protected. Pass confirm with the store's myshopify domain.`);
+    }
+    const cli = `shopify-store-sync-mcp apply ${plan.id} --confirm <the store's myshopify domain>`;
+    if (!server.server.getClientCapabilities()?.elicitation) {
+      throw new ApplyRefused(`store "${target.alias}" is protected and this client can't ask a person to confirm. Apply the plan from a terminal instead: ${cli}`);
+    }
+    const count = (a: string) => plan.ops.filter((o) => o.action === a).length;
+    let answer;
+    try {
+      // Sent as a plain request (not elicitInput) so clients that declare the capability the older way, as {}, are asked too.
+      answer = await server.server.request(
+        {
+          method: "elicitation/create",
+          params: {
+            mode: "form",
+            message: `Apply ${count("create")} create(s) and ${count("update")} update(s) from ${plan.source.alias} to the protected store ${target.label ?? target.alias}? Type ${target.domain} to confirm.`,
+            requestedSchema: {
+              type: "object",
+              properties: { domain: { type: "string", title: "Store domain", description: "The target store's myshopify domain" } },
+              required: ["domain"],
+            },
+          },
+        },
+        ElicitResultSchema,
+        { timeout: 10 * 60_000 },
+      );
+    } catch {
+      throw new ApplyRefused(`store "${target.alias}" is protected and the confirmation couldn't be asked for. Apply the plan from a terminal instead: ${cli}`);
+    }
+    if (answer.action !== "accept") throw new ApplyRefused(`the confirmation for the protected store "${target.alias}" was ${answer.action === "decline" ? "declined" : "cancelled"}; nothing was written.`);
+    return String((answer.content as { domain?: unknown } | undefined)?.domain ?? "");
+  }
 
   server.registerTool(
     "list_stores",
@@ -197,7 +302,7 @@ export function createServer(deps: ServerDeps): McpServer {
     },
     guard(async (args: ScopeArgs & { store: string; full?: boolean }) => {
       const scope = toScope(args);
-      const { snapshot, diffs } = await engine.snapshot(args.store, scope);
+      const { snapshot, diffs } = await engine.snapshot(spec(args.store), scope);
       return json({
         store: snapshot.store,
         domain: snapshot.domain,
@@ -221,12 +326,16 @@ export function createServer(deps: ServerDeps): McpServer {
         "Write a store's configuration to a folder as one JSON file per item (sorted keys, no store IDs), ready to commit to git. Use \"dir:<path>\" as the source of diff_stores or plan_sync to compare or restore from it. Only writes local files, never to Shopify.",
       inputSchema: {
         store: z.string().describe("Store alias to read"),
-        dir: z.string().describe("Folder to write. Must be empty, new, or an earlier snapshot folder (its item files are replaced)."),
+        dir: z
+          .string()
+          .describe("Folder to write, inside the snapshot base folder (SYNC_SNAPSHOT_DIR, or the folder the server runs in). Must be empty, new, or an earlier snapshot folder (its item files are replaced)."),
         ...scopeArgs,
       },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
-    guard(async (args: ScopeArgs & { store: string; dir: string }) => json(await engine.export(args.store, args.dir, toScope(args)))),
+    guard(async (args: ScopeArgs & { store: string; dir: string }, extra) =>
+      json(await engine.export(args.store, resolveInBase(args.dir, base()), toScope(args), reading(extra))),
+    ),
   );
 
   server.registerTool(
@@ -244,8 +353,8 @@ export function createServer(deps: ServerDeps): McpServer {
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    guard(async (args: ScopeArgs & { source: string; target: string; show_values?: boolean; limit?: number }) => {
-      const { diffs, skipped } = await engine.compare(args.source, args.target, toScope(args));
+    guard(async (args: ScopeArgs & { source: string; target: string; show_values?: boolean; limit?: number }, extra) => {
+      const { diffs, skipped } = await engine.compare(spec(args.source), spec(args.target), toScope(args), reading(extra));
       return json({
         source: args.source,
         target: args.target,
@@ -268,8 +377,8 @@ export function createServer(deps: ServerDeps): McpServer {
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    guard(async (args: ScopeArgs & { source: string; target: string }) => {
-      const plan = await engine.plan(args.source, args.target, toScope(args));
+    guard(async (args: ScopeArgs & { source: string; target: string }, extra) => {
+      const plan = await engine.plan(spec(args.source), args.target, toScope(args), reading(extra));
       const target = deps.registry.get(args.target);
       return json({ ...summarizePlan(plan), targetWritable: target.allowWrites, targetProtected: target.protected || undefined });
     }),
@@ -306,16 +415,32 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: "Apply a plan",
       description:
-        "Write a reviewed plan to the target store. Refused unless the target has allowWrites=true; protected stores also need confirm=<target myshopify domain>. Re-reads the target first and skips anything that changed since planning. Uploads missing files. Creates and updates only, never deletes. Every op is written to an audit log.",
+        "Write a reviewed plan to the target store. Refused unless the target has allowWrites=true. For a protected store the person is asked to confirm in the client (or applies from the command line); the assistant can't confirm on their behalf. Re-reads the target first and skips anything that changed since planning. Uploads missing files. Creates and updates only, never deletes. Every op is written to an audit log.",
       inputSchema: {
         plan_id: z.string(),
-        confirm: z.string().optional().describe("Target's myshopify domain; required for protected stores."),
+        confirm: z
+          .string()
+          .optional()
+          .describe("Leave empty. Only read when the server runs with SYNC_ALLOW_AGENT_CONFIRM=true (unattended automation); otherwise a protected store is confirmed by the person, not by this argument."),
         only: z.array(z.number().int().positive()).optional().describe("Apply only these op seq numbers."),
       },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     },
-    guard(async (args: { plan_id: string; confirm?: string; only?: number[] }) => {
-      const { plan, results } = await engine.apply(args.plan_id, { confirm: args.confirm, only: args.only });
+    guard(async (args: { plan_id: string; confirm?: string; only?: number[] }, extra) => {
+      const pending = engine.plans.get(args.plan_id);
+      if (!pending) return fail(`no plan with id ${args.plan_id}`);
+      const target = deps.registry.get(pending.target.alias);
+      // Cheap refusals (writes off, expired, already applied) come before anyone is asked to confirm.
+      if (!target.allowWrites) throw new ApplyRefused(`writes are disabled for store "${target.alias}". Set "allowWrites": true in its config to enable them.`);
+      if (pending.status !== "pending") throw new ApplyRefused(`plan was already ${pending.status.replace("_", " ")}; create a new plan`);
+      if (new Date() > new Date(pending.expiresAt)) throw new ApplyRefused("plan has expired; run plan_sync again so it reflects the current target");
+      const confirm = target.protected ? await confirmProtected(pending, target, args.confirm) : undefined;
+      const report = progressOf(extra);
+      const { plan, results } = await engine.apply(args.plan_id, {
+        confirm,
+        only: args.only,
+        onProgress: report ? (done, total, message) => report(message, done, total) : undefined,
+      });
       const tally = (o: string) => results.filter((r) => r.outcome === o).length;
       return json({
         plan_id: plan.id,

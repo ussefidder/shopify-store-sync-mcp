@@ -5,9 +5,14 @@ import { compact, PAGE_INFO } from "./util.js";
 
 /*
  * Collections: title, description, sort order, template, SEO and, for smart collections,
- * their rules. Shopify is moving smart rules to a new "sources" model; `ruleSet` is still
- * supported by every Admin API version this project targets (2026-04 to 2027-01).
- * Manual collections keep their own product lists: membership is not copied.
+ * their rules. Manual collections keep their own product lists: membership is not copied.
+ * A new collection is not published to any sales channel; publish it in the target when ready.
+ *
+ * Deprecated API in use, on purpose: `Collection.ruleSet` and the `input` argument of
+ * collectionCreate / collectionUpdate. Their replacement (collection "sources", `collection`
+ * argument) only exists from Admin API 2026-07, and this project still supports stores pinned to
+ * 2026-04. Both are valid through 2027-01. Moving over is on the roadmap; it has to happen before
+ * 2026-04 leaves Shopify's supported window. See CONTRIBUTING, "Each quarter".
  */
 
 const QUERY = /* GraphQL */ `
@@ -118,7 +123,7 @@ function input(d: Record<string, unknown>) {
 export const collections: ResourceAdapter = {
   kind: "collections",
   description:
-    "Collections, keyed by handle: title, description, sort order, template, SEO and smart-collection rules. Manual collection membership and sales-channel publishing are not copied.",
+    "Collections, keyed by handle: title, description, sort order, template, SEO and smart-collection rules. Manual collection membership and sales-channel publishing are not copied, so a new collection is not visible on any channel until someone publishes it.",
 
   async fetch(client) {
     const nodes = await paginate<Node>(client, QUERY, {}, (d) => d.collections);
@@ -128,6 +133,8 @@ export const collections: ResourceAdapter = {
   refFor(key) {
     return `${REF_PREFIX}Collection/${key}`;
   },
+
+  parallel: true,
 
   conflict(source, target) {
     if (source.data.smart !== target.data.smart) {

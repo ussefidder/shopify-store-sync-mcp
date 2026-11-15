@@ -6,7 +6,7 @@ import { RefToGidResolver } from "./refs.js";
 import { DEFAULT_KINDS, type FetchOptions, type ResourceKind } from "./resources/index.js";
 import { ShopifyAdminClient, type AdminClient } from "./shopify/client.js";
 import { ShopifyCliClient } from "./shopify/cliClient.js";
-import { takeSnapshot, type Snapshot } from "./snapshot.js";
+import { applyView, takeSnapshot, type ReadProgress, type Snapshot } from "./snapshot.js";
 import { exportSnapshot, readSnapshot, type ExportResult } from "./snapshotFiles.js";
 import { diffThemes, type ThemeDiff } from "./themes.js";
 
@@ -20,6 +20,8 @@ export interface Scope {
   locales?: string[];
   /** Copy variant prices too (products). */
   prices?: boolean;
+  /** Leave the published state alone: new pages arrive hidden, new metaobject entries as drafts. */
+  drafts?: boolean;
   include?: string[];
   exclude?: string[];
 }
@@ -59,8 +61,26 @@ export class Engine {
       namespaces: scope.namespaces,
       locales: scope.locales,
       prices: scope.prices,
+      drafts: scope.drafts || undefined,
       productHandles: Engine.productHandles(scope.include),
+      metafieldOwners: Engine.metafieldOwners(scope.include),
     };
+  }
+
+  /**
+   * When every include pattern names its owner ("PRODUCT/linen-shirt/*", "COLLECTION/sale/custom.x"),
+   * metafield values are read from those products and collections only.
+   */
+  static metafieldOwners(include?: string[]): FetchOptions["metafieldOwners"] {
+    if (!include?.length) return undefined;
+    const owners: { PRODUCT: string[]; COLLECTION: string[] } = { PRODUCT: [], COLLECTION: [] };
+    for (const p of include) {
+      const m = /^(PRODUCT|COLLECTION)\/([a-z0-9][a-z0-9-]*)\/.+$/.exec(p);
+      if (!m) return undefined;
+      const list = owners[m[1] as "PRODUCT" | "COLLECTION"];
+      if (!list.includes(m[2]!)) list.push(m[2]!);
+    }
+    return owners;
   }
 
   /**
@@ -89,10 +109,19 @@ export class Engine {
   }
 
   /** A store alias, or "dir:<path>" for a snapshot folder. */
-  async load(spec: string, scope: Scope): Promise<Snapshot> {
+  async load(spec: string, scope: Scope, onRead?: ReadProgress): Promise<Snapshot> {
     const kinds = Engine.kinds(scope);
-    if (isDirSpec(spec)) return readSnapshot(spec.slice(DIR_PREFIX.length), kinds);
-    return takeSnapshot(this.client(spec), kinds, Engine.fetchOptions(scope));
+    const opts = Engine.fetchOptions(scope);
+    if (isDirSpec(spec)) {
+      const snapshot = readSnapshot(spec.slice(DIR_PREFIX.length), kinds);
+      // A folder holds whatever was exported; it is looked at the same way a store would be.
+      for (const kind of kinds) {
+        const res = snapshot.resources[kind];
+        if (res) res.items = res.items.map((i) => ({ ...i, data: applyView(kind, i.data, opts) }));
+      }
+      return snapshot;
+    }
+    return takeSnapshot(this.client(spec), kinds, opts, onRead);
   }
 
   async snapshot(spec: string, scope: Scope): Promise<{ snapshot: Snapshot; diffs: ResourceDiff[] }> {
@@ -106,7 +135,7 @@ export class Engine {
     return { store: store?.alias ?? spec, domain: store?.domain ?? spec, takenAt: new Date().toISOString(), resources: {}, files: {} };
   }
 
-  async compare(source: string, target: string, scope: Scope) {
+  async compare(source: string, target: string, scope: Scope, onRead?: ReadProgress) {
     if (source === target) throw new Error("source and target must be different");
     const kinds = Engine.kinds(scope);
     // Read both stores at once. The target's translations are read afterwards, in the
@@ -114,11 +143,11 @@ export class Engine {
     const laterTranslations = kinds.includes("translations") && !scope.locales?.length;
     const firstKinds = laterTranslations ? kinds.filter((k) => k !== "translations") : kinds;
     const [a, b] = await Promise.all([
-      this.load(source, scope),
-      firstKinds.length ? this.load(target, { ...scope, resources: firstKinds }) : Promise.resolve(this.emptySnapshot(target)),
+      this.load(source, scope, onRead),
+      firstKinds.length ? this.load(target, { ...scope, resources: firstKinds }, onRead) : Promise.resolve(this.emptySnapshot(target)),
     ]);
     if (laterTranslations) {
-      const t = await this.load(target, { ...scope, resources: ["translations"], locales: Engine.locales(a) });
+      const t = await this.load(target, { ...scope, resources: ["translations"], locales: Engine.locales(a) }, onRead);
       b.resources.translations = t.resources.translations;
       Object.assign(b.files, t.files);
     }
@@ -127,9 +156,9 @@ export class Engine {
     return { source: a, target: b, diffs, skipped };
   }
 
-  async plan(source: string, target: string, scope: Scope): Promise<Plan> {
+  async plan(source: string, target: string, scope: Scope, onRead?: ReadProgress): Promise<Plan> {
     if (isDirSpec(target)) throw new Error("the target of a sync must be a store, not a snapshot folder");
-    const { source: a, diffs, skipped } = await this.compare(source, target, scope);
+    const { source: a, diffs, skipped } = await this.compare(source, target, scope, onRead);
     const t = this.client(target);
     const plan = await buildPlan({
       source: { alias: a.store, domain: a.domain },
@@ -144,6 +173,26 @@ export class Engine {
     if (newProducts) plan.warnings.push(`${newProducts} new product(s) will be created as drafts; publish them in ${t.store.alias} when they're ready.`);
     if (plan.ops.some((o) => o.kind === "products" && o.action !== "conflict") && !scope.prices) {
       plan.warnings.push("Prices are not copied (new variants start at 0.00 in the draft). Pass prices: true (--with-prices) to copy them.");
+    }
+    const creates = (kind: string, visible: (d: Record<string, unknown>) => boolean) =>
+      plan.ops.filter((o) => o.kind === kind && o.action === "create" && visible(o.data)).length;
+    if (scope.drafts) {
+      if (plan.ops.some((o) => (o.kind === "pages" || o.kind === "metaobjects") && o.action === "create")) {
+        plan.warnings.push(`New pages will be created hidden and new metaobject entries as drafts; publish them in ${t.store.alias} when they're ready.`);
+      }
+    } else {
+      const pages = creates("pages", (d) => d.isPublished === true);
+      const entries = creates("metaobjects", (d) => d.status === "ACTIVE");
+      const live = [pages ? `${pages} new page(s)` : "", entries ? `${entries} new metaobject entr${entries === 1 ? "y" : "ies"}` : ""].filter(Boolean);
+      if (live.length) {
+        plan.warnings.push(
+          `${live.join(" and ")} will be visible in ${t.store.alias} as soon as created, because they are published in the source. Pass as_drafts: true (--as-drafts) to create them hidden instead.`,
+        );
+      }
+    }
+    const newCollections = plan.ops.filter((o) => o.kind === "collections" && o.action === "create").length;
+    if (newCollections) {
+      plan.warnings.push(`${newCollections} new collection(s) will not be published to any sales channel; publish them in ${t.store.alias} when they're ready.`);
     }
     if (plan.ops.some((o) => o.kind === "translations")) {
       const enabled = new Set(
@@ -168,9 +217,9 @@ export class Engine {
     return { plan, results };
   }
 
-  async export(store: string, dir: string, scope: Scope): Promise<ExportResult> {
+  async export(store: string, dir: string, scope: Scope, onRead?: ReadProgress): Promise<ExportResult> {
     if (isDirSpec(store)) throw new Error("export reads from a store; give a store alias");
-    const snapshot = await takeSnapshot(this.client(store), Engine.kinds(scope), Engine.fetchOptions(scope));
+    const snapshot = await takeSnapshot(this.client(store), Engine.kinds(scope), Engine.fetchOptions(scope), onRead);
     return exportSnapshot(snapshot, dir);
   }
 

@@ -1,9 +1,9 @@
-import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { StoreConfig } from "../config.js";
-import { ShopifyError, type AdminClient, type GraphQLError } from "./client.js";
+import { envNumber, ShopifyError, type AdminClient, type GraphQLError } from "./client.js";
 
 /*
  * Talks to a store through Shopify CLI's own sign-in (`shopify store auth`), so no app,
@@ -11,8 +11,11 @@ import { ShopifyError, type AdminClient, type GraphQLError } from "./client.js";
  * the CLI's supported command, rather than reading the CLI's private token storage.
  */
 
-export type RunResult = { code: number; stdout: string; stderr: string };
-export type Runner = (bin: string, args: string[]) => Promise<RunResult>;
+export type RunResult = { code: number; stdout: string; stderr: string; timedOut?: boolean };
+export type Runner = (bin: string, args: string[], opts?: { cwd?: string }) => Promise<RunResult>;
+
+/** How long one `shopify` command may run before it is stopped. */
+export const cliTimeoutMs = () => envNumber("SYNC_CLI_TIMEOUT_MS", 120_000);
 
 export const READ_SCOPES = [
   "read_products",
@@ -47,35 +50,66 @@ export function cliBin(env: NodeJS.ProcessEnv = process.env): string {
   return env.SHOPIFY_CLI_BIN || "shopify";
 }
 
-/** Quote an argument for cmd.exe, which runs the CLI's .cmd shim on Windows. */
+/**
+ * Quote an argument for cmd.exe, which runs the CLI's .cmd shim on Windows.
+ * cmd.exe expands %VAR% and !VAR! even inside quotes and has no reliable way to escape a quote,
+ * so an argument holding one of those characters is refused rather than passed along.
+ * Nothing this tool sends needs them: file names are passed relative to the working folder.
+ */
 export function quoteWindowsArg(a: string): string {
-  return /^[A-Za-z0-9_\-.:\\/,=@]+$/.test(a) ? a : `"${a.replace(/"/g, '""')}"`;
+  if (/^[A-Za-z0-9_\-.:\\/,=@]+$/.test(a)) return a;
+  if (/[%!^"\r\n\0]/.test(a)) {
+    throw new ShopifyError(`can't pass this value to Shopify CLI on Windows (it contains % ! ^ or a quote): ${a.slice(0, 60)}`);
+  }
+  return `"${a}"`;
 }
 
 /** Start the CLI; on Windows it's a .cmd shim, so it goes through the shell with quoted arguments. */
-export function spawnCli(bin: string, args: string[], stdio: "pipe" | "inherit"): ChildProcess {
-  const opts: SpawnOptions = { stdio: stdio === "pipe" ? ["ignore", "pipe", "pipe"] : "inherit" };
+export function spawnCli(bin: string, args: string[], stdio: "pipe" | "inherit", cwd?: string): ChildProcess {
+  const opts: SpawnOptions = { stdio: stdio === "pipe" ? ["ignore", "pipe", "pipe"] : "inherit", cwd };
   return process.platform === "win32"
     ? spawn([bin, ...args].map(quoteWindowsArg).join(" "), { ...opts, shell: true })
     : spawn(bin, args, opts);
 }
 
-export const defaultRunner: Runner = (bin, args) =>
-  new Promise((resolve, reject) => {
-    const child = spawnCli(bin, args, "pipe");
-    let stdout = "";
-    let stderr = "";
-    child.stdout!.on("data", (d) => (stdout += d));
-    child.stderr!.on("data", (d) => (stderr += d));
-    child.on("error", (e: NodeJS.ErrnoException) =>
-      reject(
-        e.code === "ENOENT"
-          ? new ShopifyError(`Shopify CLI not found ("${bin}"). Install it with: npm install -g @shopify/cli`)
-          : e,
-      ),
-    );
-    child.on("close", (code: number | null) => resolve({ code: code ?? 1, stdout, stderr }));
-  });
+/** Stop a CLI process and, on Windows, the node process its shim started. */
+function stop(child: ChildProcess): void {
+  if (process.platform === "win32" && child.pid) {
+    spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+  } else {
+    child.kill("SIGKILL");
+  }
+}
+
+export function makeRunner(timeoutMs: number = cliTimeoutMs()): Runner {
+  return (bin, args, opts) =>
+    new Promise((resolve, reject) => {
+      const child = spawnCli(bin, args, "pipe", opts?.cwd);
+      let stdout = "";
+      let stderr = "";
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        stop(child);
+      }, timeoutMs);
+      child.stdout!.on("data", (d) => (stdout += d));
+      child.stderr!.on("data", (d) => (stderr += d));
+      child.on("error", (e: NodeJS.ErrnoException) => {
+        clearTimeout(timer);
+        reject(
+          e.code === "ENOENT"
+            ? new ShopifyError(`Shopify CLI not found ("${bin}"). Install it with: npm install -g @shopify/cli`)
+            : e,
+        );
+      });
+      child.on("close", (code: number | null) => {
+        clearTimeout(timer);
+        resolve({ code: code ?? 1, stdout, stderr, timedOut });
+      });
+    });
+}
+
+export const defaultRunner: Runner = (bin, args, opts) => makeRunner()(bin, args, opts);
 
 type CliOutput = {
   data?: unknown;
@@ -149,10 +183,12 @@ export class ShopifyCliClient implements AdminClient {
   private async execute<T>(query: string, variables: Record<string, unknown>): Promise<T> {
     const dir = mkdtempSync(join(tmpdir(), "store-sync-cli-"));
     try {
-      const queryFile = join(dir, "query.graphql");
-      const varsFile = join(dir, "variables.json");
-      writeFileSync(queryFile, query);
-      writeFileSync(varsFile, JSON.stringify(variables));
+      // The CLI runs inside the temp folder and gets plain file names, so no path (which holds the
+      // user's name on Windows) ever has to be quoted for a shell.
+      const queryFile = "query.graphql";
+      const varsFile = "variables.json";
+      writeFileSync(join(dir, queryFile), query);
+      writeFileSync(join(dir, varsFile), JSON.stringify(variables));
       const args = [
         "store",
         "execute",
@@ -169,10 +205,20 @@ export class ShopifyCliClient implements AdminClient {
         "--no-color",
       ];
       // The CLI refuses mutations unless asked; writes are still gated by allowWrites and plans.
-      if (/^\s*mutation\b/.test(query)) args.push("--allow-mutations");
+      const mutation = /^\s*mutation\b/.test(query);
+      if (mutation) args.push("--allow-mutations");
 
       for (let attempt = 0; ; attempt++) {
-        const res = await this.run(this.bin, args);
+        const res = await this.run(this.bin, args, { cwd: dir });
+        if (res.timedOut) {
+          // A read can simply be asked again. A write is never repeated blindly: it may have gone through.
+          if (!mutation && attempt < 1) continue;
+          throw new ShopifyError(
+            mutation
+              ? `${this.store.domain}: Shopify CLI gave no answer and was stopped. The write may or may not have been saved; plan again to see the current state.`
+              : `${this.store.domain}: Shopify CLI gave no answer and was stopped (set SYNC_CLI_TIMEOUT_MS to wait longer)`,
+          );
+        }
         const out = parseCliOutput(res.stdout) ?? parseCliOutput(res.stderr);
         const errors = out?.errors ?? out?.error?.details?.errors;
         const throttled = errors?.some((e) => e.extensions?.code === "THROTTLED");

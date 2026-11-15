@@ -19,6 +19,12 @@ async function main() {
     process.exitCode = await runCli(args);
     return;
   }
+  // Anything else that isn't a flag is a typo. Starting the server here would look like a hang.
+  if (args[0] && !args[0].startsWith("-")) {
+    console.error(`unknown command "${args[0]}". Commands: ${COMMANDS.join(", ")}. Run with --help for usage; run with no arguments to start the MCP server.`);
+    process.exitCode = 1;
+    return;
+  }
 
   const stores = loadStores();
   if (!stores.length) {

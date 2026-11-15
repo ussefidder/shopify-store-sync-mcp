@@ -1,7 +1,7 @@
 {
   "name": "shopify-store-sync-mcp",
-  "version": "0.4.0",
-  "description": "MCP server and CLI to diff and sync configuration between Shopify stores: metafield and metaobject definitions, metaobjects, collections, pages, menus, redirects, policies, metafield values and translations. Config as code, dry-run plans, never deletes.",
+  "version": "0.5.0",
+  "description": "MCP server and CLI to diff and sync configuration between Shopify stores: products, collections, pages, menus, redirects, policies, metafield and metaobject definitions, metaobjects, metafield values and translations. Config as code, dry-run plans, never deletes.",
   "type": "module",
   "bin": {
     "shopify-store-sync-mcp": "dist/index.js"
@@ -13,22 +13,26 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json --watch",
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run typecheck && npm test && npm run build",
+    "prepublishOnly": "npm run typecheck && npm run lint && npm test && npm run build",
     "validate:graphql": "node scripts/validate-graphql.mjs",
     "docs:demo": "tsx scripts/demo-data.ts > docs/demo-output.json",
-    "docs:images": "node scripts/render-docs-images.mjs"
+    "docs:images": "node scripts/render-docs-images.mjs",
+    "lint": "eslint .",
+    "coverage": "vitest run --coverage",
+    "check": "npm run typecheck && npm run lint && npm test && npm run validate:graphql"
   },
   "keywords": [
     "mcp",
     "model-context-protocol",
     "shopify",
     "shopify-plus",
+    "products",
     "metafields",
     "metaobjects",
     "store-sync",
@@ -50,17 +54,26 @@
   },
   "homepage": "https://github.com/ussefidder/shopify-store-sync-mcp#readme",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.20.5",
+    "@vitest/coverage-v8": "^5.1.0",
+    "eslint": "^10.15.0",
     "graphql": "^16.15.0",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.7"
+    "typescript-eslint": "^8.72.2",
+    "vitest": "^5.1.0"
+  },
+  "overrides": {
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.8"
+    }
   }
 }

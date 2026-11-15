@@ -6,16 +6,23 @@ import { compact, PAGE_INFO } from "./util.js";
 /*
  * Products, keyed by handle. Opt-in (not in the default set).
  *
- * What is copied: title, description, vendor, product type, tags, template, SEO, options,
- * variants (matched by option values, with SKU) and images. Prices only with `prices: true`.
- * Never copied: inventory, sales channel publishing, status of existing products.
+ * What is copied: title, description, vendor, product type, category, tags, template, SEO, options,
+ * variants (matched by option values, with SKU, taxable flag and inventory policy) and images.
+ * Prices only with `prices: true`.
+ * Never copied: inventory, sales channel publishing, status of existing products, barcodes, weight,
+ * the image assigned to a variant, videos and 3D models.
  * New products are created as drafts, so nothing appears on a storefront until someone publishes it.
  *
  * Updates go through productSet, which replaces lists. To keep the "never deletes" promise the
- * target product is re-read first, and its own variants and images are kept alongside the source's.
+ * target product is re-read first, and its own variants, tags and media (images, videos, 3D models)
+ * are sent back alongside the source's.
  */
 
 const VARIANTS_PAGE = 50;
+const MEDIA_PAGE = 50;
+const VARIANT_FIELDS = "id sku price compareAtPrice taxable inventoryPolicy selectedOptions { name value }";
+const MEDIA_FIELDS = "id mediaContentType alt";
+const CATEGORY_GID = "gid://shopify/TaxonomyCategory/";
 
 const NODE_FIELDS = /* GraphQL */ `
   id
@@ -28,12 +35,14 @@ const NODE_FIELDS = /* GraphQL */ `
   templateSuffix
   isGiftCard
   seo { title description }
+  category { id }
   options { name position optionValues { name } }
-  media(first: 50) {
-    nodes { mediaContentType ... on MediaImage { id alt } }
+  media(first: ${MEDIA_PAGE}) {
+    nodes { ${MEDIA_FIELDS} }
+    ${PAGE_INFO}
   }
   variants(first: ${VARIANTS_PAGE}) {
-    nodes { id sku price compareAtPrice selectedOptions { name value } }
+    nodes { ${VARIANT_FIELDS} }
     ${PAGE_INFO}
   }
 `;
@@ -51,7 +60,18 @@ const MORE_VARIANTS = /* GraphQL */ `
   query ProductVariants($id: ID!, $after: String) {
     product(id: $id) {
       variants(first: 100, after: $after) {
-        nodes { id sku price compareAtPrice selectedOptions { name value } }
+        nodes { ${VARIANT_FIELDS} }
+        ${PAGE_INFO}
+      }
+    }
+  }
+`;
+
+const MORE_MEDIA = /* GraphQL */ `
+  query ProductMedia($id: ID!, $after: String) {
+    product(id: $id) {
+      media(first: 100, after: $after) {
+        nodes { ${MEDIA_FIELDS} }
         ${PAGE_INFO}
       }
     }
@@ -69,8 +89,18 @@ interface VariantNode {
   sku: string | null;
   price: string;
   compareAtPrice: string | null;
+  taxable?: boolean | null;
+  inventoryPolicy?: string | null;
   selectedOptions: { name: string; value: string }[];
 }
+
+interface MediaNode {
+  id: string;
+  mediaContentType: string;
+  alt?: string | null;
+}
+
+type PageInfo = { hasNextPage: boolean; endCursor: string | null };
 
 interface Node {
   id: string;
@@ -83,9 +113,10 @@ interface Node {
   templateSuffix: string | null;
   isGiftCard: boolean;
   seo: { title: string | null; description: string | null };
+  category?: { id: string } | null;
   options: { name: string; position: number; optionValues: { name: string }[] }[];
-  media: { nodes: { mediaContentType: string; id?: string; alt?: string | null }[] };
-  variants: { nodes: VariantNode[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
+  media: { nodes: MediaNode[]; pageInfo?: PageInfo };
+  variants: { nodes: VariantNode[]; pageInfo: PageInfo };
 }
 
 /** Identity of a variant across stores: its option values, in option order. */
@@ -103,6 +134,8 @@ export function normalizeProduct(n: Node, opts: Pick<FetchOptions, "prices"> = {
     return compact({
       options: ordered,
       sku: v.sku || undefined,
+      taxable: v.taxable ?? undefined,
+      inventoryPolicy: v.inventoryPolicy || undefined,
       price: opts.prices ? v.price : undefined,
       compareAtPrice: opts.prices ? v.compareAtPrice || undefined : undefined,
     });
@@ -116,6 +149,8 @@ export function normalizeProduct(n: Node, opts: Pick<FetchOptions, "prices"> = {
       descriptionHtml: n.descriptionHtml || undefined,
       vendor: n.vendor || undefined,
       productType: n.productType || undefined,
+      // Shopify's product taxonomy is the same in every store, so the category id is portable as it is.
+      category: n.category?.id?.startsWith(CATEGORY_GID) ? n.category.id.slice(CATEGORY_GID.length) : undefined,
       tags: n.tags.length ? [...n.tags].sort() : undefined,
       templateSuffix: n.templateSuffix || undefined,
       seo: compact({ title: n.seo?.title || undefined, description: n.seo?.description || undefined }),
@@ -129,21 +164,23 @@ export function normalizeProduct(n: Node, opts: Pick<FetchOptions, "prices"> = {
   };
 }
 
-async function allVariants(client: AdminClient, n: Node): Promise<Node> {
-  if (!n.variants.pageInfo.hasNextPage) return n;
-  const rest = await paginate<VariantNode>(
-    client,
-    MORE_VARIANTS,
-    { id: n.id },
-    (d) => d.product.variants,
-  );
-  // The first page is fetched again by paginate; keep the unique ones in order.
-  const seen = new Set<string>();
-  const nodes = [...n.variants.nodes, ...rest].filter((v) => (seen.has(v.id) ? false : (seen.add(v.id), true)));
-  return { ...n, variants: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } };
+const DONE: PageInfo = { hasNextPage: false, endCursor: null };
+
+/** Read the pages of variants and media that didn't fit in the first request. */
+async function complete(client: AdminClient, n: Node): Promise<Node> {
+  let out = n;
+  if (n.variants.pageInfo.hasNextPage) {
+    const rest = await paginate<VariantNode>(client, MORE_VARIANTS, { id: n.id, after: n.variants.pageInfo.endCursor }, (d) => d.product.variants);
+    out = { ...out, variants: { nodes: [...n.variants.nodes, ...rest], pageInfo: DONE } };
+  }
+  if (n.media.pageInfo?.hasNextPage) {
+    const rest = await paginate<MediaNode>(client, MORE_MEDIA, { id: n.id, after: n.media.pageInfo.endCursor }, (d) => d.product.media);
+    out = { ...out, media: { nodes: [...n.media.nodes, ...rest], pageInfo: DONE } };
+  }
+  return out;
 }
 
-type Variant = { options: Record<string, string>; sku?: string; price?: string; compareAtPrice?: string };
+type Variant = { options: Record<string, string>; sku?: string; taxable?: boolean; inventoryPolicy?: string; price?: string; compareAtPrice?: string };
 type Image = { file: string; alt?: string };
 
 function optionValuesInput(options: Record<string, string>) {
@@ -174,6 +211,8 @@ export function productSetInput(d: Record<string, unknown>, target: Node | undef
       id: existing?.id,
       optionValues: optionValuesInput(v.options),
       sku: v.sku,
+      taxable: v.taxable,
+      inventoryPolicy: v.inventoryPolicy,
       price: v.price,
       compareAtPrice: v.compareAtPrice,
     });
@@ -182,12 +221,15 @@ export function productSetInput(d: Record<string, unknown>, target: Node | undef
     variantInputs.push({ id: v.id, optionValues: v.selectedOptions.map((o) => ({ optionName: o.name, name: o.value })) });
   }
 
-  // Images: the source's, in order, then the target's own.
+  // Media: the source's images, in order, then everything the target has on its own (images, videos, 3D models).
   const fileIds = new Set(images.map((i) => i.file));
   const files: Record<string, unknown>[] = images.map((i) => compact({ id: i.file, alt: i.alt }));
   for (const m of target?.media.nodes ?? []) {
-    if (m.mediaContentType === "IMAGE" && m.id && !fileIds.has(m.id)) files.push({ id: m.id });
+    if (m.id && !fileIds.has(m.id)) files.push({ id: m.id });
   }
+
+  // Tags: productSet overwrites the list, so the target's own tags are sent back too.
+  const tags = [...new Set([...((d.tags as string[]) ?? []), ...(target?.tags ?? [])])];
 
   return compact({
     handle: d.handle,
@@ -195,7 +237,8 @@ export function productSetInput(d: Record<string, unknown>, target: Node | undef
     descriptionHtml: d.descriptionHtml ?? "",
     vendor: d.vendor,
     productType: d.productType,
-    tags: (d.tags as string[]) ?? [],
+    category: d.category ? `${CATEGORY_GID}${String(d.category)}` : undefined,
+    tags,
     templateSuffix: d.templateSuffix,
     seo: d.seo,
     status: create ? "DRAFT" : undefined,
@@ -230,7 +273,7 @@ async function readProducts(client: AdminClient, opts: FetchOptions): Promise<No
 
 async function readTarget(client: AdminClient, handle: string): Promise<Node | undefined> {
   const res = await client.request<{ productByIdentifier: Node | null }>(BY_HANDLE, { handle });
-  return res.productByIdentifier ? allVariants(client, res.productByIdentifier) : undefined;
+  return res.productByIdentifier ? complete(client, res.productByIdentifier) : undefined;
 }
 
 async function set(client: AdminClient, d: Record<string, unknown>, create: boolean): Promise<string> {
@@ -251,11 +294,17 @@ function startsWith(list: unknown[], prefix: unknown[]): boolean {
 }
 
 /**
- * The target product as the source would see it: variants, images and option values that only the
- * target has are kept by every update, so they don't count as differences.
+ * The target product as the source would see it: variants, images, tags, option values and a category
+ * that only the target has are kept by every update, so they don't count as differences.
  */
 export function alignProduct(source: Record<string, unknown>, target: Record<string, unknown>): Record<string, unknown> {
   const out = { ...target };
+  const sTags = new Set((source.tags as string[]) ?? []);
+  const tags = ((target.tags as string[]) ?? []).filter((t) => sTags.has(t));
+  if (tags.length) out.tags = tags;
+  else delete out.tags;
+  if (source.category === undefined) delete out.category;
+
   const sImages = (source.images as unknown[]) ?? [];
   const tImages = (target.images as unknown[]) ?? [];
   if (startsWith(tImages, sImages) && Array.isArray(target.images)) out.images = tImages.slice(0, sImages.length);
@@ -279,7 +328,7 @@ export function alignProduct(source: Record<string, unknown>, target: Record<str
 export const products: ResourceAdapter = {
   kind: "products",
   description:
-    "Products, keyed by handle: title, description, vendor, type, tags, template, SEO, options, variants (matched by option values, with SKU) and images. Prices only with prices: true; inventory and sales channels are never copied. New products are created as drafts. Opt-in (not in the default set).",
+    "Products, keyed by handle: title, description, vendor, type, category, tags, template, SEO, options, variants (matched by option values, with SKU, taxable flag and inventory policy) and images. Prices only with prices: true; inventory and sales channels are never copied. Tags, variants and media that only the target has are kept. New products are created as drafts. Opt-in (not in the default set).",
 
   async fetch(client, opts) {
     const nodes = await readProducts(client, opts);
@@ -290,7 +339,7 @@ export const products: ResourceAdapter = {
         skipped.push({ key: n.handle, reason: "gift card" });
         continue;
       }
-      items.push(normalizeProduct(await allVariants(client, n), opts));
+      items.push(normalizeProduct(await complete(client, n), opts));
     }
     return { items, skipped };
   },
@@ -310,6 +359,8 @@ export const products: ResourceAdapter = {
   alignTarget(source, target) {
     return alignProduct(source, target);
   },
+
+  parallel: true,
 
   create: ({ client }, _key, d) => set(client, d, true),
   async update({ client }, _target, d) {

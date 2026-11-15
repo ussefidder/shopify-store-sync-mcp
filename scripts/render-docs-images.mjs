@@ -147,7 +147,7 @@ render("demo", 1280, 700, `
       <div class="refused"><span class="r">✕</span> ${esc(out.refused.error.replace(/^Refused: /, ""))}</div>
     </div>
     <div class="tool card">
-      <div class="th"><span class="mono b">apply_plan</span><span class="muted mono">confirm: eu.myshopify.com</span></div>
+      <div class="th"><span class="mono b">apply_plan</span><span class="muted mono">you typed: eu.myshopify.com</span></div>
       <div class="stats">
         <div><div class="big g">${t.created}</div><div class="muted">created</div></div>
         <div><div class="big a">${t.updated}</div><div class="muted">updated</div></div>
@@ -215,7 +215,7 @@ render("how-it-works", 1280, 370, `
   <div class="gates">
     <div class="gt mono muted">safety</div>
     <div class="gate card"><span class="dot bg-g"></span>Writes off unless <span class="mono">allowWrites</span></div>
-    <div class="gate card"><span class="dot bg-a"></span>Protected stores need typed confirmation</div>
+    <div class="gate card"><span class="dot bg-a"></span>Protected stores: a person confirms</div>
     <div class="gate card"><span class="dot bg-b"></span>Drifted items skipped</div>
     <div class="gate card"><span class="dot bg-r"></span>Never deletes</div>
     <div class="gate card"><span class="dot" style="background:#a371f7"></span>Audit log</div>
@@ -552,13 +552,13 @@ render("what-it-syncs", 1280, 600, `
     ${tile("MO", G, "Metaobject definitions", "Schemas, access and capabilities, self-references included.")}
     ${tile("ME", B, "Metaobject entries", "Every field value, references to products, pages and entries remapped.")}
     ${tile("CO", B, "Collections", "Descriptions, SEO, sort order and smart-collection rules.")}
-    ${tile("PG", A, "Pages", "Title, body, template and published state.")}
-    ${tile("NV", A, "Menus", "Full 3-level trees, customer account menus included.")}
+    ${tile("PG", A, "Pages", "Title, body, template and published state, or hidden with as_drafts.")}
+    ${tile("NV", A, "Menus", "Full 3-level trees, customer account menus included. The target's own links are kept.")}
     ${tile("RD", T, "Redirects", "Thousands of URL redirects, no CSV.")}
     ${tile("PL", T, "Store policies", "Refund, privacy, terms, shipping and contact text.")}
-    ${tile("PR", R, "Products", "Content, options, variants by SKU and images. New ones as drafts; prices only if asked.", "opt-in")}
+    ${tile("PR", R, "Products", "Content, options, variants matched by option values, images. New ones as drafts; prices only if asked.", "opt-in")}
     ${tile("MV", P, "Metafield values", "On products and collections, matched by handle.", "opt-in")}
-    ${tile("TR", P, "Translations", "Pages, collections, metaobjects, menus and policies, per language.", "opt-in")}
+    ${tile("TR", P, "Translations", "Products, pages, collections, metaobjects, menus and policies, per language.", "opt-in")}
     ${tile("IMG", "#8b98a8", "Files and images", "Matched by file name; missing ones uploaded to the target.")}
   </div>
 </div>`, CARD_CSS);
@@ -582,8 +582,8 @@ render("safety", 1280, 432, `
     ${tile("RO", G, "Read-only by default", "Writes stay off until you allow them, per store.")}
     ${tile("PL", G, "Plan, then apply", "Only a reviewed dry-run plan is ever applied. Plans expire after an hour.")}
     ${tile("DR", B, "Drift protection", "The target is re-read; anything edited since the plan is skipped, not overwritten.")}
-    ${tile("∅", B, "Never deletes", "Items and fields that exist only in the target are always left alone.")}
-    ${tile("!", A, "Protected stores", "Production needs its exact domain typed as confirmation.")}
+    ${tile("∅", B, "Never deletes", "What only the target has stays: items, menu links, product tags, variants and media.")}
+    ${tile("!", A, "A person confirms", "For a protected store you type its domain yourself. The assistant can't do it for you.")}
     ${tile("≠", A, "Conflicts not forced", "A type change Shopify can't apply is reported and skipped.")}
     ${tile("LOG", T, "Audit log", "Every write is appended to a local JSON lines log.")}
     ${tile("ID", T, "No broken IDs", "References that can't be matched are flagged, never copied raw.")}
@@ -595,8 +595,8 @@ render("tested", 1280, 288, `
 <div class="wrap">
   <div class="title"><h2>Tested on real stores, not just in theory</h2><span class="muted">two live Shopify stores, on Linux and Windows</span></div>
   <div class="stats">
-    <div class="stat card"><b class="g">68</b><span>automated tests</span></div>
-    <div class="stat card"><b class="b">52</b><span>GraphQL operations validated against Shopify's schema</span></div>
+    <div class="stat card"><b class="g">103</b><span>automated tests</span></div>
+    <div class="stat card"><b class="b">56</b><span>GraphQL operations validated against Shopify's schema</span></div>
     <div class="stat card"><b class="a">11</b><span>item types written to a live store</span></div>
     <div class="stat card"><b style="color:${P}">2</b><span>sign-in methods used live: Shopify CLI and an app</span></div>
   </div>
@@ -617,27 +617,27 @@ const todo = (t) => `<div class="it"><span class="ck muted">○</span>${t}</div>
 const group = (title, cls, items) => `<div class="grp"><div class="gt ${cls}">${title}</div>${items.join("")}</div>`;
 render("roadmap", 1280, 462, `
 <div class="wrap">
-  <div class="title"><h2>Roadmap</h2><span class="muted">shipped in 0.4.0, and what comes next</span></div>
+  <div class="title"><h2>Roadmap</h2><span class="muted">shipped in 0.5.0, and what comes next</span></div>
   <div class="cols">
     <div class="card pane">
       <div class="ph"><span class="badge bg-g">Shipped</span></div>
       <div class="two">
-        ${group("Syncing", "g", [done("11 item types incl. products"), done("ID remapping by handle"), done("Two-pass writes for links"), done("Filters by type, pattern, language")])}
-        ${group("Safety", "g", [done("Dry-run plans, step by step"), done("Drift check, never deletes"), done("Protected stores, audit log"), done("Conflicts reported, not forced")])}
-        ${group("Ways to use it", "g", [done("MCP server, 9 tools"), done("Command line, drift checks"), done("Config as code, theme diff"), done("No-app sign-in, on npm")])}
-        ${group("Quality", "g", [done("68 automated tests"), done("Checked on 3 API versions"), done("Live on Linux and Windows"), done("Parallel, throttle-aware")])}
+        ${group("Syncing", "g", [done("11 item types incl. products"), done("ID remapping by handle"), done("Two-pass writes for links"), done("Filters, and as_drafts")])}
+        ${group("Safety", "g", [done("Dry-run plans, drift check"), done("Never deletes, inside items too"), done("A person confirms production"), done("Validated input, time limits")])}
+        ${group("Ways to use it", "g", [done("MCP server, 9 tools, progress"), done("Command line, drift checks"), done("Config as code, theme diff"), done("No-app sign-in, on npm")])}
+        ${group("Quality", "g", [done("103 automated tests, linted"), done("Checked on 3 API versions"), done("Live on Linux and Windows"), done("Parallel reads and writes")])}
       </div>
     </div>
     <div class="card pane">
       <div class="ph"><span class="badge bg-b">Next</span></div>
       ${[
         "Collection rules on Shopify's new sources model",
+        "Batch writes for very large syncs",
         "Product prices per market, inventory (opt-in)",
+        "Barcodes, weight and variant images",
         "Remap product variants and blog articles",
         "Metafield values on variants, pages and the shop",
-        "Menu link translations",
-        "Markets and market web presences",
-        "Bulk mode for very large stores",
+        "Menu link translations, markets",
         "Undo an applied plan from the audit log",
         "Optional deletes, behind an explicit flag",
       ].map(todo).join("")}

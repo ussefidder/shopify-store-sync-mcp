@@ -35,7 +35,7 @@ const schema = buildClientSchema(introspection.data);
 // Values for template interpolations used inside operations.
 const subs = { PAGE_INFO: "pageInfo { hasNextPage endCursor }", ITEM_FIELDS: "title type url resourceId tags", size: "5" };
 // Operations built with a dynamic field name are validated once per possible value.
-const variants = { field: ["pages", "blogs"], owner: ["products", "collections"] };
+const variants = { field: ["pages", "blogs"], owner: ["products", "collections"], lookup: ["productByIdentifier", "collectionByIdentifier"] };
 
 const walk = (dir) =>
   readdirSync(dir).flatMap((f) => {
@@ -51,6 +51,7 @@ for (const file of walk(new URL("../src", import.meta.url).pathname)) {
   const local = { ...subs };
   for (const c of src.matchAll(/const (\w+) = (?:\/\* GraphQL \*\/ )?`([^`]*)`;/g)) local[c[1]] = c[2];
   for (const c of src.matchAll(/const (\w+) = (\d+);/g)) local[c[1]] = c[2];
+  for (const c of src.matchAll(/const (\w+) = "([^"\n]*)";/g)) local[c[1]] = c[2];
   const expand = (t, depth = 0) =>
     t.replace(/\$\{(\w+)\}/g, (_, k) => {
       if (!(k in local)) throw new Error(`${file}: unknown interpolation \${${k}}; add it to scripts/validate-graphql.mjs`);

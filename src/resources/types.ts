@@ -43,6 +43,16 @@ export interface FetchOptions {
   /** Include variant prices and compare-at prices (products kind). Off by default: prices usually differ per store. */
   prices?: boolean;
   /**
+   * Leave the published state out (pages, metaobjects), so new items arrive hidden or as drafts
+   * and existing ones keep the state they have in the target.
+   */
+  drafts?: boolean;
+  /**
+   * Narrows which product and collection metafields are read, taken from include patterns shaped
+   * like "PRODUCT/<handle>/..." Undefined means every owner.
+   */
+  metafieldOwners?: { PRODUCT?: string[]; COLLECTION?: string[] };
+  /**
    * Narrows which products are read, taken from include patterns that are plain handles
    * ("linen-shirt") or handle prefixes ("linen-*"). Undefined means every product.
    */
@@ -86,4 +96,11 @@ export interface ResourceAdapter {
    * deleted) set aside, so an item already in line with the source compares as identical.
    */
   alignTarget?(source: Record<string, unknown>, target: Record<string, unknown>): Record<string, unknown>;
+  /**
+   * Optional: short labels of what only the target has inside this item (menu links, say) and an
+   * update will keep. Listed in the plan so nobody is surprised that they are still there.
+   */
+  targetOnly?(source: Record<string, unknown>, target: Record<string, unknown>): string[];
+  /** Ops of this kind don't depend on each other, so they can be written a few at a time. */
+  parallel?: boolean;
 }

@@ -246,7 +246,7 @@ describe("apply", () => {
   it("requires the domain as confirmation for protected stores", async () => {
     const tgt = targetShop({ protected: true });
     const p = await plan(sourceShop(), tgt, ["redirects"]);
-    await expect(applyPlan(p, tgt, { auditLog })).rejects.toThrow(/confirm="prod.myshopify.com"/);
+    await expect(applyPlan(p, tgt, { auditLog })).rejects.toThrow(/protected. A person has to confirm/);
     await expect(applyPlan(p, tgt, { auditLog, confirm: "prod" })).rejects.toThrow(ApplyRefused);
     const results = await applyPlan(p, tgt, { auditLog, confirm: "prod.myshopify.com" });
     expect(results.map((r) => r.outcome)).toEqual(["created"]);

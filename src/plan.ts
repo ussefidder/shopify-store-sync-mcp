@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { hashData, type FieldChange, type ResourceDiff } from "./diff.js";
@@ -63,6 +63,7 @@ export interface BuildPlanInput {
 export async function buildPlan(input: BuildPlanInput): Promise<Plan> {
   const now = input.now ?? new Date();
   const ops: PlanOp[] = [];
+  const keptNotes: string[] = [];
   const diffs = orderKinds(input.diffs.map((d) => d.kind)).map((k) => input.diffs.find((d) => d.kind === k)!);
 
   for (const d of diffs) {
@@ -72,6 +73,11 @@ export async function buildPlan(input: BuildPlanInput): Promise<Plan> {
     }
     for (const c of d.changed) {
       const reason = adapter.conflict?.(c.source, c.target);
+      const kept = reason ? [] : (adapter.targetOnly?.(c.source.data, c.target.data) ?? []);
+      if (kept.length) {
+        const shown = kept.slice(0, 5).map((k) => `"${k}"`).join(", ");
+        keptNotes.push(`${d.kind} ${c.key}: ${kept.length} link(s) that only the target has will be kept: ${shown}${kept.length > 5 ? "..." : ""}`);
+      }
       ops.push({
         seq: 0,
         kind: d.kind,
@@ -96,7 +102,7 @@ export async function buildPlan(input: BuildPlanInput): Promise<Plan> {
       .filter((r): r is string => Boolean(r)),
   );
 
-  const warnings: string[] = [];
+  const warnings: string[] = [...keptNotes];
   const unmappable = new Set<string>();
   const toUpload = new Set<string>();
   const files: Record<string, FileSource> = {};
@@ -151,7 +157,7 @@ export async function buildPlan(input: BuildPlanInput): Promise<Plan> {
   }
   const conflicts = ops.filter((o) => o.action === "conflict").length;
   if (missingOwners) {
-    warnings.unshift(`${missingOwners} value(s) belong to products or collections that don't exist in the target; they will be skipped.`);
+    warnings.unshift(`${missingOwners} value(s) belong to something that doesn't exist in the target (a product, collection, page...); they will be skipped.`);
   }
   const otherConflicts = conflicts - missingOwners;
   if (otherConflicts) warnings.unshift(`${otherConflicts} conflict(s) need a manual fix in the target; they will be skipped.`);
@@ -177,6 +183,9 @@ export function stateDir(env: NodeJS.ProcessEnv = process.env): string {
   return env.SYNC_STATE_DIR ?? join(homedir(), ".shopify-store-sync");
 }
 
+/** Plan files older than this are removed whenever a new plan is saved. They expire after an hour anyway. */
+export const PLAN_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+
 /** Plans are kept in memory and on disk so they survive an MCP server restart. */
 export class PlanStore {
   private readonly plans = new Map<string, Plan>();
@@ -191,9 +200,29 @@ export class PlanStore {
     try {
       mkdirSync(this.dir, { recursive: true });
       writeFileSync(join(this.dir, `${plan.id}.json`), JSON.stringify(plan, null, 2), { mode: 0o600 });
+      this.prune();
     } catch {
       /* disk persistence is best-effort */
     }
+  }
+
+  /** Delete plan files that are long past their expiry; they hold store content. */
+  prune(now = Date.now()): number {
+    let removed = 0;
+    for (const f of readdirSync(this.dir)) {
+      if (!/^[0-9a-f-]{36}\.json$/.test(f)) continue;
+      const file = join(this.dir, f);
+      try {
+        if (now - statSync(file).mtimeMs > PLAN_KEEP_MS) {
+          rmSync(file);
+          this.plans.delete(f.slice(0, -5));
+          removed++;
+        }
+      } catch {
+        /* someone else removed it */
+      }
+    }
+    return removed;
   }
 
   get(id: string): Plan | undefined {
@@ -201,7 +230,13 @@ export class PlanStore {
     if (!/^[0-9a-f-]{36}$/.test(id)) return undefined;
     const file = join(this.dir, `${id}.json`);
     if (!existsSync(file)) return undefined;
-    const plan = JSON.parse(readFileSync(file, "utf8")) as Plan;
+    let plan: Plan;
+    try {
+      plan = JSON.parse(readFileSync(file, "utf8")) as Plan;
+    } catch {
+      return undefined; // a half-written or damaged file is treated as no plan
+    }
+    if (!plan || plan.id !== id || !Array.isArray(plan.ops)) return undefined;
     this.plans.set(id, plan);
     return plan;
   }

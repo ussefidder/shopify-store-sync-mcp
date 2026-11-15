@@ -159,7 +159,7 @@ describe("metafield values", () => {
     const orphan = plan.ops.find((o) => o.key === "PRODUCT/dev-only/custom.material")!;
     expect(orphan.action).toBe("conflict");
     expect(orphan.reason).toBe("Product/dev-only doesn't exist in the target; create it first");
-    expect(plan.warnings[0]).toMatch(/^1 value\(s\) belong to products or collections that don't exist/);
+    expect(plan.warnings[0]).toMatch(/^1 value\(s\) belong to something that doesn't exist in the target/);
     expect(plan.warnings.some((w) => /conflict\(s\) need a manual fix/.test(w))).toBe(false);
     expect(results.map((r) => `${r.outcome} ${r.key}`).sort()).toEqual([
       "created COLLECTION/linen/custom.banner_text",

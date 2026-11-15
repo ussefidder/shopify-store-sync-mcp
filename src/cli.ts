@@ -30,8 +30,9 @@ Options
   --exclude  glob,glob   drop keys matching
   --namespaces a,b       metafield value namespaces      --locales fr,de   translation locales
   --with-prices          products: also copy variant prices
+  --as-drafts            new pages are created hidden, new metaobject entries as drafts
   --writes               connect: also request write scopes (default: what the store config allows)
-  --confirm <domain>     required to apply to a protected store
+  --confirm <domain>     the target's myshopify domain; required to apply to a protected store
   --only 1,2,3           apply only these plan steps
   --files a,b            theme file patterns              --source-theme / --target-theme <id>
   --exit-code            diff/themes: exit 2 when differences are found
@@ -48,7 +49,7 @@ export function parseArgs(argv: string[]): { positional: string[]; flags: Flags 
       const [name, inline] = a.slice(2).split("=", 2) as [string, string | undefined];
       const next = argv[i + 1];
       if (inline !== undefined) flags[name] = inline;
-      else if (next !== undefined && !next.startsWith("--") && !["json", "exit-code", "values", "writes", "with-prices"].includes(name)) flags[name] = argv[++i]!;
+      else if (next !== undefined && !next.startsWith("--") && !["json", "exit-code", "values", "writes", "with-prices", "as-drafts"].includes(name)) flags[name] = argv[++i]!;
       else flags[name] = true;
     } else positional.push(a);
   }
@@ -69,6 +70,7 @@ export function scopeFromFlags(flags: Flags): Scope {
     namespaces: list(flags.namespaces),
     locales: list(flags.locales),
     prices: flags["with-prices"] === true,
+    drafts: flags["as-drafts"] === true,
     metaobjectTypes: list(flags["metaobject-types"]),
     ownerTypes: list(flags["owner-types"]),
   };

@@ -4,15 +4,16 @@ import type { Item, ResourceAdapter } from "./types.js";
 import { reservedPrefix } from "./util.js";
 
 /*
- * Translations of pages, collections, metaobjects, menus and store policies, one item per
- * resource and locale, keyed "<locale>:<Type>/<handle>" (e.g. "fr:Page/shipping").
+ * Translations of products, pages, collections, metaobjects, menus and store policies, one item
+ * per resource and locale, keyed "<locale>:<Type>/<handle>" (e.g. "fr:Page/shipping"). For products
+ * that is the title, description, type and SEO fields; option names and values are not covered.
  *
  * Shopify ties each translation to a digest of the original text it translates. Those digests
  * are store-specific, so translations are registered against the target's own content. They
  * run last in a plan, after pages, collections and metaobjects have been synced.
  */
 
-export const TRANSLATABLE_TYPES = ["PAGE", "COLLECTION", "METAOBJECT", "MENU", "SHOP_POLICY"] as const;
+export const TRANSLATABLE_TYPES = ["PRODUCT", "PAGE", "COLLECTION", "METAOBJECT", "MENU", "SHOP_POLICY"] as const;
 
 const LOCALES_QUERY = /* GraphQL */ `query Locales { shopLocales { locale primary } }`;
 
@@ -36,7 +37,17 @@ interface Node {
 export const translations: ResourceAdapter = {
   kind: "translations",
   description:
-    "Translations of pages, collections, metaobjects, menus and store policies, per locale, keyed locale:Type/handle. Registered against the target's own content. Opt-in (not in the default set).",
+    "Translations of products, pages, collections, metaobjects, menus and store policies, per locale, keyed locale:Type/handle. Registered against the target's own content. Translated fields that only the target has are kept. Opt-in (not in the default set).",
+
+  parallel: true,
+  ownerRef: (d) => (typeof d.resource === "string" ? d.resource : undefined),
+
+  /** A translated field the source doesn't have is never removed from the target, so it isn't a difference. */
+  alignTarget(source, target) {
+    const wanted = (source.values as Record<string, string>) ?? {};
+    const values = Object.fromEntries(Object.entries((target.values as Record<string, string>) ?? {}).filter(([k]) => k in wanted));
+    return { ...target, values };
+  },
 
   async fetch(client, opts, mapper) {
     const locales =

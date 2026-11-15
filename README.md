@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/shopify-store-sync-mcp"><img src="https://img.shields.io/npm/v/shopify-store-sync-mcp?color=cb3837" alt="npm version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-57c26e" alt="MIT license"></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D20-6cb6ff" alt="Node 20+">
+  <img src="https://img.shields.io/badge/node-%3E%3D22-6cb6ff" alt="Node 22+">
   <img src="https://img.shields.io/badge/MCP-server-a371f7" alt="MCP server">
   <img src="https://img.shields.io/badge/Shopify%20Admin%20API-2026--10-e3b341" alt="Shopify Admin API 2026-10">
 </p>
@@ -28,7 +28,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/demo.png" alt="diff_stores, plan_sync and apply_plan output: 6 created, 3 updated, 1 conflict skipped, protected store refused without confirmation" width="100%">
+  <img src="docs/images/demo.png" alt="diff_stores, plan_sync and apply_plan output: 6 created, 3 updated, 1 conflict skipped, protected store refused until a person confirms" width="100%">
 </p>
 
 <sub>Real output of the server's tools on two sample stores.</sub>
@@ -38,7 +38,7 @@
 The store setup that usually gets rebuilt by hand, plus the images it uses. References between items (a size guide pointing at a product, a menu linking to a page) are carried across by handle, so they land on the right item instead of a broken ID.
 
 <p align="center">
-  <img src="docs/images/what-it-syncs.png" alt="Metafield definitions, metaobject definitions and entries, collections, pages, menus, redirects, store policies, files and images, and opt-in products, metafield values and translations" width="100%">
+  <img src="docs/images/what-it-syncs.png" alt="Metafield definitions, metaobject definitions and entries, collections, pages, menus, redirects, store policies, files and images, and opt-in products (variants matched by option values), metafield values and translations" width="100%">
 </p>
 
 <details>
@@ -48,19 +48,23 @@ The store setup that usually gets rebuilt by hand, plus the images it uses. Refe
 |---|---|---|
 | `metafield_definitions` | `OWNER_TYPE.namespace.key` | Name, description, pinning, storefront and customer account access, capabilities, validations. A type change is reported as a conflict, since Shopify can't change a definition's type in place. |
 | `metaobject_definitions` | `type` | Schema, access, capabilities. Fields are added or updated, never removed. Self-referencing definitions are handled. |
-| `pages` | `handle` | Title, body HTML, template, published state. |
-| `metaobjects` | `type/handle` | All field values, publish status. References to products, collections, pages and other metaobjects are remapped. |
-| `menus` | `handle` | Full item tree (3 levels), including customer account menus. Links to resources are remapped; custom URLs are kept; links to things that can't be matched are left out and reported. |
+| `pages` | `handle` | Title, body HTML, template, published state. With `as_drafts` (`--as-drafts`), new pages are created hidden and existing ones keep their state. |
+| `metaobjects` | `type/handle` | All field values, publish status. References to products, collections, pages and other metaobjects are remapped. A field the source leaves empty is never cleared in the target. With `as_drafts`, new entries are created as drafts. |
+| `menus` | `handle` | Full item tree (3 levels), including customer account menus. Links to resources are remapped; custom URLs are kept; links to things that can't be matched are left out and reported. **Links that only the target menu has are kept**, in place, and the plan names them. |
 | `redirects` | `path` | Thousands are fine. |
-| `collections` | `handle` | Title, description, sort order, template, SEO and smart-collection rules (rules on a metafield definition are remapped). Manual collections keep their own product list; sales-channel publishing is not copied. Manual versus smart is reported as a conflict. |
+| `collections` | `handle` | Title, description, sort order, template, SEO and smart-collection rules (rules on a metafield definition are remapped). Manual collections keep their own product list. A new collection is not published to any sales channel. Manual versus smart is reported as a conflict. |
 | `shop_policies` | `type` | Refund, privacy, terms, shipping and contact policy text. |
-| `products` *(opt-in)* | `handle` | Title, description, vendor, type, tags, template, SEO, options, variants (matched by option values, with SKU) and images. **New products are created as drafts.** Prices only with `prices: true` (`--with-prices`); inventory and sales-channel publishing are never copied. On update, variants, images and option values that only the target has are kept, and don't count as differences. Gift cards are skipped. |
+| `products` *(opt-in)* | `handle` | Title, description, vendor, type, category, tags, template, SEO, options, variants (matched by option values; SKU, taxable flag and inventory policy are copied) and images. **New products are created as drafts.** Prices only with `prices: true` (`--with-prices`). On update, the tags, variants, option values and media (images, videos, 3D models) that only the target has are kept, and don't count as differences. Gift cards are skipped. See "What product sync leaves alone" below. |
 | `metafields` *(opt-in)* | `OWNER/handle/namespace.key` | Metafield **values** on products and collections, landed on the item with the same handle. Reference values are remapped. Filter with `namespaces`. |
-| `translations` *(opt-in)* | `locale:Type/handle` | Translations of pages, collections, metaobjects, menus and policies. Registered against the target's own text, after the content itself is synced. The plan warns when a language isn't added to the target. |
+| `translations` *(opt-in)* | `locale:Type/handle` | Translations of products, pages, collections, metaobjects, menus and policies. Registered against the target's own text, after the content itself is synced. A translated field only the target has is kept. The plan warns when a language isn't added to the target. |
 
-`products`, `metafields` and `translations` can be large, so they're read only when you ask for them (`resources: ["products"]`). When an include filter names exact product handles (or handle prefixes like `linen-*`), only those products are read. App-owned (`app--…`) and Shopify-reserved (`shopify--…`) data is skipped and listed in the report.
+`products`, `metafields` and `translations` can be large, so they're read only when you ask for them (`resources: ["products"]`). Name what you want and only that is read: exact product handles or prefixes (`include: ["linen-shirt", "linen-*"]`) for products, and patterns that name their owner (`include: ["PRODUCT/linen-shirt/*"]`) for metafield values. App-owned (`app--…`) and Shopify-reserved (`shopify--…`) data is skipped and listed in the report.
 
 **Files and images** referenced by any of the above are matched by file name in the target. When one is missing, the plan says so and `apply_plan` uploads it from the source store.
+
+**What product sync leaves alone.** Never copied: inventory levels, sales-channel publishing, the status of existing products, barcodes, weight and shipping settings, the image assigned to a variant, videos and 3D models (the target keeps its own), and translations of option names and values. Nothing is ever removed from a target product: a tag, variant or image deleted in the source stays in the target until you remove it there.
+
+**Nothing goes live by surprise.** New products are drafts and new collections aren't on any sales channel. Pages and metaobject entries copy the published state of the source unless you pass `as_drafts`; the plan tells you when new ones would be visible right away.
 
 </details>
 
@@ -81,7 +85,7 @@ Plenty of Shopify MCP servers read and write *one* store. This one is built for 
 | Dry run before writing | ❌ | ✅ every write goes through a reviewed plan |
 | Detects changes made after planning | ❌ | ✅ re-reads the target and skips anything that drifted |
 | Deletes | sometimes | **never** |
-| Production guardrails | ❌ | ✅ writes are off by default; protected stores need typed confirmation |
+| Production guardrails | ❌ | ✅ writes are off by default; protected stores are confirmed by a person, not by the assistant |
 | Audit trail | ❌ | ✅ JSONL log of every write |
 
 **Why not just Shopify CLI?** The CLI runs one query you wrote, on one store. This tool uses the CLI only to sign in, and does the comparing, ID remapping, ordering, uploads and safety checks for you.
@@ -100,12 +104,16 @@ Plenty of Shopify MCP servers read and write *one* store. This one is built for 
 <summary><b>How each safeguard works</b></summary>
 
 1. **Read-only by default.** `allowWrites` is `false` until you set it, per store.
-2. **Plan, then apply.** `apply_plan` only runs a plan produced by `plan_sync`. Plans expire after an hour.
+2. **Plan, then apply.** `apply_plan` only runs a plan produced by `plan_sync`. Plans expire after an hour and their files are removed after a week.
 3. **Drift protection.** Before writing, the target is re-read. Any item that changed since planning is skipped, not overwritten.
-4. **No deletes.** Items that exist only in the target are listed, never removed. Fields that exist only in the target are left alone.
-5. **Protected stores.** Production needs the exact domain typed as confirmation.
+4. **No deletes.** Items that exist only in the target are listed, never removed. The same holds inside an item wherever Shopify's API replaces a whole list: menu links, product tags, variants and media that only the target has are read first and sent back with the update. One thing is not kept: when the source has a value for a field and the target has another, the source's value wins. That is what a sync is, and the plan shows each one before you apply.
+5. **Protected stores are confirmed by a person.** For a store marked `protected`, the assistant can't supply the confirmation itself. Your client asks you to type the store's domain (MCP elicitation); in a client that can't ask, the plan is applied from the command line with `--confirm <domain>`. The assistant sees store content (page bodies, product descriptions), so this is what stands between a prompt hidden in that content and your production store.
 6. **Conflicts aren't forced.** A metafield definition whose type differs is reported and skipped.
 7. **Audit log.** Every write is appended to `~/.shopify-store-sync/audit.log` (override with `SYNC_AUDIT_LOG`).
+8. **Snapshot folders are treated as input.** A folder used as a source (`dir:`) is validated file by file, can only hold the known resource types, and files are only ever uploaded from Shopify's own file hosts. Over MCP, folders are read and written inside one base folder (`SYNC_SNAPSHOT_DIR`, or the folder the server runs in).
+9. **No silent shortcuts.** A list too long to read fully stops with an error instead of coming back short, and a request that gets no answer is abandoned after a time limit; a write is never repeated blindly.
+
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 </details>
 
@@ -154,9 +162,14 @@ Adding a scope later means releasing a new version and approving the update on e
 </details>
 
 <details>
-<summary><b>Option 3: an access token from a custom app (automation on a client's store)</b></summary>
+<summary><b>Option 3: a store in someone else's organization (a client's store)</b></summary>
 
-Client credentials only work on stores in the app's own organization; elsewhere Shopify answers `shop_not_permitted`. For unattended runs on such a store, ask the owner to create a custom app in their admin (**Settings > Apps > Develop apps**), grant the scopes listed below, install it and share the Admin API access token (`shpat_...`). Use it as `accessToken` in step 2.
+An app's client credentials only work on stores owned by the same organization as the app; elsewhere Shopify answers `shop_not_permitted`. For a store you don't own there are two ways:
+
+- **Sign in with Shopify CLI** (option 1) with your staff or collaborator account. Nothing to create; best for work you run yourself.
+- **For unattended runs**, ask the store's owner to follow option 2 in *their* organization (create the app in their Dev Dashboard, install it on their store) and share the client ID and client secret with you.
+
+An existing Admin API access token (`shpat_...`) from a custom app that was created in the store admin still works: use it as `accessToken` in step 2. New apps of that kind can no longer be created there (Shopify moved app creation to the Dev Dashboard on January 1, 2026), so don't plan new setups around it.
 
 </details>
 
@@ -231,13 +244,33 @@ Create `stores.json`. Secrets can come from environment variables with `env:NAME
 |---|---|---|
 | `domain` | required | `*.myshopify.com` domain |
 | `auth` | | `"shopify-cli"`: use the sign-in saved by `connect` (no token needed), **or** |
-| `accessToken` | | Static Admin API token, **or** |
+| `accessToken` | | Static Admin API token from an existing custom app, **or** |
 | `clientId` + `clientSecret` | | Dev Dashboard app; tokens are fetched and refreshed automatically |
 | `apiVersion` | `2026-10` | Admin API version |
 | `allowWrites` | `false` | Must be `true` for `apply_plan` to write to this store |
-| `protected` | `false` | `apply_plan` also requires `confirm: "<domain>"` |
+| `protected` | `false` | Applying also needs a person to confirm with the store's domain: asked by your AI client, or `--confirm <domain>` on the command line |
 
 You can also pass the whole config as JSON in `SHOPIFY_STORES`, or point `SHOPIFY_STORES_FILE` at a file elsewhere. For a single store, `SHOPIFY_STORE_DOMAIN` plus `SHOPIFY_ACCESS_TOKEN` works.
+
+</details>
+
+<details>
+<summary><b>Environment variables</b></summary>
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SHOPIFY_STORES_FILE` | `./stores.json` | Where the store config lives |
+| `SHOPIFY_STORES` | | The whole store config as inline JSON |
+| `SHOPIFY_API_VERSION` | `2026-10` | Admin API version for stores that don't set `apiVersion` |
+| `SHOPIFY_CLI_BIN` | `shopify` | Path to Shopify CLI, when it isn't on the `PATH` |
+| `SYNC_SNAPSHOT_DIR` | folder the server runs in | Over MCP, snapshot folders (`export_snapshot`, `dir:`) must be inside this folder |
+| `SYNC_ALLOW_AGENT_CONFIRM` | off | `true` lets `apply_plan` take the protected-store confirmation as an argument. Only for unattended automation where no person can be asked |
+| `SYNC_REQUEST_TIMEOUT_MS` | `60000` | How long one request to Shopify may take |
+| `SYNC_CLI_TIMEOUT_MS` | `120000` | How long one Shopify CLI call may take before it is stopped |
+| `SYNC_MAX_ITEMS` | `50000` | Longest list read from a store; a longer one is an error, never a silent cut |
+| `SYNC_WRITE_CONCURRENCY` | `4` | How many independent writes run at once |
+| `SYNC_AUDIT_LOG` | `~/.shopify-store-sync/audit.log` | Where every write is logged |
+| `SYNC_STATE_DIR` | `~/.shopify-store-sync` | Where plans and the audit log are kept |
 
 </details>
 
@@ -296,6 +329,7 @@ claude mcp add shopify-store-sync \
 - *"Which product metafield definitions in namespace custom are missing from eu?"* (uses `include: ["PRODUCT.custom.*"]`)
 - *"Plan a sync of the faq and size_guide metaobjects from dev to eu."*
 - *"Apply only ops 1 to 4 of that plan."*
+- *"Sync the pages from dev to eu, but keep new ones hidden."* (uses `as_drafts: true`)
 - *"Copy the linen-shirt product to eu, with its prices."* (uses `resources: ["products"], include: ["linen-shirt"], prices: true`)
 - *"Copy the French translations from dev to eu."* (uses `resources: ["translations"], locales: ["fr"]`)
 - *"Export eu's configuration to ./store-config so I can commit it."*
@@ -321,11 +355,11 @@ What `diff_stores` reports, field by field (real output):
 | `diff_stores` | no | Only-in-source, changed (field by field), only-in-target. |
 | `plan_sync` | no | Dry-run plan: creates, updates, conflicts, missing references. Returns a `plan_id`. |
 | `get_plan` | no | Show a plan, or list recent ones. |
-| `apply_plan` | **yes** | Execute a plan, with every safety check below. |
+| `apply_plan` | **yes** | Execute a plan, with every safety check above. For a protected store your client asks you to confirm. |
 | `export_snapshot` | local files only | Write a store's configuration to a folder for git ([config as code](#config-as-code)). |
 | `diff_themes` | no | Compare theme templates and settings between two stores ([theme settings](#theme-settings-diff)). |
 
-Every tool except `apply_plan` is read-only toward Shopify and annotated as such, so clients can auto-approve them.
+Every tool except `apply_plan` is read-only toward Shopify and annotated as such, so clients can auto-approve them. Long calls report progress (what was read, which step was written) to clients that ask for it.
 
 </details>
 
@@ -345,8 +379,8 @@ Everything also works without an AI client. Run a command instead of starting th
 ```bash
 npx shopify-store-sync-mcp stores
 npx shopify-store-sync-mcp diff dev eu --resources pages,menus
-npx shopify-store-sync-mcp plan dev eu
-npx shopify-store-sync-mcp apply <plan-id> --confirm eu.myshopify.com
+npx shopify-store-sync-mcp plan dev eu --as-drafts
+npx shopify-store-sync-mcp apply <plan-id> --confirm my-brand-eu.myshopify.com
 npx shopify-store-sync-mcp export eu ./store-config
 npx shopify-store-sync-mcp themes dev eu
 ```
@@ -429,7 +463,7 @@ Two references followed from the source store to the target, as the sample sync 
 ## Tested on real stores
 
 <p align="center">
-  <img src="docs/images/tested.png" alt="68 automated tests, 52 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
+  <img src="docs/images/tested.png" alt="103 automated tests, 56 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
 </p>
 
 <details>
@@ -437,7 +471,7 @@ Two references followed from the source store to the target, as the sample sync 
 
 | Feature | Live result |
 |---|---|
-| Diff of all default resource types | both stores read in about 10 seconds |
+| Diff of all default resource types | both stores read in about 2 seconds with an app, about 30 through the Shopify CLI sign-in |
 | Create: metafield and metaobject definitions, metaobjects, smart collection, page, redirect, French translation | applied, second diff empty |
 | File reference on a metaobject | image uploaded to the target by file name and linked |
 | Update: page title and body, collection description | applied, second diff empty |
@@ -459,7 +493,7 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 ## Roadmap
 
 <p align="center">
-  <img src="docs/images/roadmap.png" alt="Roadmap: shipped (syncing, safety, ways to use it, quality) and next (collection sources, variants and articles, more metafield owners, menu translations, markets, bulk mode, undo, optional deletes)" width="100%">
+  <img src="docs/images/roadmap.png" alt="Roadmap: shipped (syncing, safety, ways to use it, quality) and next (collection sources, batch writes, more product fields, variants and articles, more metafield owners, menu translations, markets, undo, optional deletes)" width="100%">
 </p>
 
 <details>
@@ -469,22 +503,27 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 
 *Syncing*
 - [x] Metafield definitions, metaobject definitions and metaobject entries
-- [x] Products: content, options, variants by option values and SKU, images; new ones as drafts, prices only when asked, target-only variants and images kept
+- [x] Products: content, category, options, variants matched by option values (SKU, taxable flag, inventory policy), images; new ones as drafts, prices only when asked
 - [x] Collections with smart-collection rules, pages, menus (3 levels, customer account menus too), redirects, store policies
-- [x] Metafield values on products and collections, translations per language (opt-in)
+- [x] Metafield values on products and collections, translations per language, products included (opt-in)
 - [x] Images and files matched by file name, uploaded to the target when missing
 - [x] Cross-store ID remapping by handle, including list references and rules on metafield definitions
 - [x] Two-pass writes for items that point at each other or at themselves
 - [x] Filters: resource types, include and exclude patterns, namespaces, metaobject types, owner types, languages
+- [x] `as_drafts`: new pages hidden, new metaobject entries as drafts, published state of existing ones left alone
 
 *Safety*
 - [x] Dry-run plans that expire after an hour, applied in full or step by step (`--only`)
-- [x] Drift check before every write, never deletes, read-only by default, typed confirmation for protected stores
+- [x] Drift check before every write, read-only by default
+- [x] Never deletes, also inside an item: menu links, product tags, variants and media that only the target has are kept
+- [x] Protected stores are confirmed by a person (asked by the client, or `--confirm` on the command line), never by the assistant
 - [x] Conflicts reported instead of forced (type changes, manual versus smart collections, values on items missing from the target)
+- [x] Snapshot folders validated, files uploaded only from Shopify's hosts, folders kept inside a base folder over MCP
+- [x] Time limits on every request, and an error instead of a shortened list
 - [x] Audit log of every write
 
 *Ways to use it*
-- [x] MCP server with 9 tools, read-only tools annotated for auto-approval
+- [x] MCP server with 9 tools, read-only tools annotated for auto-approval, progress reported on long calls
 - [x] Command line with `--json` output and `--exit-code` for scheduled drift checks
 - [x] Config as code: export a store to files and use the folder as a source (`dir:`)
 - [x] Read-only theme settings diff
@@ -492,19 +531,21 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 - [x] Published on npm, runs with `npx`
 
 *Quality*
-- [x] 68 automated tests against an in-memory Shopify, plus MCP protocol tests
+- [x] 103 automated tests against an in-memory Shopify, plus MCP protocol tests
 - [x] Every GraphQL operation validated against Shopify's schema for 2026-04, 2026-10 and 2027-01
 - [x] Tested live between two stores on Linux and Windows, Shopify CLI 4.9 and 5
-- [x] Parallel reads with throttle-aware retries; clear errors for missing installs, expired sign-ins and auto-managed policies
+- [x] Parallel reads and writes with throttle-aware retries; clear errors for missing installs, expired sign-ins and auto-managed policies
+- [x] Linted, no known vulnerabilities in any dependency, release checklist for Shopify's quarterly API versions
 
 **Next**
-- [ ] Move collection rules to Shopify's new `sources` model (`ruleSet` is deprecated but supported through 2027-01)
+- [ ] Move collection rules to Shopify's new `sources` model. `ruleSet` is deprecated but supported through 2027-01; the new model only exists from 2026-07, so this waits until 2026-04 can be dropped
+- [ ] Batch writes for very large syncs (`urlRedirectImport`, bulk operations): writes run 4 at a time today
 - [ ] Product prices per market and inventory levels, as explicit opt-ins
+- [ ] Barcodes, weight and variant images on products; translations of option names and values
 - [ ] Remap product variants and blog articles, so references to them sync too
-- [ ] Metafield values on variants, pages, blogs and the shop
+- [ ] Metafield values on variants, pages, blogs and the shop; metafield definition constraints
 - [ ] Menu item (link) translations
 - [ ] Markets and market web presences
-- [ ] Bulk operations for very large stores
 - [ ] Undo: restore the previous values of an applied plan from the audit log
 - [ ] Optional deletes, behind an explicit flag
 
@@ -516,14 +557,17 @@ Ideas and PRs are welcome. Issues tagged `good first issue` are a good place to 
 <summary><b>Development</b></summary>
 
 ```bash
-npm install
+npm install           # Node 22 or newer
 npm test              # vitest: unit, sync engine against an in-memory Shopify, and MCP protocol tests
 npm run typecheck
+npm run lint
 npm run build
 
 # Validate every GraphQL operation against Shopify's real Admin schema
 npm run validate:graphql            # defaults to 2026-10
 npm run validate:graphql -- 2027-01
+
+npm run check         # typecheck, lint, tests and schema validation in one go
 ```
 
 Layout:
@@ -541,6 +585,7 @@ src/
   shopify/cliClient.ts  the same requests through Shopify CLI's sign-in (`shopify store execute`)
   refs.ts             GID <-> portable reference mapping
   snapshot.ts         read a store into portable form
+  drafts.ts           the "as drafts" view: published state left out
   diff.ts             field-level diff
   plan.ts             dry-run plans and plan storage
   apply.ts            guarded, drift-checked, two-pass writes
@@ -549,7 +594,7 @@ test/
   fakeShop.ts         in-memory Admin API used by the tests
 ```
 
-Adding a resource type means writing one adapter (`fetch`, `create`, `update`) in `src/resources/`. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Adding a resource type means writing one adapter (`fetch`, `create`, `update`) in `src/resources/`. See [CONTRIBUTING.md](CONTRIBUTING.md), which also has the release checklist.
 
 </details>
 
@@ -565,7 +610,7 @@ Syncing definitions between stores isn't a new idea, and these tools are worth k
 | [shopify-metadata-migrator](https://github.com/warriorachilles/shopify-metadata-migrator) | CLI | Copies metafield and metaobject definitions |
 | MetaMaintain, Metora, Rewind Staging | Shopify apps (paid or freemium) | Definition and entry sync through an embedded app |
 
-What this project adds: it runs inside your AI client as an MCP server (or as a CLI) on your own machine, signed in as you through Shopify CLI or with your own private app, so there's no third-party app from the App Store and no data goes anywhere except Shopify. You can ask for a diff in plain language; it also covers pages, menus, redirects, collections, policies, metafield values and translations, remaps references and files across stores, keeps store configuration in git, checks for drift before writing and never deletes. If you only need a scripted one-shot copy of definitions, one of the CLIs above may be all you need.
+What this project adds: it runs inside your AI client as an MCP server (or as a CLI) on your own machine, signed in as you through Shopify CLI or with your own private app, so there's no third-party app from the App Store and no data goes anywhere except Shopify. You can ask for a diff in plain language; it also covers products, pages, menus, redirects, collections, policies, metafield values and translations, remaps references and files across stores, keeps store configuration in git, checks for drift before writing and never deletes. If you only need a scripted one-shot copy of definitions, one of the CLIs above may be all you need.
 
 </details>
 

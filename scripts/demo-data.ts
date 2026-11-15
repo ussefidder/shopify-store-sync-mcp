@@ -9,6 +9,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { StoreRegistry, type StoreConfig } from "../src/config.js";
 import { PlanStore } from "../src/plan.js";
@@ -116,7 +117,10 @@ const server = createServer({
   clientFactory: (s: StoreConfig) => shops[s.alias]!,
 });
 const [a, b] = InMemoryTransport.createLinkedPair();
-const client = new Client({ name: "demo", version: "0" });
+// The client plays the person too: asked to confirm the protected store, it first declines, then types the domain.
+const client = new Client({ name: "demo", version: "0" }, { capabilities: { elicitation: {} } });
+const person: { types?: string } = {};
+client.setRequestHandler(ElicitRequestSchema, async () => (person.types ? { action: "accept", content: { domain: person.types } } : { action: "decline" }));
 await Promise.all([server.connect(a), client.connect(b)]);
 
 async function call(name: string, args: Record<string, unknown>) {
@@ -133,7 +137,8 @@ const resources = ["metafield_definitions", "metaobject_definitions", "pages", "
 const diff = await call("diff_stores", { source: "dev", target: "eu", resources });
 const plan = await call("plan_sync", { source: "dev", target: "eu", resources });
 const refused = await call("apply_plan", { plan_id: plan.plan_id });
-const applied = await call("apply_plan", { plan_id: plan.plan_id, confirm: "eu.myshopify.com" });
+person.types = "eu.myshopify.com";
+const applied = await call("apply_plan", { plan_id: plan.plan_id });
 const again = await call("plan_sync", { source: "dev", target: "eu", resources });
 const menuAfter = eu.state.menus[0].items.map((i: { title: string; resourceId: string | null }) => [i.title, i.resourceId]);
 

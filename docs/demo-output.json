@@ -150,7 +150,7 @@
     ]
   },
   "plan": {
-    "plan_id": "7f0a1429-c9a1-4e06-a4aa-35201302b5cd",
+    "plan_id": "b8b07997-4094-4339-bb20-7878240a296b",
     "status": "pending",
     "source": {
       "alias": "dev",
@@ -160,14 +160,15 @@
       "alias": "eu",
       "domain": "eu.myshopify.com"
     },
-    "expiresAt": "2026-11-15T01:26:45.467Z",
+    "expiresAt": "2026-11-15T04:23:30.845Z",
     "totals": {
       "create": 6,
       "update": 3,
       "conflict": 1
     },
     "warnings": [
-      "1 conflict(s) need a manual fix in the target; they will be skipped."
+      "1 conflict(s) need a manual fix in the target; they will be skipped.",
+      "2 new metaobject entries will be visible in eu as soon as created, because they are published in the source. Pass as_drafts: true (--as-drafts) to create them hidden instead."
     ],
     "ops": [
       {
@@ -286,15 +287,15 @@
         ]
       }
     ],
-    "note": "Nothing has been written. Review, then call apply_plan with this plan_id. Items only in the target are never deleted.",
+    "note": "Nothing has been written. Review, then call apply_plan with this plan_id. Items only in the target are never deleted, and menu links, product tags, variants and media that only the target has are kept.",
     "targetWritable": true,
     "targetProtected": true
   },
   "refused": {
-    "error": "Refused: store \"eu\" is protected. Pass confirm=\"eu.myshopify.com\" to apply."
+    "error": "Refused: the confirmation for the protected store \"eu\" was declined; nothing was written."
   },
   "applied": {
-    "plan_id": "7f0a1429-c9a1-4e06-a4aa-35201302b5cd",
+    "plan_id": "b8b07997-4094-4339-bb20-7878240a296b",
     "status": "applied",
     "totals": {
       "created": 6,

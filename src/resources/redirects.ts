@@ -1,4 +1,4 @@
-import { assertNoUserErrors, paginate } from "../shopify/client.js";
+import { assertNoUserErrors, maxItems, paginate } from "../shopify/client.js";
 import type { ResourceAdapter } from "./types.js";
 import { PAGE_INFO } from "./util.js";
 
@@ -14,9 +14,10 @@ const QUERY = /* GraphQL */ `
 export const redirects: ResourceAdapter = {
   kind: "redirects",
   description: "URL redirects, keyed by path.",
+  parallel: true,
 
   async fetch(client) {
-    const nodes = await paginate<{ id: string; path: string; target: string }>(client, QUERY, {}, (d) => d.urlRedirects, 100_000);
+    const nodes = await paginate<{ id: string; path: string; target: string }>(client, QUERY, {}, (d) => d.urlRedirects, Math.max(maxItems(), 250_000));
     return { items: nodes.map((n) => ({ key: n.path, id: n.id, data: { path: n.path, target: n.target } })), skipped: [] };
   },
 

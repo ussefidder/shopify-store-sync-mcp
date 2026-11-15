@@ -6,7 +6,7 @@ import { runCli } from "../src/cli.js";
 import { parseStores, StoreRegistry, type StoreConfig } from "../src/config.js";
 import { Engine } from "../src/engine.js";
 import { PlanStore } from "../src/plan.js";
-import { parseCliOutput, quoteWindowsArg, scopesFor, ShopifyCliClient, type Runner } from "../src/shopify/cliClient.js";
+import { makeRunner, parseCliOutput, quoteWindowsArg, scopesFor, ShopifyCliClient, type Runner } from "../src/shopify/cliClient.js";
 import { FakeShop } from "./fakeShop.js";
 
 const tmp = (p: string) => mkdtempSync(join(tmpdir(), p));
@@ -15,10 +15,11 @@ const progress = '{"type":"progress","status":"started","message":"Loading store
 
 /** A `shopify store execute` stand-in that answers from an in-memory store. */
 function runnerFor(shop: FakeShop, calls: string[][] = []): Runner {
-  return async (_bin, args) => {
+  return async (_bin, args, opts) => {
     calls.push(args);
-    const query = readFileSync(arg(args, "--query-file"), "utf8");
-    const variables = JSON.parse(readFileSync(arg(args, "--variable-file"), "utf8"));
+    // File names are relative to the folder the CLI is started in.
+    const query = readFileSync(join(opts!.cwd!, arg(args, "--query-file")), "utf8");
+    const variables = JSON.parse(readFileSync(join(opts!.cwd!, arg(args, "--variable-file")), "utf8"));
     if (/^\s*mutation\b/.test(query) && !args.includes("--allow-mutations")) {
       return { code: 1, stdout: JSON.stringify({ error: { message: "Mutations are disabled by default." } }), stderr: "" };
     }
@@ -123,8 +124,8 @@ describe("Shopify CLI sign-in", () => {
   });
 
   it("reads Shopify CLI 4.9 output, where the data object is printed on its own over several lines", () => {
-    const out = `${progress}\n{"type":"progress","status":"completed"}\n{\n  "shop": {\n    "name": "Soraly Studio Demo"\n  }\n}\n`;
-    expect(parseCliOutput(out)).toEqual({ data: { shop: { name: "Soraly Studio Demo" } } });
+    const out = `${progress}\n{"type":"progress","status":"completed"}\n{\n  "shop": {\n    "name": "Demo Shop"\n  }\n}\n`;
+    expect(parseCliOutput(out)).toEqual({ data: { shop: { name: "Demo Shop" } } });
     expect(parseCliOutput(`${progress}\n${JSON.stringify({ data: { shop: { name: "S" } }, extensions: { cost: 1 } }, null, 2)}`)).toEqual({
       data: { shop: { name: "S" } },
       extensions: { cost: 1 },
@@ -132,10 +133,45 @@ describe("Shopify CLI sign-in", () => {
     expect(parseCliOutput(`${progress}\n{"error":{"type":"abort","message":"nope"}}`)).toEqual({ error: { type: "abort", message: "nope" } });
   });
 
-  it("quotes arguments for the Windows shell", () => {
+  it("quotes arguments for the Windows shell, and refuses what cmd.exe would expand", () => {
     expect(quoteWindowsArg("--store")).toBe("--store");
-    expect(quoteWindowsArg("C:\\Users\\a b\\q.graphql")).toBe('"C:\\Users\\a b\\q.graphql"');
-    expect(quoteWindowsArg('say "hi"')).toBe('"say ""hi"""');
+    expect(quoteWindowsArg("C:\\Users\\a b\\shopify.cmd")).toBe('"C:\\Users\\a b\\shopify.cmd"');
+    // cmd.exe expands %VAR% and !VAR! even inside quotes, and a quote can't be escaped reliably.
+    for (const bad of ["%USERPROFILE%", "a!b!", 'say "hi"', "a^b"]) expect(() => quoteWindowsArg(bad)).toThrow(/can't pass this value/);
+  });
+
+  it("passes plain file names and runs the CLI inside its temp folder, so no path is ever quoted", async () => {
+    const seen: { args: string[]; cwd?: string }[] = [];
+    const run: Runner = async (_bin, args, opts) => (seen.push({ args, cwd: opts?.cwd }), { code: 0, stdout: JSON.stringify({ data: { ok: true } }), stderr: "" });
+    await new ShopifyCliClient(cliStore("dev"), run, "shopify").request("query { shop { name } }");
+    expect(arg(seen[0]!.args, "--query-file")).toBe("query.graphql");
+    expect(arg(seen[0]!.args, "--variable-file")).toBe("variables.json");
+    expect(seen[0]!.cwd).toMatch(/store-sync-cli-/);
+    for (const a of seen[0]!.args) expect(a).toMatch(/^[A-Za-z0-9_\-.:,=@]+$/);
+  });
+
+  it("stops a CLI call that gives no answer: a read is asked once more, a write is never repeated", async () => {
+    let n = 0;
+    const hung: Runner = async () => (n++, { code: 1, stdout: "", stderr: "", timedOut: true });
+    const client = new ShopifyCliClient(cliStore("dev"), hung, "shopify");
+    await expect(client.request("query { shop { name } }")).rejects.toThrow(/gave no answer and was stopped \(set SYNC_CLI_TIMEOUT_MS/);
+    expect(n).toBe(2);
+    n = 0;
+    await expect(client.request("mutation { x { id } }")).rejects.toThrow(/may or may not have been saved/);
+    expect(n).toBe(1);
+  });
+
+  it("kills a CLI process that runs past the time limit", async () => {
+    const dir = tmp("slow-cli-");
+    const script = join(dir, "slow.js");
+    writeFileSync(script, "setTimeout(() => {}, 60000);\n");
+    const bin = process.platform === "win32" ? join(dir, "slow.cmd") : join(dir, "slow");
+    writeFileSync(bin, process.platform === "win32" ? `@node "${script}" %*\r\n` : `#!/bin/sh\nexec node "${script}"\n`);
+    chmodSync(bin, 0o755);
+    const started = Date.now();
+    const res = await makeRunner(300)(bin, ["store", "execute"]);
+    expect(res.timedOut).toBe(true);
+    expect(Date.now() - started).toBeLessThan(10_000);
   });
 
   it("connect runs store auth with the right scopes, then checks the sign-in", async () => {

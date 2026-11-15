@@ -21,7 +21,7 @@ export class ShopifyError extends Error {
   }
 }
 
-export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<{
+export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal }) => Promise<{
   ok: boolean;
   status: number;
   headers: { get(name: string): string | null };
@@ -37,6 +37,18 @@ export interface AdminClient {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** A positive whole number from the environment, or the default. */
+export function envNumber(name: string, fallback: number, env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(env[name]);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
+/** How long one HTTP request to Shopify may take before it is abandoned. */
+export const requestTimeoutMs = () => envNumber("SYNC_REQUEST_TIMEOUT_MS", 60_000);
+
+const isMutation = (query: string) => /^\s*mutation\b/.test(query);
+const isTimeout = (e: unknown) => e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
+
 export class ShopifyAdminClient implements AdminClient {
   private token: string | undefined;
   private tokenExpiresAt = 0;
@@ -45,6 +57,7 @@ export class ShopifyAdminClient implements AdminClient {
     readonly store: StoreConfig,
     private readonly fetchImpl: FetchLike = fetch as unknown as FetchLike,
     private readonly maxRetries = 5,
+    private readonly timeoutMs = requestTimeoutMs(),
   ) {
     this.token = store.accessToken;
     if (store.accessToken) this.tokenExpiresAt = Number.POSITIVE_INFINITY;
@@ -60,6 +73,7 @@ export class ShopifyAdminClient implements AdminClient {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
       body: new URLSearchParams({ grant_type: "client_credentials", client_id: clientId, client_secret: clientSecret }).toString(),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -69,7 +83,7 @@ export class ShopifyAdminClient implements AdminClient {
         code === "app_not_installed"
           ? ": the app isn't installed on this store yet (install it from the Dev Dashboard, then retry)"
           : code === "shop_not_permitted"
-            ? ": client credentials only work on stores owned by the same organization as the app; use an access token instead"
+            ? ": client credentials only work on stores owned by the same organization as the app. Sign in with Shopify CLI instead (shopify-store-sync-mcp connect), or have the store's owner create the app in their own organization"
             : code
               ? ` (${code})`
               : "";
@@ -88,15 +102,29 @@ export class ShopifyAdminClient implements AdminClient {
 
     for (let attempt = 0; ; attempt++) {
       const token = await this.getToken();
-      const res = await this.fetchImpl(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          "X-Shopify-Access-Token": token,
-        },
-        body: JSON.stringify({ query, variables }),
-      });
+      let res: Awaited<ReturnType<FetchLike>>;
+      try {
+        res = await this.fetchImpl(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            "X-Shopify-Access-Token": token,
+          },
+          body: JSON.stringify({ query, variables }),
+          signal: AbortSignal.timeout(this.timeoutMs),
+        });
+      } catch (err) {
+        if (!isTimeout(err)) throw err;
+        const secs = Math.round(this.timeoutMs / 1000);
+        // A read can simply be asked again. A write is never repeated blindly: it may have gone through.
+        if (!isMutation(query) && attempt < 2) continue;
+        throw new ShopifyError(
+          isMutation(query)
+            ? `${this.store.domain}: no answer after ${secs}s. The write may or may not have been saved; plan again to see the current state.`
+            : `${this.store.domain}: no answer after ${secs}s (set SYNC_REQUEST_TIMEOUT_MS to wait longer)`,
+        );
+      }
 
       if (res.status === 401 && this.store.clientId && attempt === 0) {
         this.tokenExpiresAt = 0; // token expired or revoked, fetch a new one once
@@ -147,21 +175,33 @@ export function assertNoUserErrors(payload: { userErrors?: UserError[] } | null 
   }
 }
 
-/** Walk a cursor-paginated connection. `pick` returns the connection object from the response. */
+/** Most items one list may hold before the read stops with an error (never a silent cut). */
+export const maxItems = () => envNumber("SYNC_MAX_ITEMS", 50_000);
+
+/**
+ * Walk a cursor-paginated connection. `pick` returns the connection object from the response.
+ * A list longer than `limit` is an error, not a shorter list: comparing against half a store
+ * would report things as missing that are there.
+ */
 export async function paginate<N>(
   client: AdminClient,
   query: string,
   variables: Record<string, unknown>,
   pick: (data: any) => { nodes: N[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } },
-  maxItems = 10_000,
+  limit = maxItems(),
 ): Promise<N[]> {
   const out: N[] = [];
-  let after: string | null = null;
-  do {
-    const data = await client.request(query, { ...variables, after });
-    const conn = pick(data);
+  let after = (variables.after as string | null | undefined) ?? null;
+  for (;;) {
+    const conn = pick(await client.request(query, { ...variables, after }));
     out.push(...conn.nodes);
-    after = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
-  } while (after && out.length < maxItems);
-  return out;
+    if (!conn.pageInfo.hasNextPage || !conn.pageInfo.endCursor) return out;
+    if (out.length >= limit) {
+      const name = /^\s*query\s+(\w+)/.exec(query)?.[1] ?? "list";
+      throw new ShopifyError(
+        `${client.store.domain}: ${name} has more than ${limit} items, so the read was stopped. Narrow it (include, namespaces, metaobject_types) or raise SYNC_MAX_ITEMS.`,
+      );
+    }
+    after = conn.pageInfo.endCursor;
+  }
 }

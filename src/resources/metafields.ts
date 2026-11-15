@@ -1,4 +1,4 @@
-import { assertNoUserErrors, paginate } from "../shopify/client.js";
+import { assertNoUserErrors, paginate, type AdminClient } from "../shopify/client.js";
 import type { Item, ResourceAdapter } from "./types.js";
 import { reservedPrefix } from "./util.js";
 
@@ -10,21 +10,29 @@ import { reservedPrefix } from "./util.js";
  */
 
 const OWNERS = [
-  { type: "PRODUCT", field: "products", page: 5 },
-  { type: "COLLECTION", field: "collections", page: 5 },
+  { type: "PRODUCT", field: "products", byHandle: "productByIdentifier", page: 5 },
+  { type: "COLLECTION", field: "collections", byHandle: "collectionByIdentifier", page: 5 },
 ] as const;
+
+const OWNER_FIELDS = /* GraphQL */ `
+  id
+  handle
+  metafields(first: 100, namespace: $namespace) {
+    nodes { namespace key type value }
+    pageInfo { hasNextPage }
+  }
+`;
+
+const byHandle = (lookup: string) => /* GraphQL */ `
+  query MetafieldValuesOf($handle: String!, $namespace: String) {
+    ${lookup}(identifier: { handle: $handle }) { ${OWNER_FIELDS} }
+  }
+`;
 
 const query = (owner: string, size: number) => /* GraphQL */ `
   query MetafieldValues($after: String, $namespace: String) {
     ${owner}(first: ${size}, after: $after) {
-      nodes {
-        id
-        handle
-        metafields(first: 100, namespace: $namespace) {
-          nodes { namespace key type value }
-          pageInfo { hasNextPage }
-        }
-      }
+      nodes { ${OWNER_FIELDS} }
       pageInfo { hasNextPage endCursor }
     }
   }
@@ -69,6 +77,20 @@ async function set({ client }: Parameters<ResourceAdapter["create"]>[0], d: Reco
   return res.metafieldsSet.metafields[0]?.id ?? "";
 }
 
+async function readOwners(
+  client: AdminClient,
+  owner: (typeof OWNERS)[number],
+  namespace: string | undefined,
+  named: { PRODUCT?: string[]; COLLECTION?: string[] } | undefined,
+): Promise<OwnerNode[]> {
+  if (!named) return paginate<OwnerNode>(client, query(owner.field, owner.page), { namespace }, (d) => d[owner.field]);
+  const handles = named[owner.type] ?? [];
+  const found = await Promise.all(
+    handles.map(async (handle) => (await client.request<Record<string, OwnerNode | null>>(byHandle(owner.byHandle), { handle, namespace }))[owner.byHandle]),
+  );
+  return found.filter((n): n is OwnerNode => Boolean(n));
+}
+
 export const metafields: ResourceAdapter = {
   kind: "metafields",
   description:
@@ -78,16 +100,20 @@ export const metafields: ResourceAdapter = {
     const items: Item[] = [];
     const skipped: { key: string; reason: string }[] = [];
     const namespace = opts.namespaces?.length === 1 ? opts.namespaces[0] : undefined;
-    for (const owner of OWNERS) {
-      const nodes = await paginate<OwnerNode>(client, query(owner.field, owner.page), { namespace }, (d) => d[owner.field]);
-      for (const n of nodes) {
+    // Products and collections are read at once. When the include patterns name the owners
+    // ("PRODUCT/linen-shirt/*"), only those are read instead of the whole catalog.
+    const lists = await Promise.all(OWNERS.map((owner) => readOwners(client, owner, namespace, opts.metafieldOwners)));
+    OWNERS.forEach((owner, i) => {
+      for (const n of lists[i]!) {
         const r = metafieldItems(owner.type, n, opts.namespaces);
         items.push(...r.items);
         skipped.push(...r.skipped);
       }
-    }
+    });
     return { items, skipped };
   },
+
+  parallel: true,
 
   conflict(source, target) {
     if (source.data.type !== target.data.type) {

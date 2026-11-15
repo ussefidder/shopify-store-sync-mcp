@@ -12,7 +12,15 @@ const gid = (type: string) => `gid://shopify/${type}/${nextId++}`;
 
 type FakeMetafield = { namespace: string; key: string; type: string; value: string };
 
-export type FakeVariant = { id: string; options: Record<string, string>; sku?: string; price?: string; compareAtPrice?: string | null };
+export type FakeVariant = {
+  id: string;
+  options: Record<string, string>;
+  sku?: string;
+  price?: string;
+  compareAtPrice?: string | null;
+  taxable?: boolean;
+  inventoryPolicy?: string;
+};
 export interface FakeProduct {
   id: string;
   handle: string;
@@ -26,6 +34,8 @@ export interface FakeProduct {
   isGiftCard?: boolean;
   status?: string;
   seo?: { title: string | null; description: string | null };
+  /** Taxonomy category id, e.g. "aa-1-13-8". */
+  category?: string;
   options?: { name: string; values: string[] }[];
   variants?: FakeVariant[];
   /** File ids, in order. */
@@ -46,7 +56,9 @@ export interface FakeState {
     metafields?: FakeMetafield[];
   }[];
   /** A file with a url maps to shopify://File/<filename>; without one it stays unresolved. */
-  files: { id: string; url?: string; alt?: string; kind?: "MediaImage" | "GenericFile" }[];
+  files: { id: string; url?: string; alt?: string; kind?: "MediaImage" | "GenericFile" | "Video" | "Model3d" | "ExternalVideo" }[];
+  /** How many variants and media one request returns, to exercise paging. Default: everything. */
+  pageSize?: number;
   shopLocales: { locale: string; primary: boolean }[];
   /** resourceId -> locale -> key -> value */
   translations: Record<string, Record<string, Record<string, string>>>;
@@ -85,6 +97,13 @@ export function emptyState(): FakeState {
 }
 
 const conn = (nodes: unknown[]) => ({ nodes, pageInfo: { hasNextPage: false, endCursor: null } });
+/** One page of a list; the cursor is simply the index to continue from. */
+function page(nodes: unknown[], size: number | undefined, after?: string | null) {
+  const start = after ? Number(after) : 0;
+  const end = size ? Math.min(nodes.length, start + size) : nodes.length;
+  return { nodes: nodes.slice(start, end), pageInfo: { hasNextPage: end < nodes.length, endCursor: end < nodes.length ? String(end) : null } };
+}
+const MEDIA_TYPE: Record<string, string> = { MediaImage: "IMAGE", Video: "VIDEO", Model3d: "MODEL_3D", ExternalVideo: "EXTERNAL_VIDEO" };
 const ok = (extra: Record<string, unknown>) => ({ ...extra, userErrors: [] });
 
 export class FakeShop implements AdminClient {
@@ -149,7 +168,7 @@ export class FakeShop implements AdminClient {
   }
 
   /** A product as the products adapter queries it. */
-  private productView(p: FakeProduct) {
+  private productView(p: FakeProduct, after: { variants?: string | null; media?: string | null } = {}) {
     const options = p.options ?? [{ name: "Title", values: ["Default Title"] }];
     const variants = p.variants ?? [{ id: `${p.id}-v`, options: { Title: "Default Title" }, price: "0.00" }];
     return {
@@ -163,21 +182,28 @@ export class FakeShop implements AdminClient {
       templateSuffix: p.templateSuffix ?? null,
       isGiftCard: p.isGiftCard ?? false,
       seo: p.seo ?? { title: null, description: null },
+      category: p.category ? { id: `gid://shopify/TaxonomyCategory/${p.category}` } : null,
       options: options.map((o, i) => ({ name: o.name, position: i + 1, optionValues: o.values.map((name) => ({ name })) })),
-      media: {
-        nodes: (p.media ?? []).map((id) => {
+      media: page(
+        (p.media ?? []).map((id) => {
           const f = this.state.files.find((x) => x.id === id);
-          return { mediaContentType: "IMAGE", id, alt: f?.alt ?? null };
+          return { mediaContentType: MEDIA_TYPE[f?.kind ?? "MediaImage"] ?? "IMAGE", id, alt: f?.alt ?? null };
         }),
-      },
-      variants: conn(
+        this.state.pageSize,
+        after.media,
+      ),
+      variants: page(
         variants.map((x) => ({
           id: x.id,
           sku: x.sku ?? null,
           price: x.price ?? "0.00",
           compareAtPrice: x.compareAtPrice ?? null,
+          taxable: x.taxable ?? true,
+          inventoryPolicy: x.inventoryPolicy ?? "DENY",
           selectedOptions: Object.entries(x.options).map(([name, value]) => ({ name, value })),
         })),
+        this.state.pageSize,
+        after.variants,
       ),
     };
   }
@@ -189,10 +215,32 @@ export class FakeShop implements AdminClient {
         return (v.ids as string[]).map((id) => this.findNode(id));
       case "productByIdentifier": {
         const p = s.products.find((x) => x.handle === (v.h ?? v.handle)) ?? null;
+        if (p && query.includes("metafields(")) return { ...p, metafields: conn(filterNs(p.metafields, v.namespace)) };
         return p && query.includes("variants(") ? this.productView(p) : p;
       }
-      case "collectionByIdentifier":
-        return s.collections.find((p) => p.handle === v.h) ?? null;
+      case "product": {
+        const p = s.products.find((x) => x.id === v.id);
+        if (!p) return null;
+        const view = this.productView(p, query.includes("media(") ? { media: v.after } : { variants: v.after });
+        return query.includes("media(") ? { media: view.media } : { variants: view.variants };
+      }
+      case "collectionByIdentifier": {
+        const c = s.collections.find((p) => p.handle === (v.h ?? v.handle)) ?? null;
+        return c && query.includes("metafields(") ? { ...c, metafields: conn(filterNs(c.metafields, v.namespace)) } : c;
+      }
+      case "menu": {
+        const menu = s.menus.find((m) => m.id === v.id);
+        if (!menu) return null;
+        // Like the live API, every item has an id of its own.
+        const withIds = (items: any[]) => {
+          for (const i of items) {
+            i.id ??= gid("MenuItem");
+            withIds((i.items ??= []));
+          }
+          return items;
+        };
+        return { id: menu.id, items: withIds(menu.items) };
+      }
       case "metaobjectByHandle":
         return s.metaobjects.find((o) => o.type === v.t && o.handle === v.h) ?? null;
       case "customerAccountPages":
@@ -226,7 +274,7 @@ export class FakeShop implements AdminClient {
       case "shopLocales":
         return s.shopLocales;
       case "translatableResources": {
-        const prefix = { PAGE: "Page", COLLECTION: "Collection", METAOBJECT: "Metaobject", MENU: "Menu", SHOP_POLICY: "ShopPolicy" }[v.type as string];
+        const prefix = { PRODUCT: "Product", PAGE: "Page", COLLECTION: "Collection", METAOBJECT: "Metaobject", MENU: "Menu", SHOP_POLICY: "ShopPolicy" }[v.type as string];
         const nodes = Object.entries(s.translations)
           .filter(([id]) => id.startsWith(`gid://shopify/${prefix}/`))
           .map(([id, byLocale]) => ({
@@ -374,9 +422,11 @@ export class FakeShop implements AdminClient {
           p = { id: gid("Product"), handle: input.handle, status: input.status ?? "ACTIVE" };
           s.products.push(p);
         }
+        // Like the live API: tags, variants and files are replaced by what is sent.
         for (const k of ["title", "descriptionHtml", "vendor", "productType", "tags", "templateSuffix", "seo"] as const) {
           if (input[k] !== undefined) (p as any)[k] = input[k];
         }
+        if (input.category) p.category = String(input.category).replace("gid://shopify/TaxonomyCategory/", "");
         if (input.productOptions) p.options = input.productOptions.map((o: any) => ({ name: o.name, values: o.values.map((x: any) => x.name) }));
         if (input.variants) {
           const old = p.variants ?? [];
@@ -389,6 +439,8 @@ export class FakeShop implements AdminClient {
               sku: iv.sku ?? existing?.sku,
               price: iv.price ?? existing?.price ?? "0.00",
               compareAtPrice: iv.compareAtPrice ?? existing?.compareAtPrice ?? null,
+              taxable: iv.taxable ?? existing?.taxable,
+              inventoryPolicy: iv.inventoryPolicy ?? existing?.inventoryPolicy,
             };
           });
         }
@@ -496,6 +548,7 @@ function toFieldNode(f: any, partial = false): any {
 
 function toMenuNode(i: any): any {
   return {
+    id: i.id ?? gid("MenuItem"),
     title: i.title,
     type: i.type,
     url: i.url ?? (i.resourceId ? `https://example.com/${i.resourceId}` : null),

@@ -1,4 +1,4 @@
-import type { AdminClient } from "./shopify/client.js";
+import { paginate, type AdminClient } from "./shopify/client.js";
 
 /**
  * Resource IDs differ between stores, so before comparing or copying anything we
@@ -114,17 +114,40 @@ export function filenameFromUrl(url: string): string {
   }
 }
 
+const ACCOUNT_PAGES_QUERY = /* GraphQL */ `
+  query CustomerAccountPages($after: String) {
+    customerAccountPages(first: 100, after: $after) { nodes { id handle } pageInfo { hasNextPage endCursor } }
+  }
+`;
+const MENUS_QUERY = /* GraphQL */ `
+  query MenuHandles($after: String) {
+    menus(first: 100, after: $after) { nodes { id handle } pageInfo { hasNextPage endCursor } }
+  }
+`;
+
 // Types that \`nodes\` returns null for (verified against the live Admin API), so they are listed instead.
-const LIST_LOOKUPS: Record<string, { query: string; pick: (d: any) => { id: string; key: string }[] }> = {
-  CustomerAccountPage: {
-    query: `query { customerAccountPages(first: 100) { nodes { id handle } } }`,
-    pick: (d) => d.customerAccountPages.nodes.map((n: { id: string; handle: string }) => ({ id: n.id, key: n.handle })),
-  },
-  ShopPolicy: {
-    query: `query { shop { shopPolicies { id type } } }`,
-    pick: (d) => d.shop.shopPolicies.map((n: { id: string; type: string }) => ({ id: n.id, key: n.type })),
-  },
+const LIST_LOOKUPS: Record<string, (c: AdminClient) => Promise<{ id: string; key: string }[]>> = {
+  CustomerAccountPage: async (c) =>
+    (await paginate<{ id: string; handle: string }>(c, ACCOUNT_PAGES_QUERY, {}, (d) => d.customerAccountPages)).map((n) => ({ id: n.id, key: n.handle })),
+  ShopPolicy: async (c) =>
+    (await c.request(`query { shop { shopPolicies { id type } } }`)).shop.shopPolicies.map((n: { id: string; type: string }) => ({ id: n.id, key: n.type })),
 };
+
+/**
+ * Files are copied by handing Shopify a URL to download. Only Shopify's own file hosts are
+ * accepted, so an edited snapshot folder can't make a store fetch something from elsewhere.
+ */
+export function isShopifyFileUrl(url: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "https:") return false;
+  const host = u.hostname.toLowerCase();
+  return host === "cdn.shopify.com" || host.endsWith(".myshopify.com");
+}
 
 type RefNode =
   | { __typename: "Product" | "Collection" | "Page" | "Blog"; id: string; handle: string }
@@ -212,8 +235,7 @@ export class GidToRefMapper {
     const left = missing.filter((g) => !this.cache.has(g));
     const types = new Set(left.map((g) => GID_RE.exec(g)?.[1]).filter((t): t is string => Boolean(t && LIST_LOOKUPS[t])));
     for (const type of types) {
-      const lookup = LIST_LOOKUPS[type]!;
-      const byId = new Map(lookup.pick(await this.client.request(lookup.query)).map((x) => [x.id, x.key]));
+      const byId = new Map((await LIST_LOOKUPS[type]!(this.client)).map((x) => [x.id, x.key]));
       for (const g of left) {
         const key = byId.get(g);
         if (key) this.cache.set(g, `${REF_PREFIX}${type}/${key}`);
@@ -228,9 +250,12 @@ export class GidToRefMapper {
   }
 }
 
-/** Resolves portable refs to GIDs in a (target) store. Results are cached; misses are cached as undefined. */
+/**
+ * Resolves portable refs to GIDs in a (target) store. Results are cached; misses are cached as undefined.
+ * Lookups in flight are shared, so two writes that need the same missing file upload it once.
+ */
 export class RefToGidResolver {
-  private readonly cache = new Map<string, string | undefined>();
+  private readonly cache = new Map<string, Promise<string | undefined>>();
 
   /**
    * @param uploads files that may be uploaded when missing in this store (only set when applying).
@@ -254,14 +279,18 @@ export class RefToGidResolver {
   }
 
   remember(ref: string, gid: string): void {
-    this.cache.set(ref, gid);
+    this.cache.set(ref, Promise.resolve(gid));
   }
 
-  async resolve(ref: string): Promise<string | undefined> {
-    if (this.cache.has(ref)) return this.cache.get(ref);
-    const gid = await this.lookup(ref);
-    this.cache.set(ref, gid);
-    return gid;
+  resolve(ref: string): Promise<string | undefined> {
+    let hit = this.cache.get(ref);
+    if (!hit) {
+      hit = this.lookup(ref);
+      this.cache.set(ref, hit);
+      // A failed lookup (network, refused upload) is not remembered, so it can be tried again.
+      hit.catch(() => this.cache.delete(ref));
+    }
+    return hit;
   }
 
   private async lookup(ref: string): Promise<string | undefined> {
@@ -302,13 +331,12 @@ export class RefToGidResolver {
       }
       case "CustomerAccountPage":
       case "ShopPolicy": {
-        const lookup = LIST_LOOKUPS[kind]!;
-        return lookup.pick(await c.request(lookup.query)).find((x) => x.key === rest.join("/"))?.id;
+        return (await LIST_LOOKUPS[kind]!(c)).find((x) => x.key === rest.join("/"))?.id;
       }
       case "Menu": {
         const handle = rest.join("/");
-        const d = await c.request(`query { menus(first: 100) { nodes { id handle } } }`);
-        return (d.menus.nodes as { id: string; handle: string }[]).find((n) => n.handle === handle)?.id;
+        const all = await paginate<{ id: string; handle: string }>(c, MENUS_QUERY, {}, (d) => d.menus);
+        return all.find((n) => n.handle === handle)?.id;
       }
       case "MetafieldDefinition": {
         const [ownerType, namespace, ...key] = rest.join("/").split(".");
@@ -327,7 +355,7 @@ export class RefToGidResolver {
 
   private async findOrUploadFile(ref: string, filename: string): Promise<string | undefined> {
     const d = await this.client.request(
-      `query($q: String!) { files(first: 25, query: $q) { nodes { __typename id ... on MediaImage { alt image { url } } ... on GenericFile { alt url } ... on Video { alt filename originalSource { url } } } } }`,
+      `query($q: String!) { files(first: 50, query: $q) { nodes { __typename id ... on MediaImage { alt image { url } } ... on GenericFile { alt url } ... on Video { alt filename originalSource { url } } } } }`,
       { q: `filename:'${filename.replace(/'/g, "\\'")}'` },
     );
     const found = (d.files.nodes as RefNode[]).find((n) => nodeToFile(n)?.filename === filename);
@@ -335,6 +363,9 @@ export class RefToGidResolver {
 
     const source = this.uploads?.get(ref);
     if (!source) return undefined;
+    if (!isShopifyFileUrl(source.url)) {
+      throw new Error(`file ${filename} can't be uploaded: its source URL is not on a Shopify file host (${source.url.slice(0, 80)})`);
+    }
     const res = await this.client.request(
       `mutation($files: [FileCreateInput!]!) { fileCreate(files: $files) { files { id } userErrors { field message code } } }`,
       { files: [{ originalSource: source.url, contentType: source.contentType, alt: source.alt, filename, duplicateResolutionMode: "RAISE_ERROR" }] },

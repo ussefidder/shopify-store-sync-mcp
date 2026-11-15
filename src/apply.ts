@@ -2,8 +2,8 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { hashData } from "./diff.js";
 import { collectRefs, mapStrings, RefToGidResolver } from "./refs.js";
-import { ADAPTERS, type ResourceKind } from "./resources/index.js";
-import type { AdminClient } from "./shopify/client.js";
+import { ADAPTERS, orderKinds, type ResourceKind } from "./resources/index.js";
+import { envNumber, type AdminClient } from "./shopify/client.js";
 import { takeSnapshot } from "./snapshot.js";
 import { stateDir, type Plan, type PlanOp } from "./plan.js";
 
@@ -24,6 +24,20 @@ export interface ApplyOptions {
   only?: number[];
   now?: Date;
   auditLog?: string;
+  /** Called as the apply moves along: steps finished, steps in total, and what just happened. */
+  onProgress?: (done: number, total: number, message: string) => void;
+}
+
+/** How many independent writes run at once (products, pages, redirects...). */
+export const writeConcurrency = () => envNumber("SYNC_WRITE_CONCURRENCY", 4);
+
+/** Run each lane's items in order, a few lanes at a time. */
+async function runLanes<T>(lanes: T[][], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < lanes.length) for (const item of lanes[next++]!) await fn(item);
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, lanes.length)) }, worker));
 }
 
 export class ApplyRefused extends Error {}
@@ -38,8 +52,13 @@ export function checkApplyAllowed(plan: Plan, target: AdminClient["store"], opts
   if (!target.allowWrites) {
     throw new ApplyRefused(`writes are disabled for store "${target.alias}". Set "allowWrites": true in its config to enable them.`);
   }
-  if (target.protected && opts.confirm !== target.domain) {
-    throw new ApplyRefused(`store "${target.alias}" is protected. Pass confirm="${target.domain}" to apply.`);
+  if (target.protected && opts.confirm?.trim().toLowerCase() !== target.domain.toLowerCase()) {
+    // The domain is deliberately not repeated here: the confirmation has to come from a person who knows it.
+    throw new ApplyRefused(
+      opts.confirm
+        ? `store "${target.alias}" is protected and the confirmation doesn't match its myshopify domain.`
+        : `store "${target.alias}" is protected. A person has to confirm by giving the store's myshopify domain (command line: --confirm <domain>).`,
+    );
   }
 }
 
@@ -125,6 +144,8 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
   /** Current target state, refreshed before pass 2 so updates see what pass 1 created. */
   let pass2Targets = new Map<string, { key: string; id: string; data: Record<string, unknown> }>();
 
+  let finished = 0;
+  const total = ready.length;
   const run = async (op: PlanOp, pass: 1 | 2): Promise<void> => {
     const adapter = ADAPTERS[op.kind];
     let data = dropUnmappable(op.data, op.kind);
@@ -165,6 +186,7 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
       if (PARTIAL[op.kind] && pass === 1 && !retry.includes(op)) retry.push(op);
       upsertResult({ seq: op.seq, kind: op.kind, key: op.key, outcome: "failed", message });
     }
+    if (pass === 1) opts.onProgress?.(++finished, total, `${op.kind} ${op.key}`);
   };
 
   const upsertResult = (r: OpResult) => {
@@ -174,7 +196,22 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
     audit(log, { plan: plan.id, target: plan.target.domain, source: plan.source.domain, ...r });
   };
 
-  for (const op of ready) await run(op, 1);
+  // Kinds go in dependency order. Inside a kind whose items don't depend on each other, a few are
+  // written at a time; items that share a lane (the same product, say) still go one after the other.
+  for (const kind of orderKinds([...new Set(ready.map((o) => o.kind))])) {
+    const ops = ready.filter((o) => o.kind === kind);
+    const adapter = ADAPTERS[kind];
+    if (!adapter.parallel || ops.length < 2) {
+      for (const op of ops) await run(op, 1);
+      continue;
+    }
+    const lanes = new Map<string, PlanOp[]>();
+    for (const op of ops) {
+      const lane = adapter.ownerRef?.(op.data) ?? op.key;
+      lanes.set(lane, [...(lanes.get(lane) ?? []), op]);
+    }
+    await runLanes([...lanes.values()], writeConcurrency(), (op) => run(op, 1));
+  }
   if (retry.length) {
     const retryKinds = [...new Set(retry.map((o) => o.kind))];
     const fresh = await takeSnapshot(client, retryKinds, plan.fetchOptions);

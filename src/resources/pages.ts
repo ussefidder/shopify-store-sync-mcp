@@ -37,7 +37,8 @@ export function normalizePage(n: Node): Item {
 
 export const pages: ResourceAdapter = {
   kind: "pages",
-  description: "Online store pages, keyed by handle (title, body HTML, template, published state).",
+  description: "Online store pages, keyed by handle (title, body HTML, template, published state). With as_drafts, new pages are created hidden and the published state is left alone.",
+  parallel: true,
 
   async fetch(client) {
     const nodes = await paginate<Node>(client, QUERY, {}, (d) => d.pages);
@@ -51,7 +52,8 @@ export const pages: ResourceAdapter = {
   async create({ client }, _key, d) {
     const res = await client.request(
       `mutation($page: PageCreateInput!) { pageCreate(page: $page) { page { id } userErrors { field message code } } }`,
-      { page: compact({ handle: d.handle, title: d.title, body: d.body, isPublished: d.isPublished, templateSuffix: d.templateSuffix }) },
+      // No published state in the data means the plan was made with as_drafts: the new page starts hidden.
+      { page: compact({ handle: d.handle, title: d.title, body: d.body, isPublished: d.isPublished ?? false, templateSuffix: d.templateSuffix }) },
     );
     assertNoUserErrors(res.pageCreate, `pageCreate ${String(d.handle)}`);
     return res.pageCreate.page.id;
@@ -62,7 +64,7 @@ export const pages: ResourceAdapter = {
       `mutation($id: ID!, $page: PageUpdateInput!) { pageUpdate(id: $id, page: $page) { page { id } userErrors { field message code } } }`,
       {
         id: target.id,
-        page: { title: d.title, body: d.body ?? "", isPublished: d.isPublished, templateSuffix: d.templateSuffix ?? "" },
+        page: compact({ title: d.title, body: d.body ?? "", isPublished: d.isPublished, templateSuffix: d.templateSuffix ?? "" }),
       },
     );
     assertNoUserErrors(res.pageUpdate, `pageUpdate ${target.key}`);

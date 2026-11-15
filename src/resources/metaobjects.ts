@@ -52,7 +52,9 @@ export function normalizeMetaobject(n: Node): Item {
   };
 }
 
-async function upsert(client: Parameters<ResourceAdapter["create"]>[0]["client"], d: Record<string, unknown>): Promise<string> {
+async function upsert(client: Parameters<ResourceAdapter["create"]>[0]["client"], d: Record<string, unknown>, create = false): Promise<string> {
+  // With as_drafts the data carries no status: a new entry starts as a draft, an existing one keeps its own.
+  const status = d.status ?? (create && d.publishable ? "DRAFT" : undefined);
   const fields = Object.entries((d.fields as Record<string, string>) ?? {}).map(([key, value]) => ({ key, value }));
   const res = await client.request(
     `mutation($handle: MetaobjectHandleInput!, $metaobject: MetaobjectUpsertInput!) {
@@ -62,7 +64,7 @@ async function upsert(client: Parameters<ResourceAdapter["create"]>[0]["client"]
       handle: { type: d.type, handle: d.handle },
       metaobject: compact({
         fields,
-        capabilities: d.status ? { publishable: { status: d.status } } : undefined,
+        capabilities: status ? { publishable: { status } } : undefined,
       }),
     },
   );
@@ -73,7 +75,7 @@ async function upsert(client: Parameters<ResourceAdapter["create"]>[0]["client"]
 export const metaobjects: ResourceAdapter = {
   kind: "metaobjects",
   description:
-    "Metaobject entries, keyed by type/handle. Values that reference products, collections, pages or other metaobjects are remapped by handle.",
+    "Metaobject entries, keyed by type/handle. Values that reference products, collections, pages or other metaobjects are remapped by handle. Fields that only the target entry has a value for are kept.",
 
   async fetch(client, opts) {
     const skipped: { key: string; reason: string }[] = [];
@@ -99,8 +101,15 @@ export const metaobjects: ResourceAdapter = {
     return `${REF_PREFIX}Metaobject/${key}`;
   },
 
+  /** A field the source has no value for is never cleared in the target, so it isn't a difference. */
+  alignTarget(source, target) {
+    const wanted = (source.fields as Record<string, string>) ?? {};
+    const fields = Object.fromEntries(Object.entries((target.fields as Record<string, string>) ?? {}).filter(([k]) => k in wanted));
+    return { ...target, fields };
+  },
+
   async create({ client }, _key, d) {
-    return upsert(client, d);
+    return upsert(client, d, true);
   },
 
   async update({ client }, _target, d) {

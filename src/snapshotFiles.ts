@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { z } from "zod";
 import { stableStringify } from "./diff.js";
+import { isShopifyFileUrl } from "./refs.js";
 import { RESOURCE_KINDS, type Item, type ResourceKind } from "./resources/index.js";
 import type { Snapshot } from "./snapshot.js";
 
@@ -79,22 +81,62 @@ export function exportSnapshot(snapshot: Snapshot, dir: string): ExportResult {
   return { dir: root, files, kinds: summary };
 }
 
+/*
+ * A snapshot folder is input like any other: it can come from a pull request or a download.
+ * Everything read from it is checked, resource folders can only be the known kinds (so a
+ * manifest can't point outside the folder), and file URLs must be on a Shopify file host.
+ */
+const skippedSchema = z.array(z.object({ key: z.string(), reason: z.string() }));
+const manifestSchema = z.object({
+  format: z.literal(SNAPSHOT_FORMAT),
+  store: z.string().optional(),
+  domain: z.string(),
+  takenAt: z.string(),
+  resources: z.array(z.enum(RESOURCE_KINDS)),
+  skipped: z.record(z.string(), skippedSchema).optional(),
+  files: z
+    .record(
+      z.string(),
+      z.object({
+        url: z.string().refine(isShopifyFileUrl, "file URLs must be https URLs on cdn.shopify.com or a myshopify.com domain"),
+        alt: z.string().optional(),
+        contentType: z.enum(["IMAGE", "FILE", "VIDEO"]),
+      }),
+    )
+    .optional(),
+});
+const itemSchema = z.object({ key: z.string().min(1), data: z.record(z.string(), z.unknown()) });
+
+function readJson<T>(file: string, schema: z.ZodType<T>): T {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(file, "utf8").replace(/^\uFEFF/, ""));
+  } catch {
+    throw new Error(`${file} is not valid JSON`);
+  }
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw new Error(`${file}: ${issue?.path.length ? `${issue.path.join(".")}: ` : ""}${issue?.message ?? "not a snapshot file"}`);
+  }
+  return parsed.data;
+}
+
 export function readSnapshot(dir: string, kinds?: readonly ResourceKind[]): Snapshot {
   const root = resolve(dir);
   const manifestPath = join(root, MANIFEST);
   if (!existsSync(manifestPath)) throw new Error(`${root} has no ${MANIFEST}; export a snapshot there first`);
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8").replace(/^\uFEFF/, ""));
-  if (manifest.format !== SNAPSHOT_FORMAT) throw new Error(`${manifestPath}: unsupported format ${String(manifest.format)}`);
+  const manifest = readJson(manifestPath, manifestSchema);
 
   const resources: Snapshot["resources"] = {};
-  for (const kind of manifest.resources as ResourceKind[]) {
+  for (const kind of manifest.resources) {
     if (kinds && !kinds.includes(kind)) continue;
     const folder = join(root, kind);
     const items: Item[] = existsSync(folder)
       ? readdirSync(folder)
           .filter((f) => f.endsWith(".json"))
           .map((f) => {
-            const { key, data } = JSON.parse(readFileSync(join(folder, f), "utf8").replace(/^\uFEFF/, ""));
+            const { key, data } = readJson(join(folder, f), itemSchema);
             return { key, id: "", data };
           })
       : [];

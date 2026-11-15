@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.5.0
+
+A hardening release: every finding of an audit of 0.4.0 (code, package, docs, and Shopify's current API) is fixed or, for one, documented with the reason.
+
+**Keeps its promises**
+
+- Menus: updating a menu no longer removes the links only the target has. They are kept in place, and the plan names them
+- Products: updating a product keeps the target's own tags, videos and 3D models (images and variants were already kept). All variants and media are read, however many pages they take
+- Protected stores are confirmed by a person. Over MCP the client asks you to type the store's domain (elicitation); a client that can't ask is pointed to the command line. The `confirm` argument of `apply_plan` is ignored unless the server runs with `SYNC_ALLOW_AGENT_CONFIRM=true`
+- Snapshot folders are validated: known resource types only (a manifest can't point outside the folder), item files checked, file URLs only on Shopify's hosts. Uploads refuse any other host
+- Over MCP, `export_snapshot` and `dir:` sources stay inside one base folder (`SYNC_SNAPSHOT_DIR`, or the folder the server runs in)
+
+**Behaviour**
+
+- A metaobject field or translated field that only the target has no longer shows up as a difference forever
+- A list longer than the read limit is an error, not a shorter list (`SYNC_MAX_ITEMS`, default 50,000). Menu and customer account page lookups read every page
+- A mistyped command prints an error instead of starting the MCP server
+- Time limits: 60 seconds per request, 120 per Shopify CLI call (`SYNC_REQUEST_TIMEOUT_MS`, `SYNC_CLI_TIMEOUT_MS`). A read is asked again; a write is never repeated blindly
+- New `as_drafts` option (`--as-drafts`): new pages are created hidden and new metaobject entries as drafts, existing ones keep their state. Without it, the plan warns when new pages or entries would be visible right away, and says that new collections aren't on any sales channel
+- Applying is faster: independent items are written 4 at a time (`SYNC_WRITE_CONCURRENCY`), never two values of the same product at once, and a file several items need is uploaded once
+- MCP progress notifications while reading and applying, for clients that ask for them
+- Metafield values: products and collections are read in parallel, and only the named ones when the include patterns name their owner (`PRODUCT/linen-shirt/*`)
+- Windows: Shopify CLI gets plain file names and runs inside its temp folder, so no path is passed through `cmd.exe`; values `cmd.exe` would expand are refused
+- Plan files are removed a week after they were made; a damaged plan file is ignored instead of breaking `plans`
+
+**Shopify**
+
+- Products also copy the category, the taxable flag and the inventory policy of variants; translations now cover products
+- README no longer tells store owners to create a custom app in the store admin (not possible for new apps since January 1, 2026); it explains what to do for a store in another organization
+- Collections still use the deprecated `ruleSet` and `input` argument on purpose: their replacement only exists from Admin API 2026-07 and stores pinned to 2026-04 are still supported. The reason and the deadline are written down in the code and in CONTRIBUTING
+
+**Package and repo**
+
+- Node 22 or newer (Node 20 is past its end of life)
+- The npm package no longer ships source maps (32 files instead of 60)
+- The version is read from `package.json` in one place
+- ESLint with typescript-eslint; `npm run check` runs typecheck, lint, tests and schema validation
+- vitest 5 (the 3.x line had known vulnerabilities, development only); `npm audit` reports 0 for all dependencies
+- SECURITY.md, a release checklist in CONTRIBUTING, git tags and GitHub releases
+- 103 tests (was 68), 56 GraphQL operations validated on 2026-04, 2026-10 and 2027-01
+
+**Changes you may notice when upgrading**
+
+- `apply_plan` on a protected store now asks you instead of accepting `confirm` from the assistant
+- Over MCP, snapshot folders outside the base folder are refused: set `SYNC_SNAPSHOT_DIR`
+- Product diffs can show `category`, `taxable` and `inventoryPolicy` the first time
+- A store with more than 50,000 items of one type needs `SYNC_MAX_ITEMS` raised, or a narrower read
+
 ## 0.4.0
 
 - New opt-in resource: `products`, keyed by handle. Copies title, description, vendor, type, tags, template, SEO, options, variants (matched by option values, with SKU) and images
@@ -35,9 +83,6 @@
 - Read-only theme settings diff (`diff_themes`): JSON templates, section groups and settings_data.json
 - Command line: `stores`, `diff`, `plan`, `apply`, `plans`, `export`, `themes`, with `--json` and `--exit-code`
 - Collection rules on metafield definitions, menus and metafield definitions are now remapped too
-
-## Unreleased
-
 - Remap customer account pages and shop policies (menus such as `customer-account-main-menu` now sync)
 - Menu links to resources that can't be matched are left out and reported, instead of being sent with an empty target
 - Verified reads and writes against a live Shopify Plus development store
