@@ -1,0 +1,38 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ussefidder/shopify-store-sync-mcp",
+  "title": "Shopify Store Sync",
+  "description": "Diff and sync Shopify stores: dry-run plans, cross-store ID remapping, never deletes.",
+  "websiteUrl": "https://github.com/ussefidder/shopify-store-sync-mcp#readme",
+  "repository": {
+    "url": "https://github.com/ussefidder/shopify-store-sync-mcp",
+    "source": "github"
+  },
+  "version": "0.5.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "shopify-store-sync-mcp",
+      "version": "0.5.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "SHOPIFY_STORES_FILE",
+          "description": "Absolute path to your stores.json (store domains and how each one is connected). Defaults to ./stores.json.",
+          "format": "filepath",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "SYNC_SNAPSHOT_DIR",
+          "description": "Folder that snapshot exports and dir: sources must stay inside. Defaults to the folder the server runs in.",
+          "format": "filepath",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

@@ -46,10 +46,11 @@ The last step checks every query and mutation in `src/` against Shopify's publis
 ## Releasing
 
 1. `npm run check`, then `npm audit` (it should report 0).
-2. Bump `version` in `package.json` (the server reads it from there) and add the changelog entry.
+2. Bump `version` in `package.json` (the server reads it from there) and in `server.json` (both places; a test checks they match), and add the changelog entry.
 3. Update the numbers in the README and in `scripts/render-docs-images.mjs` (tests, operations), then `npm run docs:images`.
 4. Commit, `git tag vX.Y.Z`, push with tags, and create the GitHub release from the changelog entry.
 5. `npm publish --access public` (runs typecheck, lint, tests and the build first).
+6. Update the [MCP Registry](https://registry.modelcontextprotocol.io) listing: `mcp-publisher login github`, then `mcp-publisher publish` from the repo root. The registry checks that the npm package of that version exists and carries the same `mcpName`.
 
 ### Each quarter (Shopify ships a new Admin API version in January, April, July and October)
 

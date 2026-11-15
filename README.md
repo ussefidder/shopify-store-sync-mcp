@@ -463,7 +463,7 @@ Two references followed from the source store to the target, as the sample sync 
 ## Tested on real stores
 
 <p align="center">
-  <img src="docs/images/tested.png" alt="103 automated tests, 56 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
+  <img src="docs/images/tested.png" alt="104 automated tests, 56 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
 </p>
 
 <details>
@@ -535,7 +535,7 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 - [x] Published on npm, runs with `npx`
 
 *Quality*
-- [x] 103 automated tests against an in-memory Shopify, plus MCP protocol tests
+- [x] 104 automated tests against an in-memory Shopify, plus MCP protocol tests
 - [x] Every GraphQL operation validated against Shopify's schema for 2026-04, 2026-10 and 2027-01
 - [x] Tested live between two stores on Linux and Windows, Shopify CLI 4.9 and 5
 - [x] Parallel reads and writes with throttle-aware retries; clear errors for missing installs, expired sign-ins and auto-managed policies

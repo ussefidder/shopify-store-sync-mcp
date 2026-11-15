@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- Listed in the official MCP Registry as `io.github.ussefidder/shopify-store-sync-mcp` (`mcpName` in `package.json`, `server.json` in the repo)
+- No code changes
+
 ## 0.5.0
 
 A hardening release: every finding of an audit of 0.4.0 (code, package, docs, and Shopify's current API) is fixed or, for one, documented with the reason.

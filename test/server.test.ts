@@ -196,6 +196,17 @@ describe("MCP server", () => {
     expect(prod.state.pages[0]).toMatchObject({ handle: "faq", isPublished: false });
   });
 
+  it("has a registry entry (server.json) that matches the npm package", () => {
+    const read = (f: string) => JSON.parse(readFileSync(new URL(`../${f}`, import.meta.url), "utf8"));
+    const pkg = read("package.json");
+    const entry = read("server.json");
+    expect(entry.name).toBe(pkg.mcpName);
+    expect(entry.name).toMatch(/^io\.github\.ussefidder\//);
+    expect(entry.version).toBe(pkg.version);
+    expect(entry.packages).toEqual([expect.objectContaining({ registryType: "npm", identifier: pkg.name, version: pkg.version, transport: { type: "stdio" } })]);
+    expect(entry.description.length).toBeLessThanOrEqual(100);
+  });
+
   it("reports its version from package.json", async () => {
     const { client } = await connect();
     expect(client.getServerVersion()?.version).toBe(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version);

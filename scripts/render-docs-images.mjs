@@ -595,7 +595,7 @@ render("tested", 1280, 288, `
 <div class="wrap">
   <div class="title"><h2>Tested on real stores, not just in theory</h2><span class="muted">two live Shopify stores, on Linux and Windows</span></div>
   <div class="stats">
-    <div class="stat card"><b class="g">103</b><span>automated tests</span></div>
+    <div class="stat card"><b class="g">104</b><span>automated tests</span></div>
     <div class="stat card"><b class="b">56</b><span>GraphQL operations validated against Shopify's schema</span></div>
     <div class="stat card"><b class="a">11</b><span>item types written to a live store</span></div>
     <div class="stat card"><b style="color:${P}">2</b><span>sign-in methods used live: Shopify CLI and an app</span></div>
@@ -625,7 +625,7 @@ render("roadmap", 1280, 462, `
         ${group("Syncing", "g", [done("11 item types incl. products"), done("ID remapping by handle"), done("Two-pass writes for links"), done("Filters, and as_drafts")])}
         ${group("Safety", "g", [done("Dry-run plans, drift check"), done("Never deletes, inside items too"), done("A person confirms production"), done("Validated input, time limits")])}
         ${group("Ways to use it", "g", [done("MCP server, 9 tools, progress"), done("Command line, drift checks"), done("Config as code, theme diff"), done("No-app sign-in, on npm")])}
-        ${group("Quality", "g", [done("103 automated tests, linted"), done("Checked on 3 API versions"), done("Live on Linux and Windows"), done("Parallel reads and writes")])}
+        ${group("Quality", "g", [done("104 automated tests, linted"), done("Checked on 3 API versions"), done("Live on Linux and Windows"), done("Parallel reads and writes")])}
       </div>
     </div>
     <div class="card pane">
