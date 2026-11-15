@@ -38,7 +38,7 @@
 The store setup that usually gets rebuilt by hand, plus the images it uses. References between items (a size guide pointing at a product, a menu linking to a page) are carried across by handle, so they land on the right item instead of a broken ID.
 
 <p align="center">
-  <img src="docs/images/what-it-syncs.png" alt="Metafield definitions, metaobject definitions and entries, collections, pages, menus, redirects, store policies, and opt-in metafield values and translations" width="100%">
+  <img src="docs/images/what-it-syncs.png" alt="Metafield definitions, metaobject definitions and entries, collections, pages, menus, redirects, store policies, files and images, and opt-in products, metafield values and translations" width="100%">
 </p>
 
 <details>
@@ -54,8 +54,11 @@ The store setup that usually gets rebuilt by hand, plus the images it uses. Refe
 | `redirects` | `path` | Thousands are fine. |
 | `collections` | `handle` | Title, description, sort order, template, SEO and smart-collection rules (rules on a metafield definition are remapped). Manual collections keep their own product list; sales-channel publishing is not copied. Manual versus smart is reported as a conflict. |
 | `shop_policies` | `type` | Refund, privacy, terms, shipping and contact policy text. |
+| `products` *(opt-in)* | `handle` | Title, description, vendor, type, tags, template, SEO, options, variants (matched by option values, with SKU) and images. **New products are created as drafts.** Prices only with `prices: true` (`--with-prices`); inventory and sales-channel publishing are never copied. On update, variants, images and option values that only the target has are kept, and don't count as differences. Gift cards are skipped. |
 | `metafields` *(opt-in)* | `OWNER/handle/namespace.key` | Metafield **values** on products and collections, landed on the item with the same handle. Reference values are remapped. Filter with `namespaces`. |
-| `translations` *(opt-in)* | `locale:Type/handle` | Translations of pages, collections, metaobjects, menus and policies. Registered against the target's own text, after the content itself is synced. The plan warns when a language isn't added to the target. |\n\n`metafields` and `translations` can be large, so they're read only when you ask for them (`resources: ["metafields"]`). App-owned (`app--…`) and Shopify-reserved (`shopify--…`) data is skipped and listed in the report.
+| `translations` *(opt-in)* | `locale:Type/handle` | Translations of pages, collections, metaobjects, menus and policies. Registered against the target's own text, after the content itself is synced. The plan warns when a language isn't added to the target. |
+
+`products`, `metafields` and `translations` can be large, so they're read only when you ask for them (`resources: ["products"]`). When an include filter names exact product handles (or handle prefixes like `linen-*`), only those products are read. App-owned (`app--…`) and Shopify-reserved (`shopify--…`) data is skipped and listed in the report.
 
 **Files and images** referenced by any of the above are matched by file name in the target. When one is missing, the plan says so and `apply_plan` uploads it from the source store.
 
@@ -168,6 +171,7 @@ Client credentials only work on stores in the app's own organization; elsewhere 
 | menus | `read_online_store_navigation` | `write_online_store_navigation` |
 | redirects | `read_online_store_navigation` | `write_online_store_navigation` |
 | collections | `read_products` | `write_products` |
+| products | `read_products` | `write_products` (plus `read_files`/`write_files` for their images) |
 | shop policies | `read_legal_policies` | `write_legal_policies` |
 | metafield values | `read_products` | `write_products` |
 | translations | `read_translations`, `read_locales` | `write_translations` |
@@ -292,6 +296,7 @@ claude mcp add shopify-store-sync \
 - *"Which product metafield definitions in namespace custom are missing from eu?"* (uses `include: ["PRODUCT.custom.*"]`)
 - *"Plan a sync of the faq and size_guide metaobjects from dev to eu."*
 - *"Apply only ops 1 to 4 of that plan."*
+- *"Copy the linen-shirt product to eu, with its prices."* (uses `resources: ["products"], include: ["linen-shirt"], prices: true`)
 - *"Copy the French translations from dev to eu."* (uses `resources: ["translations"], locales: ["fr"]`)
 - *"Export eu's configuration to ./store-config so I can commit it."*
 - *"Has eu drifted from ./store-config?"*
@@ -424,7 +429,7 @@ Two references followed from the source store to the target, as the sample sync 
 ## Tested on real stores
 
 <p align="center">
-  <img src="docs/images/tested.png" alt="60 automated tests, 47 GraphQL operations validated, 10 resource types written live, 2 sign-in methods used live" width="100%">
+  <img src="docs/images/tested.png" alt="68 automated tests, 52 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
 </p>
 
 <details>
@@ -441,6 +446,8 @@ Two references followed from the source store to the target, as the sample sync 
 | Values on products missing from the target | skipped up front with the reason |
 | Export to a folder, then diff that folder against the store | no differences |
 | Theme settings diff | read-only, 15 files compared in about 1 second |
+| Products (Shopify CLI sign-in, Windows) | a real product copied as a draft with its 4 images and alt text; after editing the copy and adding a variant and an image there, the update restored the title and kept both; the next diff was identical |
+| Products: reading only named handles | planning one product went from 97 to 6 seconds |
 | Safety: write to a read-only store | refused |
 | Safety: target edited after the plan was made | step skipped, nothing overwritten |
 | Shopify CLI sign-in on Windows (CLI 4.9.4), both stores | `connect` read-only and `--writes`; plan, apply (7 creates incl. file upload and translation), update and re-diff all exact; also through the MCP server over stdio |
@@ -462,6 +469,7 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 
 *Syncing*
 - [x] Metafield definitions, metaobject definitions and metaobject entries
+- [x] Products: content, options, variants by option values and SKU, images; new ones as drafts, prices only when asked, target-only variants and images kept
 - [x] Collections with smart-collection rules, pages, menus (3 levels, customer account menus too), redirects, store policies
 - [x] Metafield values on products and collections, translations per language (opt-in)
 - [x] Images and files matched by file name, uploaded to the target when missing
@@ -484,13 +492,14 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 - [x] Published on npm, runs with `npx`
 
 *Quality*
-- [x] 60 automated tests against an in-memory Shopify, plus MCP protocol tests
+- [x] 68 automated tests against an in-memory Shopify, plus MCP protocol tests
 - [x] Every GraphQL operation validated against Shopify's schema for 2026-04, 2026-10 and 2027-01
 - [x] Tested live between two stores on Linux and Windows, Shopify CLI 4.9 and 5
 - [x] Parallel reads with throttle-aware retries; clear errors for missing installs, expired sign-ins and auto-managed policies
 
 **Next**
 - [ ] Move collection rules to Shopify's new `sources` model (`ruleSet` is deprecated but supported through 2027-01)
+- [ ] Product prices per market and inventory levels, as explicit opt-ins
 - [ ] Remap product variants and blog articles, so references to them sync too
 - [ ] Metafield values on variants, pages, blogs and the shop
 - [ ] Menu item (link) translations

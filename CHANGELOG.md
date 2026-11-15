@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0
+
+- New opt-in resource: `products`, keyed by handle. Copies title, description, vendor, type, tags, template, SEO, options, variants (matched by option values, with SKU) and images
+- New products are created as drafts; prices are copied only with `prices: true` (`--with-prices`); inventory and sales channels are never copied
+- Updates never delete: variants, images and option values that only the target has are kept, and the diff doesn't report them
+- Products named by an include filter (exact handles or `prefix-*`) are read directly instead of scanning the catalog
+- Plans remember their read options, so the drift check reads the target the same way
+- `--values` prints lists and objects as JSON instead of `[object Object]`
+- Tested live on Windows through the Shopify CLI sign-in
+
 ## 0.3.0
 
 - Connect a store without creating an app: `connect <store>` signs in through Shopify CLI (`shopify store auth`) in the browser, and `"auth": "shopify-cli"` in `stores.json` sends requests through `shopify store execute`

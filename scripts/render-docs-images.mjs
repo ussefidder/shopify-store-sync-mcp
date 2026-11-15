@@ -544,10 +544,10 @@ render("quickstart", 1280, 330, `
 `);
 
 // ---------------------------------------------------------------- what it syncs
-render("what-it-syncs", 1280, 448, `
+render("what-it-syncs", 1280, 600, `
 <div class="wrap">
   <div class="title"><h2>What it syncs</h2><span class="muted">with the images they use, and every reference remapped</span></div>
-  <div class="grid" style="grid-template-columns: repeat(5, 1fr)">
+  <div class="grid" style="grid-template-columns: repeat(4, 1fr)">
     ${tile("MF", G, "Metafield definitions", "Types, validations, access, pinning and capabilities, per owner type.")}
     ${tile("MO", G, "Metaobject definitions", "Schemas, access and capabilities, self-references included.")}
     ${tile("ME", B, "Metaobject entries", "Every field value, references to products, pages and entries remapped.")}
@@ -556,8 +556,10 @@ render("what-it-syncs", 1280, 448, `
     ${tile("NV", A, "Menus", "Full 3-level trees, customer account menus included.")}
     ${tile("RD", T, "Redirects", "Thousands of URL redirects, no CSV.")}
     ${tile("PL", T, "Store policies", "Refund, privacy, terms, shipping and contact text.")}
+    ${tile("PR", R, "Products", "Content, options, variants by SKU and images. New ones as drafts; prices only if asked.", "opt-in")}
     ${tile("MV", P, "Metafield values", "On products and collections, matched by handle.", "opt-in")}
     ${tile("TR", P, "Translations", "Pages, collections, metaobjects, menus and policies, per language.", "opt-in")}
+    ${tile("IMG", "#8b98a8", "Files and images", "Matched by file name; missing ones uploaded to the target.")}
   </div>
 </div>`, CARD_CSS);
 
@@ -593,13 +595,13 @@ render("tested", 1280, 288, `
 <div class="wrap">
   <div class="title"><h2>Tested on real stores, not just in theory</h2><span class="muted">two live Shopify stores, on Linux and Windows</span></div>
   <div class="stats">
-    <div class="stat card"><b class="g">60</b><span>automated tests</span></div>
-    <div class="stat card"><b class="b">47</b><span>GraphQL operations validated against Shopify's schema</span></div>
-    <div class="stat card"><b class="a">10</b><span>resource types written to a live store</span></div>
+    <div class="stat card"><b class="g">68</b><span>automated tests</span></div>
+    <div class="stat card"><b class="b">52</b><span>GraphQL operations validated against Shopify's schema</span></div>
+    <div class="stat card"><b class="a">11</b><span>item types written to a live store</span></div>
     <div class="stat card"><b style="color:${P}">2</b><span>sign-in methods used live: Shopify CLI and an app</span></div>
   </div>
   <div class="checks">
-    ${["Create and update across 7 resource types", "Image uploaded to the target by file name", "French translation registered", "Product reference remapped to the target's own ID", "Read-only store refused a write", "Target edited after planning: step skipped", "Same results through the MCP server over stdio", "Shopify CLI sign-in on Windows, end to end"].map((t) => `<div class="ck"><span class="g">✓</span> ${t}</div>`).join("")}
+    ${["Create and update across 7 resource types", "Image uploaded to the target by file name", "French translation registered", "Product copied as a draft with its 4 images", "Read-only store refused a write", "Target edited after planning: step skipped", "Target-only variant and image kept on update", "Shopify CLI sign-in on Windows, end to end"].map((t) => `<div class="ck"><span class="g">✓</span> ${t}</div>`).join("")}
   </div>
 </div>`, CARD_CSS + `
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
@@ -613,23 +615,24 @@ render("tested", 1280, 288, `
 const done = (t) => `<div class="it"><span class="ck g">✓</span>${t}</div>`;
 const todo = (t) => `<div class="it"><span class="ck muted">○</span>${t}</div>`;
 const group = (title, cls, items) => `<div class="grp"><div class="gt ${cls}">${title}</div>${items.join("")}</div>`;
-render("roadmap", 1280, 438, `
+render("roadmap", 1280, 462, `
 <div class="wrap">
-  <div class="title"><h2>Roadmap</h2><span class="muted">shipped in 0.3.0, and what comes next</span></div>
+  <div class="title"><h2>Roadmap</h2><span class="muted">shipped in 0.4.0, and what comes next</span></div>
   <div class="cols">
     <div class="card pane">
       <div class="ph"><span class="badge bg-g">Shipped</span></div>
       <div class="two">
-        ${group("Syncing", "g", [done("10 item types, with images"), done("ID remapping by handle"), done("Two-pass writes for links"), done("Filters by type, pattern, language")])}
+        ${group("Syncing", "g", [done("11 item types incl. products"), done("ID remapping by handle"), done("Two-pass writes for links"), done("Filters by type, pattern, language")])}
         ${group("Safety", "g", [done("Dry-run plans, step by step"), done("Drift check, never deletes"), done("Protected stores, audit log"), done("Conflicts reported, not forced")])}
         ${group("Ways to use it", "g", [done("MCP server, 9 tools"), done("Command line, drift checks"), done("Config as code, theme diff"), done("No-app sign-in, on npm")])}
-        ${group("Quality", "g", [done("60 automated tests"), done("Checked on 3 API versions"), done("Live on Linux and Windows"), done("Parallel, throttle-aware")])}
+        ${group("Quality", "g", [done("68 automated tests"), done("Checked on 3 API versions"), done("Live on Linux and Windows"), done("Parallel, throttle-aware")])}
       </div>
     </div>
     <div class="card pane">
       <div class="ph"><span class="badge bg-b">Next</span></div>
       ${[
         "Collection rules on Shopify's new sources model",
+        "Product prices per market, inventory (opt-in)",
         "Remap product variants and blog articles",
         "Metafield values on variants, pages and the shop",
         "Menu link translations",
