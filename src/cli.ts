@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { ApplyRefused } from "./apply.js";
 import { DEFAULT_API_VERSION, loadStores, StoreRegistry, type StoreConfig } from "./config.js";
 import { preview, type ResourceDiff } from "./diff.js";
@@ -6,7 +5,7 @@ import { Engine, type Scope } from "./engine.js";
 import type { Plan } from "./plan.js";
 import { RESOURCE_KINDS, type ResourceKind } from "./resources/index.js";
 import { summarizeDiff, summarizePlan, summarizeThemes } from "./server.js";
-import { cliBin, scopesFor, ShopifyCliClient } from "./shopify/cliClient.js";
+import { cliBin, scopesFor, ShopifyCliClient, spawnCli } from "./shopify/cliClient.js";
 
 export const COMMANDS = ["connect", "stores", "diff", "plan", "plans", "apply", "export", "themes", "help"] as const;
 
@@ -230,7 +229,7 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.en
 /** Run a command attached to the terminal (the CLI opens the browser and waits for approval). */
 function interactive(bin: string, args: string[]): Promise<number> {
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { stdio: "inherit", shell: process.platform === "win32" });
+    const child = spawnCli(bin, args, "inherit");
     child.on("error", (e: NodeJS.ErrnoException) =>
       reject(e.code === "ENOENT" ? new Error(`Shopify CLI not found ("${bin}"). Install it with: npm install -g @shopify/cli`) : e),
     );

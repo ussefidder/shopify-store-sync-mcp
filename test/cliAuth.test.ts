@@ -6,7 +6,7 @@ import { runCli } from "../src/cli.js";
 import { parseStores, StoreRegistry, type StoreConfig } from "../src/config.js";
 import { Engine } from "../src/engine.js";
 import { PlanStore } from "../src/plan.js";
-import { parseCliOutput, scopesFor, ShopifyCliClient, type Runner } from "../src/shopify/cliClient.js";
+import { parseCliOutput, quoteWindowsArg, scopesFor, ShopifyCliClient, type Runner } from "../src/shopify/cliClient.js";
 import { FakeShop } from "./fakeShop.js";
 
 const tmp = (p: string) => mkdtempSync(join(tmpdir(), p));
@@ -105,6 +105,22 @@ describe("Shopify CLI sign-in", () => {
     expect(parseCliOutput(`${progress}\n{"data":{"a":1},"extensions":{}}\n`)).toEqual({ data: { a: 1 }, extensions: {} });
     expect(parseCliOutput(JSON.stringify({ data: { a: 1 } }, null, 2))).toEqual({ data: { a: 1 } });
     expect(parseCliOutput("not json")).toBeUndefined();
+  });
+
+  it("reads Shopify CLI 4.9 output, where the data object is printed on its own over several lines", () => {
+    const out = `${progress}\n{"type":"progress","status":"completed"}\n{\n  "shop": {\n    "name": "Soraly Studio Demo"\n  }\n}\n`;
+    expect(parseCliOutput(out)).toEqual({ data: { shop: { name: "Soraly Studio Demo" } } });
+    expect(parseCliOutput(`${progress}\n${JSON.stringify({ data: { shop: { name: "S" } }, extensions: { cost: 1 } }, null, 2)}`)).toEqual({
+      data: { shop: { name: "S" } },
+      extensions: { cost: 1 },
+    });
+    expect(parseCliOutput(`${progress}\n{"error":{"type":"abort","message":"nope"}}`)).toEqual({ error: { type: "abort", message: "nope" } });
+  });
+
+  it("quotes arguments for the Windows shell", () => {
+    expect(quoteWindowsArg("--store")).toBe("--store");
+    expect(quoteWindowsArg("C:\\Users\\a b\\q.graphql")).toBe('"C:\\Users\\a b\\q.graphql"');
+    expect(quoteWindowsArg('say "hi"')).toBe('"say ""hi"""');
   });
 
   it("connect runs store auth with the right scopes, then checks the sign-in", async () => {

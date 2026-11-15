@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -47,14 +47,26 @@ export function cliBin(env: NodeJS.ProcessEnv = process.env): string {
   return env.SHOPIFY_CLI_BIN || "shopify";
 }
 
+/** Quote an argument for cmd.exe, which runs the CLI's .cmd shim on Windows. */
+export function quoteWindowsArg(a: string): string {
+  return /^[A-Za-z0-9_\-.:\\/,=@]+$/.test(a) ? a : `"${a.replace(/"/g, '""')}"`;
+}
+
+/** Start the CLI; on Windows it's a .cmd shim, so it goes through the shell with quoted arguments. */
+export function spawnCli(bin: string, args: string[], stdio: "pipe" | "inherit"): ChildProcess {
+  const opts: SpawnOptions = { stdio: stdio === "pipe" ? ["ignore", "pipe", "pipe"] : "inherit" };
+  return process.platform === "win32"
+    ? spawn([bin, ...args].map(quoteWindowsArg).join(" "), { ...opts, shell: true })
+    : spawn(bin, args, opts);
+}
+
 export const defaultRunner: Runner = (bin, args) =>
   new Promise((resolve, reject) => {
-    // On Windows the CLI is a .cmd shim, which needs a shell to start.
-    const child = spawn(bin, args, { shell: process.platform === "win32", stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawnCli(bin, args, "pipe");
     let stdout = "";
     let stderr = "";
-    child.stdout.on("data", (d) => (stdout += d));
-    child.stderr.on("data", (d) => (stderr += d));
+    child.stdout!.on("data", (d) => (stdout += d));
+    child.stderr!.on("data", (d) => (stderr += d));
     child.on("error", (e: NodeJS.ErrnoException) =>
       reject(
         e.code === "ENOENT"
@@ -62,7 +74,7 @@ export const defaultRunner: Runner = (bin, args) =>
           : e,
       ),
     );
-    child.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    child.on("close", (code: number | null) => resolve({ code: code ?? 1, stdout, stderr }));
   });
 
 type CliOutput = {
@@ -71,22 +83,39 @@ type CliOutput = {
   error?: { message?: string; nextSteps?: unknown; details?: { errors?: GraphQLError[] } };
 };
 
-/** The CLI prints JSON lines (progress events, then the result); keep the last result-shaped one. */
+/**
+ * Read the result of `shopify store execute --json`. Progress events come first, one JSON
+ * object per line; the result follows, possibly pretty-printed over several lines.
+ * Shopify CLI 5 wraps the result as { data, extensions }; CLI 4.9 prints the data object itself.
+ */
 export function parseCliOutput(text: string): CliOutput | undefined {
-  let found: CliOutput | undefined;
-  const candidates = [text.trim(), ...text.split(/\r?\n/)];
-  for (const line of candidates) {
+  const rest: string[] = [];
+  for (const line of text.split(/\r?\n/)) {
     const t = line.trim();
-    if (!t.startsWith("{")) continue;
-    try {
-      const obj = JSON.parse(t) as CliOutput & { type?: string };
-      if (obj.type === "progress") continue;
-      if ("data" in obj || "error" in obj || "errors" in obj) found = obj;
-    } catch {
-      // not JSON, ignore
+    if (t.startsWith("{") && t.endsWith("}")) {
+      try {
+        const obj = JSON.parse(t) as { type?: string };
+        if (obj && obj.type === "progress") continue;
+      } catch {
+        // part of a multi-line document
+      }
     }
+    rest.push(line);
   }
-  return found;
+  const body = rest.join("\n").trim();
+  const start = body.indexOf("{");
+  if (start < 0) return undefined;
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(body.slice(start)) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return undefined;
+  if ("error" in obj || "errors" in obj) return obj as CliOutput;
+  const keys = Object.keys(obj);
+  if ("data" in obj && keys.every((k) => k === "data" || k === "extensions")) return obj as CliOutput;
+  return { data: obj };
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
