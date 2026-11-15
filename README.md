@@ -482,6 +482,10 @@ Two references followed from the source store to the target, as the sample sync 
 | Theme settings diff | read-only, 15 files compared in about 1 second |
 | Products (Shopify CLI sign-in, Windows) | a real product copied as a draft with its 4 images and alt text; after editing the copy and adding a variant and an image there, the update restored the title and kept both; the next diff was identical |
 | Products: reading only named handles | planning one product went from 97 to 6 seconds |
+| Menus (0.5.0) | a link added only in the target stayed in place through an update that added a link from the source; the plan named it; the next plan was empty |
+| Products: what only the target has (0.5.0) | a tag and a YouTube video added only in the target were both still there after an update that renamed the product and added a tag |
+| Protected store over MCP (0.5.0, stdio, Windows) | refused when the assistant passed the domain itself; applied after the person typed it when the client asked |
+| Snapshot folders over MCP (0.5.0) | a folder outside the base folder was refused |
 | Safety: write to a read-only store | refused |
 | Safety: target edited after the plan was made | step skipped, nothing overwritten |
 | Shopify CLI sign-in on Windows (CLI 4.9.4), both stores | `connect` read-only and `--writes`; plan, apply (7 creates incl. file upload and translation), update and re-diff all exact; also through the MCP server over stdio |

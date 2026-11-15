@@ -601,7 +601,7 @@ render("tested", 1280, 288, `
     <div class="stat card"><b style="color:${P}">2</b><span>sign-in methods used live: Shopify CLI and an app</span></div>
   </div>
   <div class="checks">
-    ${["Create and update across 7 resource types", "Image uploaded to the target by file name", "French translation registered", "Product copied as a draft with its 4 images", "Read-only store refused a write", "Target edited after planning: step skipped", "Target-only variant and image kept on update", "Shopify CLI sign-in on Windows, end to end"].map((t) => `<div class="ck"><span class="g">✓</span> ${t}</div>`).join("")}
+    ${["Create and update across 7 resource types", "Image uploaded to the target by file name", "French translation registered", "Product copied as a draft with its 4 images", "Protected store confirmed by a person", "Target edited after planning: step skipped", "Target-only links, tags and media kept", "Shopify CLI sign-in on Windows"].map((t) => `<div class="ck"><span class="g">✓</span> ${t}</div>`).join("")}
   </div>
 </div>`, CARD_CSS + `
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
