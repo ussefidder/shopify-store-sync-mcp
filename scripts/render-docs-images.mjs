@@ -316,15 +316,16 @@ render("social-preview", 1280, 640, `
   <h1>shopify-store-sync-mcp</h1>
   <p class="tag">Diff and sync configuration between Shopify stores from Claude, Cursor or any MCP client.</p>
   <div class="row">
-    <div class="pill"><span class="dot bg-g"></span>Metafield &amp; metaobject definitions</div>
-    <div class="pill"><span class="dot bg-g"></span>Metaobjects</div>
-    <div class="pill"><span class="dot bg-g"></span>Pages · Menus · Redirects</div>
+    <div class="pill"><span class="dot bg-g"></span>Products · Collections</div>
+    <div class="pill"><span class="dot bg-g"></span>Metafields &amp; metaobjects</div>
+    <div class="pill"><span class="dot bg-g"></span>Pages · Menus · Redirects · Translations</div>
   </div>
   <div class="row">
     <div class="pill"><span class="dot bg-b"></span>Field-level diffs</div>
     <div class="pill"><span class="dot bg-a"></span>Dry-run plans</div>
     <div class="pill"><span class="dot bg-b"></span>ID remapping by handle</div>
     <div class="pill"><span class="dot bg-r"></span>Never deletes</div>
+    <div class="pill"><span class="dot bg-a"></span>A person confirms production</div>
   </div>
   <div class="foot mono muted">github.com/ussefidder/shopify-store-sync-mcp · MIT</div>
 </div>`, `
@@ -652,4 +653,104 @@ render("roadmap", 1280, 462, `
   .gt { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 6px; }
   .it { font-size: 14px; color: #c9d4df; padding: 5px 0; border-top: 1px solid #1c2530; display: flex; gap: 10px; }
   .ck { width: 14px; display: inline-block; }
+`);
+
+// ---------------------------------------------------------------- images for posts (LinkedIn, Reddit, forums)
+// Same real numbers as demo.png: they come from docs/demo-output.json.
+const label = (k) => k.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+const postRows = out.diff.resources
+  .map((r) => `<div class="drow"><span>${label(r.kind)}</span><span class="g mono">+${r.counts.onlyInSource}</span><span class="a mono">~${r.counts.changed}</span></div>`)
+  .join("");
+const pt = out.plan.totals;
+const at = out.applied.totals;
+const postCard = `
+  <div class="card diff">
+    <div class="dh"><span class="mono b">diff</span><span class="muted mono">dev → eu</span><span class="muted small">new</span><span class="muted small">changed</span></div>
+    ${postRows}
+    <div class="flow">
+      <div class="step"><div class="sl muted">plan (dry run)</div><div class="sv"><span class="g">${pt.create} create</span> · <span class="a">${pt.update} update</span> · <span class="r">${pt.conflict} conflict</span></div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="sl muted">applied</div><div class="sv"><span class="g">${at.created + at.updated} written</span> · <span class="muted">${at.skipped} skipped</span> · <span class="muted">0 deleted</span></div></div>
+    </div>
+  </div>`;
+const POST_CSS = `
+  .wrap { position: relative; overflow: hidden; background: radial-gradient(1000px 520px at 0% 0%, #13202a 0%, #0b0f14 62%); }
+  .glow { position: absolute; right: -180px; bottom: -220px; width: 720px; height: 720px; border-radius: 50%;
+          background: radial-gradient(circle, rgba(87,194,110,.16), transparent 65%); }
+  .eyebrow { letter-spacing: .14em; color: #57c26e; }
+  h1 { font-weight: 800; letter-spacing: -0.025em; line-height: 1.08; }
+  .sub { color: #b5c2cf; line-height: 1.4; }
+  .diff { position: relative; padding: 18px 22px; }
+  .dh, .drow { display: grid; grid-template-columns: 1fr 1fr 64px 84px; align-items: center; }
+  .dh { padding-bottom: 10px; border-bottom: 1px solid #222c38; font-size: 15px; }
+  .dh .small { font-size: 12.5px; text-align: right; }
+  .drow { grid-template-columns: 2fr 64px 84px; padding: 9px 0; border-bottom: 1px solid #1a222c; font-size: 17px; }
+  .drow .mono { text-align: right; font-size: 16px; }
+  .flow { display: flex; align-items: center; gap: 14px; margin-top: 16px; }
+  .step { flex: 1; background: #0d1319; border: 1px solid #222c38; border-radius: 10px; padding: 10px 14px; }
+  .sl { font-size: 12.5px; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 4px; }
+  .sv { font-size: 15.5px; font-weight: 600; }
+  .arrow { color: #4a5868; font-size: 22px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 10px; }
+  .cmd { background: #0d1319; border: 1px solid #222c38; border-radius: 10px; color: #c9d4df; display: inline-block; }
+  .cmd .p { color: #57c26e; }
+  .foot { position: absolute; color: #8b98a8; }
+`;
+const chips = `
+  <span class="pill"><span class="dot bg-g"></span>Read-only by default</span>
+  <span class="pill"><span class="dot bg-a"></span>Dry-run plan first</span>
+  <span class="pill"><span class="dot bg-r"></span>Never deletes</span>
+  <span class="pill"><span class="dot bg-b"></span>A person confirms production</span>`;
+
+render("post-landscape", 1200, 675, `
+<div class="wrap land">
+  <div class="glow"></div>
+  <div class="left">
+    <div class="eyebrow mono">OPEN SOURCE · MCP SERVER + CLI</div>
+    <h1>Keep your Shopify stores in sync by asking for it.</h1>
+    <p class="sub">Compare dev with production, review a dry-run plan, apply it. From Claude, Cursor or the terminal.</p>
+    <div class="chips">${chips}</div>
+    <div class="cmd mono"><span class="p">$</span> npx shopify-store-sync-mcp diff dev eu</div>
+  </div>
+  <div class="right">${postCard}</div>
+  <div class="foot mono">github.com/ussefidder/shopify-store-sync-mcp · MIT</div>
+</div>`, POST_CSS + `
+  .land { width: 1200px; height: 675px; padding: 64px 60px; display: grid; grid-template-columns: 1.08fr 1fr; gap: 44px; align-items: center; }
+  .eyebrow { font-size: 14px; margin-bottom: 16px; }
+  h1 { font-size: 50px; }
+  .sub { font-size: 20px; margin-top: 16px; }
+  .chips { margin-top: 22px; }
+  .chips .pill { font-size: 14.5px; }
+  .cmd { margin-top: 22px; padding: 11px 16px; font-size: 15.5px; }
+  .foot { left: 60px; bottom: 30px; font-size: 14px; }
+  .flow { flex-direction: column; align-items: stretch; gap: 8px; }
+  .arrow { display: none; }
+  .step { display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; }
+  .sl { margin-bottom: 0; }
+  .sv { font-size: 15px; }
+`);
+
+render("post-square", 1080, 1080, `
+<div class="wrap sq">
+  <div class="glow"></div>
+  <div class="eyebrow mono">OPEN SOURCE · MCP SERVER + CLI</div>
+  <h1>Keep your Shopify stores in sync by asking for it.</h1>
+  <p class="sub">Compare dev with production, review a dry-run plan, apply it. From Claude, Cursor or the terminal.</p>
+  ${postCard}
+  <div class="chips">${chips}</div>
+  <div class="cmd mono"><span class="p">$</span> npx shopify-store-sync-mcp diff dev eu</div>
+  <div class="foot mono">github.com/ussefidder/shopify-store-sync-mcp · MIT</div>
+</div>`, POST_CSS + `
+  .sq { width: 1080px; height: 1080px; padding: 72px 72px; }
+  .eyebrow { font-size: 16px; margin-bottom: 18px; }
+  h1 { font-size: 62px; }
+  .sub { font-size: 24px; margin-top: 18px; }
+  .diff { margin-top: 34px; padding: 22px 28px; }
+  .dh { font-size: 17px; } .dh .small { font-size: 14px; }
+  .drow { font-size: 21px; padding: 11px 0; } .drow .mono { font-size: 19px; }
+  .sl { font-size: 14px; } .sv { font-size: 18px; }
+  .chips { margin-top: 30px; }
+  .chips .pill { font-size: 17px; padding: 8px 15px; }
+  .cmd { margin-top: 24px; padding: 13px 18px; font-size: 18px; }
+  .foot { left: 72px; bottom: 44px; font-size: 16px; }
 `);
