@@ -27,15 +27,9 @@
   <img src="docs/images/quickstart.png" alt="Three steps: connect your stores with npx shopify-store-sync-mcp connect, add the server to your AI client, ask in plain language" width="100%">
 </p>
 
-<p align="center">
-  <img src="docs/images/explainer.gif" alt="An AI assistant compares two stores, shows the plan, and a person confirms the protected store before anything is written" width="100%">
-</p>
-
-<sub>Compare, plan, confirm, apply. Every output shown is real, from two sample stores. <a href="docs/explainer.mp4">
-
 https://github.com/user-attachments/assets/66a2dfd0-5770-4403-992c-cfe133ea0e9c
 
-Watch the full walkthrough with voice-over and sound</a>.</sub>
+<sub>Compare, plan, confirm, apply: the full walkthrough, with sound. Every output shown is real, from two sample stores.</sub>
 
 <p align="center">
   <img src="docs/images/demo.png" alt="diff_stores, plan_sync and apply_plan output: 6 created, 3 updated, 1 conflict skipped, protected store refused until a person confirms" width="100%">
