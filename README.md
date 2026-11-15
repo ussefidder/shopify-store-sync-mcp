@@ -19,7 +19,8 @@
   <a href="#what-it-syncs">What it syncs</a> ·
   <a href="#why-this-tool">Why this tool</a> ·
   <a href="#safe-on-production">Safety</a> ·
-  <a href="#tested-on-real-stores">Tested</a>
+  <a href="#tested-on-real-stores">Tested</a> ·
+  <a href="#roadmap">Roadmap</a>
 </p>
 
 <p align="center">
@@ -448,49 +449,14 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 
 </details>
 
-<details>
-<summary><b>Development</b></summary>
+## Roadmap
 
-```bash
-npm install
-npm test              # vitest: unit, sync engine against an in-memory Shopify, and MCP protocol tests
-npm run typecheck
-npm run build
-
-# Validate every GraphQL operation against Shopify's real Admin schema
-npm run validate:graphql            # defaults to 2026-10
-npm run validate:graphql -- 2027-01
-```
-
-Layout:
-
-```
-src/
-  index.ts            entrypoint: MCP server on stdio, or the CLI when given a command
-  engine.ts           everything the tools and the CLI do, in one place
-  server.ts           MCP tools
-  cli.ts              command line
-  snapshotFiles.ts    export and read snapshot folders (config as code)
-  themes.ts           read-only theme settings diff
-  config.ts           store config loading and validation
-  shopify/client.ts   Admin GraphQL client (token refresh, throttling, retries)
-  shopify/cliClient.ts  the same requests through Shopify CLI's sign-in (`shopify store execute`)
-  refs.ts             GID <-> portable reference mapping
-  snapshot.ts         read a store into portable form
-  diff.ts             field-level diff
-  plan.ts             dry-run plans and plan storage
-  apply.ts            guarded, drift-checked, two-pass writes
-  resources/          one adapter per resource type
-test/
-  fakeShop.ts         in-memory Admin API used by the tests
-```
-
-Adding a resource type means writing one adapter (`fetch`, `create`, `update`) in `src/resources/`. See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-</details>
+<p align="center">
+  <img src="docs/images/roadmap.png" alt="Roadmap: shipped (syncing, safety, ways to use it, quality) and next (collection sources, variants and articles, more metafield owners, menu translations, markets, bulk mode, undo, optional deletes)" width="100%">
+</p>
 
 <details>
-<summary><b>Roadmap: what's shipped and what's next</b></summary>
+<summary><b>The full list</b></summary>
 
 **Shipped**
 
@@ -533,7 +499,48 @@ Adding a resource type means writing one adapter (`fetch`, `create`, `update`) i
 - [ ] Undo: restore the previous values of an applied plan from the audit log
 - [ ] Optional deletes, behind an explicit flag
 
+</details>
+
 Ideas and PRs are welcome. Issues tagged `good first issue` are a good place to start.
+
+<details>
+<summary><b>Development</b></summary>
+
+```bash
+npm install
+npm test              # vitest: unit, sync engine against an in-memory Shopify, and MCP protocol tests
+npm run typecheck
+npm run build
+
+# Validate every GraphQL operation against Shopify's real Admin schema
+npm run validate:graphql            # defaults to 2026-10
+npm run validate:graphql -- 2027-01
+```
+
+Layout:
+
+```
+src/
+  index.ts            entrypoint: MCP server on stdio, or the CLI when given a command
+  engine.ts           everything the tools and the CLI do, in one place
+  server.ts           MCP tools
+  cli.ts              command line
+  snapshotFiles.ts    export and read snapshot folders (config as code)
+  themes.ts           read-only theme settings diff
+  config.ts           store config loading and validation
+  shopify/client.ts   Admin GraphQL client (token refresh, throttling, retries)
+  shopify/cliClient.ts  the same requests through Shopify CLI's sign-in (`shopify store execute`)
+  refs.ts             GID <-> portable reference mapping
+  snapshot.ts         read a store into portable form
+  diff.ts             field-level diff
+  plan.ts             dry-run plans and plan storage
+  apply.ts            guarded, drift-checked, two-pass writes
+  resources/          one adapter per resource type
+test/
+  fakeShop.ts         in-memory Admin API used by the tests
+```
+
+Adding a resource type means writing one adapter (`fetch`, `create`, `update`) in `src/resources/`. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 </details>
 

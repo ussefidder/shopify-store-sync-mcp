@@ -608,3 +608,45 @@ render("tested", 1280, 288, `
   .stat span { font-size: 13.5px; color: #aab6c4; line-height: 1.4; }
   .checks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px 14px; margin-top: 16px; font-size: 13.5px; color: #c9d4df; }
 `);
+
+// ---------------------------------------------------------------- roadmap
+const done = (t) => `<div class="it"><span class="ck g">✓</span>${t}</div>`;
+const todo = (t) => `<div class="it"><span class="ck muted">○</span>${t}</div>`;
+const group = (title, cls, items) => `<div class="grp"><div class="gt ${cls}">${title}</div>${items.join("")}</div>`;
+render("roadmap", 1280, 438, `
+<div class="wrap">
+  <div class="title"><h2>Roadmap</h2><span class="muted">shipped in 0.3.0, and what comes next</span></div>
+  <div class="cols">
+    <div class="card pane">
+      <div class="ph"><span class="badge bg-g">Shipped</span></div>
+      <div class="two">
+        ${group("Syncing", "g", [done("10 item types, with images"), done("ID remapping by handle"), done("Two-pass writes for links"), done("Filters by type, pattern, language")])}
+        ${group("Safety", "g", [done("Dry-run plans, step by step"), done("Drift check, never deletes"), done("Protected stores, audit log"), done("Conflicts reported, not forced")])}
+        ${group("Ways to use it", "g", [done("MCP server, 9 tools"), done("Command line, drift checks"), done("Config as code, theme diff"), done("No-app sign-in, on npm")])}
+        ${group("Quality", "g", [done("60 automated tests"), done("Checked on 3 API versions"), done("Live on Linux and Windows"), done("Parallel, throttle-aware")])}
+      </div>
+    </div>
+    <div class="card pane">
+      <div class="ph"><span class="badge bg-b">Next</span></div>
+      ${[
+        "Collection rules on Shopify's new sources model",
+        "Remap product variants and blog articles",
+        "Metafield values on variants, pages and the shop",
+        "Menu link translations",
+        "Markets and market web presences",
+        "Bulk mode for very large stores",
+        "Undo an applied plan from the audit log",
+        "Optional deletes, behind an explicit flag",
+      ].map(todo).join("")}
+    </div>
+  </div>
+</div>`, CARD_CSS + `
+  .cols { display: grid; grid-template-columns: 1.55fr 1fr; gap: 16px; }
+  .pane { padding: 16px 20px; }
+  .ph { margin-bottom: 12px; }
+  .badge { font-size: 12px; font-weight: 700; color: #0b0f14; padding: 3px 10px; border-radius: 999px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 22px; }
+  .gt { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 6px; }
+  .it { font-size: 14px; color: #c9d4df; padding: 5px 0; border-top: 1px solid #1c2530; display: flex; gap: 10px; }
+  .ck { width: 14px; display: inline-block; }
+`);
