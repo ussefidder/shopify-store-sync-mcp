@@ -432,7 +432,7 @@ const connectLines = [
   ["", "Add it to stores.json:"],
   ["b", '  "my-staging-store": { "domain": "my-staging-store.myshopify.com", "auth": "shopify-cli", "allowWrites": true }'],
 ];
-const opt = (title, tag, cls, rows) => `<div class="opt card"><div class="ot"><span class="b2">${title}</span><span class="tag ${cls}">${tag}</span></div>${rows.map(([k, v]) => `<div class="row"><span class="muted">${k}</span><span>${v}</span></div>`).join("")}</div>`;
+const opt = (title, tag, cls, rows, rec = false) => `<div class="opt card${rec ? " rec" : ""}"><div class="ot"><span class="b2">${title}${rec ? ' <span class="recb">recommended</span>' : ""}</span><span class="tag ${cls}">${tag}</span></div>${rows.map(([k, v]) => `<div class="row"><span class="muted">${k}</span><span>${v}</span></div>`).join("")}</div>`;
 render("connect", 1280, 500, `
 <div class="wrap">
   <div class="hd"><span class="b2">Connect a store in one click, no app to create</span><span class="muted">uses Shopify CLI's own sign-in</span></div>
@@ -440,7 +440,7 @@ render("connect", 1280, 500, `
     ${connectLines.map(([c, t]) => (c === "$" ? `<div><span class="g">$</span> ${esc(t)}</div>` : `<div class="${c}">${esc(t) || "&nbsp;"}</div>`)).join("")}
   </div>
   <div class="opts">
-    ${opt("Shopify CLI sign-in", "no app", "bg-g", [["Setup", "<span class='mono'>connect</span>, click Install"], ["Works on", "any store you can approve apps on"], ["Speed", "a full diff in tens of seconds"], ["Best for", "working at your keyboard"]])}
+    ${opt("Shopify CLI sign-in", "no app", "bg-g", [["Setup", "<span class='mono'>connect</span>, click Install"], ["Works on", "any store you can approve apps on"], ["Speed", "a full diff in tens of seconds"], ["Best for", "working at your keyboard"]], true)}
     ${opt("Dev Dashboard app", "client ID + secret", "bg-b", [["Setup", "create one app, install per store"], ["Works on", "stores in your own organization"], ["Speed", "a full diff in about 2 seconds"], ["Best for", "scheduled and unattended runs"]])}
     ${opt("Custom app token", "shpat_...", "bg-a", [["Setup", "store owner creates it and shares the token"], ["Works on", "any store whose owner shares a token"], ["Speed", "a full diff in about 2 seconds"], ["Best for", "automation on a client's store"]])}
   </div>
@@ -455,6 +455,9 @@ render("connect", 1280, 500, `
   .ot { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
   .tag { font-size: 11.5px; color: #0b0f14; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
   .row { display: grid; grid-template-columns: 78px 1fr; gap: 8px; padding: 4px 0; border-top: 1px solid #1c2530; }
+  .opt.rec { border: 1.5px solid #57c26e; background: #10201a; box-shadow: 0 0 0 4px rgba(87,194,110,.12); }
+  .opt.rec .row { border-top-color: #1f3a2a; }
+  .recb { font-size: 11px; font-weight: 700; color: #57c26e; border: 1px solid #57c26e; border-radius: 999px; padding: 1px 7px; margin-left: 6px; vertical-align: middle; text-transform: uppercase; letter-spacing: .5px; }
 `);
 
 // ---------------------------------------------------------------- Shopify CLI alone vs this tool

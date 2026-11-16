@@ -126,7 +126,7 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ### 1. Connect your stores
 
-Most people only need the first option: no app to create. The other two are for scheduled or unattended runs.
+**Recommended: sign in with Shopify CLI.** No app to create, nothing to paste: run `connect` and click **Install**. The other two options are only for scheduled or unattended runs.
 
 <p align="center">
   <img src="docs/images/connect.png" alt="connect output: browser approval, Connected, and the stores.json line to add; then the three ways to connect compared" width="100%">
@@ -139,7 +139,7 @@ npx shopify-store-sync-mcp connect my-staging-store --writes
 ```
 
 <details>
-<summary><b>More about the Shopify CLI sign-in</b></summary>
+<summary><b>More about the Shopify CLI sign-in (recommended)</b></summary>
 
 Each `connect` opens Shopify in your browser; click **Install** to approve. It asks for read-only scopes unless you pass `--writes` (or the store is configured with `"allowWrites": true`), then prints the line to add to `stores.json`:
 
