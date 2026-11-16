@@ -558,7 +558,7 @@ render("what-it-syncs", 1280, 600, `
     ${tile("RD", T, "Redirects", "Thousands of URL redirects, no CSV.")}
     ${tile("PL", T, "Store policies", "Refund, privacy, terms, shipping and contact text.")}
     ${tile("PR", R, "Products", "Content, options, variants matched by option values, images. New ones as drafts; prices only if asked.", "opt-in")}
-    ${tile("MV", P, "Metafield values", "On products and collections, matched by handle.", "opt-in")}
+    ${tile("MV", P, "Metafield values", "On products, collections, variants and the shop, matched by handle and option values.", "opt-in")}
     ${tile("TR", P, "Translations", "Products, pages, collections, metaobjects, menus and policies, per language.", "opt-in")}
     ${tile("IMG", "#8b98a8", "Files and images", "Matched by file name; missing ones uploaded to the target.")}
   </div>
@@ -596,8 +596,8 @@ render("tested", 1280, 288, `
 <div class="wrap">
   <div class="title"><h2>Tested on real stores, not just in theory</h2><span class="muted">two live Shopify stores, on Linux and Windows</span></div>
   <div class="stats">
-    <div class="stat card"><b class="g">104</b><span>automated tests</span></div>
-    <div class="stat card"><b class="b">56</b><span>GraphQL operations validated against Shopify's schema</span></div>
+    <div class="stat card"><b class="g">111</b><span>automated tests</span></div>
+    <div class="stat card"><b class="b">61</b><span>GraphQL operations validated against Shopify's schema</span></div>
     <div class="stat card"><b class="a">11</b><span>item types written to a live store</span></div>
     <div class="stat card"><b style="color:${P}">2</b><span>sign-in methods used live: Shopify CLI and an app</span></div>
   </div>
@@ -618,15 +618,15 @@ const todo = (t) => `<div class="it"><span class="ck muted">○</span>${t}</div>
 const group = (title, cls, items) => `<div class="grp"><div class="gt ${cls}">${title}</div>${items.join("")}</div>`;
 render("roadmap", 1280, 462, `
 <div class="wrap">
-  <div class="title"><h2>Roadmap</h2><span class="muted">shipped in 0.5.0, and what comes next</span></div>
+  <div class="title"><h2>Roadmap</h2><span class="muted">shipped in 0.6.0, and what comes next</span></div>
   <div class="cols">
     <div class="card pane">
       <div class="ph"><span class="badge bg-g">Shipped</span></div>
       <div class="two">
-        ${group("Syncing", "g", [done("11 item types incl. products"), done("ID remapping by handle"), done("Two-pass writes for links"), done("Filters, and as_drafts")])}
+        ${group("Syncing", "g", [done("11 item types incl. products"), done("ID remapping, incl. variants"), done("Two-pass writes for links"), done("Filters, and as_drafts")])}
         ${group("Safety", "g", [done("Dry-run plans, drift check"), done("Never deletes, inside items too"), done("A person confirms production"), done("Validated input, time limits")])}
         ${group("Ways to use it", "g", [done("MCP server, 9 tools, progress"), done("Command line, drift checks"), done("Config as code, theme diff"), done("No-app sign-in, on npm")])}
-        ${group("Quality", "g", [done("104 automated tests, linted"), done("Checked on 3 API versions"), done("Live on Linux and Windows"), done("Parallel reads and writes")])}
+        ${group("Quality", "g", [done("111 automated tests, linted"), done("Checked on 3 API versions"), done("Live on Linux and Windows"), done("Parallel reads and writes")])}
       </div>
     </div>
     <div class="card pane">
@@ -636,8 +636,8 @@ render("roadmap", 1280, 462, `
         "Batch writes for very large syncs",
         "Product prices per market, inventory (opt-in)",
         "Barcodes, weight and variant images",
-        "Remap product variants and blog articles",
-        "Metafield values on variants, pages and the shop",
+        "Remap blog articles",
+        "Metafield values on pages and blogs",
         "Menu link translations, markets",
         "Undo an applied plan from the audit log",
         "Optional deletes, behind an explicit flag",

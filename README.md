@@ -190,11 +190,13 @@ An existing Admin API access token (`shpat_...`) from a custom app that was crea
 | collections | `read_products` | `write_products` |
 | products | `read_products` | `write_products` (plus `read_files`/`write_files` for their images) |
 | shop policies | `read_legal_policies` | `write_legal_policies` |
-| metafield values | `read_products` | `write_products` |
+| metafield values (products, collections, variants, shop) | `read_products` | `write_products` |
 | translations | `read_translations`, `read_locales` | `write_translations` |
 | files | `read_files` | `write_files` (to upload missing files) |
 | theme diff | `read_themes` | none, never writes |
 | ID remapping | `read_products`, `read_content` | none |
+
+Metafield definitions of some owner types (customers, orders, draft orders, companies, locations, markets) need that owner's read scope too, such as `read_customers`. The Shopify CLI sign-in doesn't ask for those, since they open up customer and order data. When a store won't show an owner type, the diff carries on: that owner type is listed as "not compared", on both stores, with the scope Shopify asked for.
 
 Everything at once (the set used for the live tests), ready to paste:
 
@@ -469,7 +471,7 @@ Two references followed from the source store to the target, as the sample sync 
 ## Tested on real stores
 
 <p align="center">
-  <img src="docs/images/tested.png" alt="104 automated tests, 56 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
+  <img src="docs/images/tested.png" alt="111 automated tests, 61 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
 </p>
 
 <details>
@@ -541,7 +543,7 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 - [x] Published on npm, runs with `npx`
 
 *Quality*
-- [x] 104 automated tests against an in-memory Shopify, plus MCP protocol tests
+- [x] 111 automated tests against an in-memory Shopify, plus MCP protocol tests
 - [x] Every GraphQL operation validated against Shopify's schema for 2026-04, 2026-10 and 2027-01
 - [x] Tested live between two stores on Linux and Windows, Shopify CLI 4.9 and 5
 - [x] Parallel reads and writes with throttle-aware retries; clear errors for missing installs, expired sign-ins and auto-managed policies
