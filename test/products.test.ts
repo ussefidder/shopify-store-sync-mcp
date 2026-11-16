@@ -324,6 +324,49 @@ describe("bulk writes", () => {
     }
   });
 
+  it("updates many products in one bulk operation and keeps what only the target has", async () => {
+    const { bulkIO } = await import("../src/shopify/bulk.js");
+    const { bulkFiles } = await import("./fakeShop.js");
+    bulkIO.wait = async () => {};
+    bulkIO.upload = async (_url, form) => void bulkFiles.set(String(form.get("key")), await (form.get("file") as Blob).text());
+    bulkIO.download = async (url) => bulkFiles.get(url) ?? "";
+    process.env.SYNC_BULK_THRESHOLD = "2";
+    try {
+      const src = Array.from({ length: 3 }, (_, i) => shirt(`gid://shopify/Product/${i + 1}`, { handle: `tee-${i}`, title: `Tee ${i} v2` }));
+      const tgt = Array.from({ length: 3 }, (_, i) =>
+        shirt(`gid://shopify/Product/${i + 11}`, {
+          handle: `tee-${i}`,
+          title: `Tee ${i}`,
+          tags: ["summer", "linen", "eu-only"],
+          options: [
+            { name: "Color", values: ["Sand", "Navy", "Red"] },
+            { name: "Size", values: ["M"] },
+          ],
+          variants: [
+            { id: `gid://shopify/ProductVariant/${i}01`, options: { Color: "Sand", Size: "M" }, sku: "LS-SAND-M", price: "79.00" },
+            { id: `gid://shopify/ProductVariant/${i}02`, options: { Color: "Navy", Size: "M" }, sku: "LS-NAVY-M", price: "79.00", compareAtPrice: "99.00" },
+            { id: `gid://shopify/ProductVariant/${i}03`, options: { Color: "Red", Size: "M" }, sku: "EU-RED-M", price: "79.00" },
+          ],
+        }),
+      );
+      const dev = new FakeShop(FakeShop.config("dev"), { products: src });
+      const eu = new FakeShop(FakeShop.config("eu"), { products: tgt });
+      const engine = engineFor(dev, eu);
+      const plan = await engine.plan("dev", "eu", { resources: ["products"] });
+      expect(plan.ops.map((o) => o.action)).toEqual(["update", "update", "update"]);
+      const { results } = await engine.apply(plan.id);
+      expect(results.map((r) => [r.outcome, r.message])).toEqual([["updated", undefined], ["updated", undefined], ["updated", undefined]]);
+      const fields = eu.calls.map((c) => c.field);
+      expect(fields.filter((f) => f === "bulkOperationRunMutation")).toHaveLength(1);
+      const tee = eu.state.products.find((p) => p.handle === "tee-1")!;
+      expect(tee).toMatchObject({ id: "gid://shopify/Product/12", title: "Tee 1 v2" });
+      expect(tee.tags).toContain("eu-only");
+      expect(tee.variants!.map((v) => v.sku)).toContain("EU-RED-M");
+    } finally {
+      delete process.env.SYNC_BULK_THRESHOLD;
+    }
+  });
+
   it("creates an image several new products share only once", async () => {
     const { bulkIO } = await import("../src/shopify/bulk.js");
     const { bulkFiles } = await import("./fakeShop.js");

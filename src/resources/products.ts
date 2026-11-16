@@ -590,8 +590,8 @@ async function set(client: AdminClient, d: Record<string, unknown>, create: bool
 }
 
 const BULK_SET = /* GraphQL */ `
-  mutation BulkProductSet($input: ProductSetInput!) {
-    productSet(input: $input, synchronous: true) {
+  mutation BulkProductSet($identifier: ProductSetIdentifiers, $input: ProductSetInput!) {
+    productSet(identifier: $identifier, input: $input, synchronous: true) {
       product { id handle variants(first: 250) { nodes { id selectedOptions { name value } } } }
       userErrors { field message code }
     }
@@ -707,7 +707,20 @@ export const products: ResourceAdapter = {
   // New products only: one productSet per line, images taken straight from the source's URLs.
   async bulkWrite(ctx, items) {
     const locations = items.some((i) => hasStock(i.data)) ? await locationsByName(ctx.client) : undefined;
-    const inputs = items.map((i) => productSetInput(i.data, undefined, true, locations));
+    // Updates merge with what the target has, so the target products are read first (in bulk for many).
+    const updating = items.filter((i) => i.action === "update").map((i) => String(i.data.handle));
+    const targets = new Map<string, Node>();
+    if (updating.length) {
+      ctx.onPhase?.(`reading the ${updating.length} products to update from ${ctx.client.store.alias}`);
+      const found = await readByHandles(ctx.client, updating);
+      await eachLimited(found, 4, async (n) => void targets.set(n.handle, await complete(ctx.client, n)));
+    }
+    const early = new Map<number, { error: string }>();
+    const inputs = items.map((i, k) => {
+      const target = i.action === "update" ? targets.get(String(i.data.handle)) : undefined;
+      if (i.action === "update" && !target) early.set(k, { error: "no longer in the target; re-run plan_sync" });
+      return productSetInput(i.data, target, i.action === "create", locations);
+    });
     // Files the target doesn't have yet are created first, once each and all at the same time, so no
     // product write waits on an image download and an image several products share isn't copied per product.
     const missing = new Map<string, FileSource>();
@@ -727,7 +740,13 @@ export const products: ResourceAdapter = {
         input.variants = ((input.variants as Record<string, any>[]) ?? []).map((v) => (v.file ? { ...v, file: swap(v.file) } : v));
       }
     }
-    const lines = inputs.map((input) => ({ input: withSources(input, ctx.files) }));
+    // Items that can't be written are left out of the bulk file and reported on their own.
+    const sent = items.map((_, k) => k).filter((k) => !early.has(k));
+    const lines = sent.map((k) => ({
+      identifier: items[k]!.action === "update" ? { handle: items[k]!.data.handle } : undefined,
+      input: withSources(inputs[k]!, ctx.files),
+    }));
+    for (const [k, r] of early) ctx.onDone?.(k, r);
     const toResult = (r: LineResult): { id?: string; error?: string } => {
       const ps = r.data?.productSet;
       const errors = [...(r.errors ?? []), ...(ps?.userErrors ?? [])].map((e: { message: string }) => e.message);
@@ -740,16 +759,33 @@ export const products: ResourceAdapter = {
       timeoutMs: bulkTimeoutMs(),
       onProgress: ctx.onWritten,
       onPart: (part, parts, start, rows) => {
-        rows.forEach((r, k) => {
+        rows.forEach((r, j) => {
           const res = toResult(r);
-          done.set(start + k, res);
-          ctx.onDone?.(start + k, res);
+          done.set(sent[start + j]!, res);
+          ctx.onDone?.(sent[start + j]!, res);
         });
-        const failed = rows.filter((_, k) => done.get(start + k)?.error).length;
+        const failed = rows.filter((_, j) => done.get(sent[start + j]!)?.error).length;
         ctx.onPhase?.(`products: part ${part} of ${parts} finished, ${rows.length - failed} written${failed ? `, ${failed} failed` : ""}`);
       },
     });
-    return results.map((r, i) => done.get(i) ?? toResult(r));
+    results.forEach((r, j) => done.has(sent[j]!) || done.set(sent[j]!, toResult(r)));
+    // Stock of variants the target already had is set after the product write, against what it has now.
+    if (locations) {
+      await eachLimited(
+        items.map((it, k) => ({ it, k })).filter(({ it, k }) => it.action === "update" && hasStock(it.data) && done.get(k)?.id),
+        4,
+        async ({ it, k }) => {
+          const target = targets.get(String(it.data.handle))!;
+          const existing = new Set(target.variants.nodes.map((v) => variantKey(Object.fromEntries(v.selectedOptions.map((o) => [o.name, o.value])))));
+          try {
+            await setExistingStock(ctx.client, done.get(k)!.id!, it.data, locations, existing);
+          } catch (e) {
+            done.set(k, { error: `product written, stock not set: ${(e as Error).message}` });
+          }
+        },
+      );
+    }
+    return items.map((_, k) => early.get(k) ?? done.get(k) ?? { error: "no result" });
   },
 
   create: ({ client }, _key, d) => set(client, d, true),

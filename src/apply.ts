@@ -244,10 +244,13 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
           items.push({ op, data: value });
         }
       }
-      const reported = new Set<number>();
+      // Results come as each part finishes, then all together at the end; a later error (stock not
+      // set after the product was written, say) replaces an earlier success.
+      const reported = new Map<number, boolean>();
       const record = (i: number, r: { id?: string; error?: string }) => {
-        if (reported.has(i)) return;
-        reported.add(i);
+        const before = reported.get(i);
+        if (before !== undefined && (before || !r.error)) return;
+        reported.set(i, Boolean(r.error));
         const { op } = items[i]!;
         if (r.error) {
           upsertResult({ seq: op.seq, kind, key: op.key, outcome: "failed", message: r.error });
@@ -256,7 +259,7 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
           if (ref && r.id && op.action === "create") resolver.remember(ref, r.id);
           upsertResult({ seq: op.seq, kind, key: op.key, outcome: op.action === "create" ? "created" : "updated" });
         }
-        opts.onProgress?.(++finished, total, `${kind} ${op.key}`);
+        if (before === undefined) opts.onProgress?.(++finished, total, `${kind} ${op.key}`);
       };
       const res = await adapter.bulkWrite!(
         {
@@ -292,8 +295,7 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
     let ops = ready.filter((o) => o.kind === kind);
     const adapter = ADAPTERS[kind];
     if (adapter.bulkWrite) {
-      // Products: only new ones go in bulk (an update has to merge with what the target has).
-      const bulk = ops.filter((o) => kind !== "products" || o.action === "create");
+      const bulk = ops;
       if (bulk.length > bulkThreshold()) {
         const left = await runBulk(kind, bulk);
         ops = ops.filter((o) => !bulk.includes(o) || left.includes(o));
