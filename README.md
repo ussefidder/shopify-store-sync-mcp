@@ -85,7 +85,8 @@ Thousands of products are fine. Above 250 products the tool switches to Shopify 
 </p>
 
 - **Reads**: both stores are listed by handle first, and only the products both have are read in full. A full read of a big catalog is one bulk export.
-- **Writes**: new products go in bulk with their variants, and their images are taken straight from the source's URLs. Metafield values go 25 per call. A big write is split into 5 operations running at once.
+- **Writes**: new and changed products go in bulk with their variants. Missing images are created first, once each and all at the same time, so no product waits on a download and a shared image isn't copied per product. Metafield values go 25 per call. A big write is split into 5 operations running at once.
+- **Live status**: a big apply runs in the background. `apply_status` shows what is written, failed and left per resource type, and the time remaining. Reports list 50 items per section, with counts of the rest.
 - **Nothing to set up**: it kicks in on its own. `SYNC_BULK_THRESHOLD` and `SYNC_BULK_PARALLEL` tune it, and if a store won't run bulk writes the tool says so and writes one by one.
 
 ## Use cases
@@ -297,8 +298,9 @@ You can also pass the whole config as JSON in `SHOPIFY_STORES`, or point `SHOPIF
 | `SYNC_CLI_TIMEOUT_MS` | `120000` | How long one Shopify CLI call may take before it is stopped |
 | `SYNC_MAX_ITEMS` | `50000` | Longest list read from a store; a longer one is an error, never a silent cut |
 | `SYNC_WRITE_CONCURRENCY` | `4` | How many independent writes run at once |
-| `SYNC_BULK_THRESHOLD` | `250` | Above this many products, reads and new products (and metafield values) go through one Shopify bulk operation instead of single requests |
+| `SYNC_BULK_THRESHOLD` | `250` | Above this many products, reads and product writes (and metafield values) go through one Shopify bulk operation instead of single requests |
 | `SYNC_BULK_TIMEOUT_MS` | `1800000` | How long to wait for a bulk operation to finish |
+| `SYNC_BACKGROUND_STEPS` | `50` | Plans with more steps than this are applied in the background; follow them with `apply_status` |
 | `SYNC_BULK_PARALLEL` | `5` | How many bulk write operations run at once on one store (a big write is split into parts) |
 | `SYNC_CLI_CONCURRENCY` | `4` | With the Shopify CLI sign-in, how many `shopify` processes run at once per store (up to 16) |
 | `SYNC_AUDIT_LOG` | `~/.shopify-store-sync/audit.log` | Where every write is logged |
@@ -394,18 +396,19 @@ What `diff_stores` reports, field by field (real output):
 </p>
 
 <details>
-<summary><b>All 10 tools</b></summary>
+<summary><b>All 11 tools</b></summary>
 
 | Tool | Writes? | What it does |
 |---|---|---|
-| `list_stores` | no | Configured stores and their write permissions. Secrets are never returned. |
+| `list_stores` | no | Configured stores and their write permissions, and the server's version. Secrets are never returned. |
 | `list_resource_types` | no | What can be synced and how it's keyed. |
 | `snapshot_store` | no | Read one store's configuration in portable form. |
 | `compare_item` | no | One item side by side: each field that differs, and whether what it points at exists in the target. Reads only that item where possible. |
 | `diff_stores` | no | Only-in-source, changed (field by field, and entry by entry inside JSON values), only-in-target. `format: "markdown"` returns a report to paste into a ticket. |
 | `plan_sync` | no | Dry-run plan: creates, updates, conflicts, missing references. Returns a `plan_id`. |
 | `get_plan` | no | Show a plan, or list recent ones. `format: "markdown"` returns it as a report to share before applying. |
-| `apply_plan` | **yes** | Execute a plan, with every safety check above. For a protected store your client asks you to confirm. |
+| `apply_plan` | **yes** | Execute a plan, with every safety check above. For a protected store your client asks you to confirm. A plan of more than 50 steps runs in the background and this returns at once. |
+| `apply_status` | no | How far an apply has got: written, failed and left per resource type, phase, time so far and time remaining, latest failures. |
 | `export_snapshot` | local files only | Write a store's configuration to a folder for git ([config as code](#config-as-code)). |
 | `diff_themes` | no | Compare theme templates and settings between two stores ([theme settings](#theme-settings-diff)). |
 
@@ -518,7 +521,7 @@ Two references followed from the source store to the target, as the sample sync 
 ## Tested on real stores
 
 <p align="center">
-  <img src="docs/images/tested.png" alt="140 automated tests, 79 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
+  <img src="docs/images/tested.png" alt="148 automated tests, 82 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
 </p>
 
 <details>
@@ -594,7 +597,7 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 - [x] Published on npm, runs with `npx`
 
 *Quality*
-- [x] 140 automated tests against an in-memory Shopify, plus MCP protocol tests
+- [x] 148 automated tests against an in-memory Shopify, plus MCP protocol tests
 - [x] Every GraphQL operation validated against Shopify's schema for 2026-04, 2026-10 and 2027-01
 - [x] Tested live between two stores on Linux and Windows, Shopify CLI 4.9 and 5
 - [x] Parallel reads and writes (metaobject types read and entries written in parallel; the check before writing re-reads only what the plan touches) with throttle-aware retries; clear errors for missing installs, expired sign-ins and auto-managed policies

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.0
+
+- **A big apply no longer blocks.** A plan of more than 50 steps (`SYNC_BACKGROUND_STEPS`) is applied in the background and `apply_plan` returns at once, so a client's time limit on one call no longer cuts it off. Pass `wait: true` to wait as before
+- **`apply_status`**: created, updated, skipped, failed and left per resource type, the current phase, how far Shopify has got inside a bulk operation, time so far and time remaining, and the latest failures
+- **Product updates in bulk** above 250 products, still keeping the variants, tags and media only the target has
+- **Images created once**: before a bulk product write, missing images are created all at the same time, once each. An image several products share is no longer copied per product, and no product write waits on a download
+- Bulk writes start the next part as soon as one finishes when the store runs fewer at once, a failed part no longer loses the others, and results reach the audit log part by part
+- Short reports: Markdown diffs and plans list 50 items per section over MCP, with counts of the rest, and plans count creates, updates and conflicts per resource type
+- Decimal values written two ways (`0.40` and `0.4`) in decimal metafields and prices are no longer differences
+- `list_stores` gives the server's version; `compare_item` reports use a section heading
+
 ## 0.9.2
 
 - Metafield values leave out Shopify's own copies of built-in fields: the SEO title and description (`global.title_tag`, `global.description_tag`) and a variant's HS code (`global.harmonized_system_code`). They travel with the product or collection itself; on a 4,000-product catalog they were 54,000 of 144,000 planned writes
