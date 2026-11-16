@@ -567,6 +567,42 @@ render("what-it-syncs", 1280, 625, `
   </div>
 </div>`, CARD_CSS);
 
+// ---------------------------------------------------------------- big catalogs
+const big = (title, beforeVal, beforeNote, afterVal, afterNote) => `
+  <div class="cmp card">
+    <div class="ct">${title}</div>
+    <div class="row2">
+      <div class="side"><div class="lbl">before</div><div class="v r">${beforeVal}</div><div class="muted n">${beforeNote}</div></div>
+      <div class="arrow">→</div>
+      <div class="side"><div class="lbl">now</div><div class="v g">${afterVal}</div><div class="muted n">${afterNote}</div></div>
+    </div>
+  </div>`;
+render("big-catalogs", 1280, 300, `
+<div class="wrap">
+  <div class="title"><h2>Built for big catalogs</h2><span class="muted">Shopify bulk operations, picked automatically above 250 products</span></div>
+  <div class="cmps">
+    ${big("Full product diff, 72 products against 4,530", "~10 h", "one request per product", "82 s", "measured, one bulk export")}
+    ${big("Copy every product with variants, images and metafields", "~70,000", "requests, a few at a time", "10", "bulk operations, 5 running at once")}
+  </div>
+  <div class="pills2">
+    <span class="pill"><span class="dot bg-g"></span>Images from the source's URLs</span>
+    <span class="pill"><span class="dot bg-b"></span>Metafields 25 per call</span>
+    <span class="pill"><span class="dot bg-a"></span>Only shared products read in full</span>
+    <span class="pill"><span class="dot bg-r"></span>Falls back to one by one</span>
+  </div>
+</div>`, CARD_CSS + `
+  .cmps { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .cmp { padding: 16px 20px; }
+  .ct { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
+  .row2 { display: grid; grid-template-columns: 1fr 40px 1fr; align-items: start; }
+  .arrow { padding-top: 28px; }
+  .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #8b98a8; margin-bottom: 4px; }
+  .v { font-size: 40px; font-weight: 800; letter-spacing: -1px; }
+  .n { font-size: 13px; margin-top: 4px; line-height: 1.4; }
+  .arrow { font-size: 24px; color: #8b98a8; text-align: center; }
+  .pills2 { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+`);
+
 // ---------------------------------------------------------------- use cases
 render("use-cases", 1280, 212, `
 <div class="wrap">

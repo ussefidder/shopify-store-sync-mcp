@@ -17,6 +17,7 @@
 <p align="center">
   <a href="#get-started">Get started</a> ·
   <a href="#what-it-syncs">What it syncs</a> ·
+  <a href="#built-for-big-catalogs">Big catalogs</a> ·
   <a href="#why-this-tool">Why this tool</a> ·
   <a href="#safe-on-production">Safety</a> ·
   <a href="#tested-on-real-stores">Tested</a> ·
@@ -69,11 +70,23 @@ The store setup that usually gets rebuilt by hand, plus the images it uses. Refe
 
 **What product sync leaves alone.** Never copied: sales-channel publishing, the status of existing products, unit cost, videos and 3D models (the target keeps its own), and translations of option names and values. Stock is copied only when asked, into locations with the same name; a location the target doesn't have is skipped. Nothing is ever removed from a target product: a tag, variant or image deleted in the source stays in the target until you remove it there.
 
-**Big catalogs.** Above 250 products (`SYNC_BULK_THRESHOLD`), reads and new products go through Shopify bulk operations: the catalog is exported or written in one operation instead of one request per product, and images come straight from the source's URLs. Metafield values are written 25 per call in one bulk operation too. If a store won't run bulk writes, the tool says so and writes one by one.
+**Big catalogs.** See [Built for big catalogs](#built-for-big-catalogs).
 
 **Nothing goes live by surprise.** New products are drafts and new collections aren't on any sales channel. Pages and metaobject entries copy the published state of the source unless you pass `as_drafts`; the plan tells you when new ones would be visible right away.
 
 </details>
+
+## Built for big catalogs
+
+Thousands of products are fine. Above 250 products the tool switches to Shopify bulk operations by itself: Shopify exports or writes the whole catalog on its side instead of answering one request per product. Comparing a 72-product store with a 4,530-product one went from about 10 hours to 82 seconds.
+
+<p align="center">
+  <img src="docs/images/big-catalogs.png" alt="Full product diff, 72 against 4,530 products: about 10 hours before, 82 seconds now. Copying every product with variants, images and metafields: about 70,000 requests before, 10 bulk operations now, 5 running at once" width="100%">
+</p>
+
+- **Reads**: both stores are listed by handle first, and only the products both have are read in full. A full read of a big catalog is one bulk export.
+- **Writes**: new products go in bulk with their variants, and their images are taken straight from the source's URLs. Metafield values go 25 per call. A big write is split into 5 operations running at once.
+- **Nothing to set up**: it kicks in on its own. `SYNC_BULK_THRESHOLD` and `SYNC_BULK_PARALLEL` tune it, and if a store won't run bulk writes the tool says so and writes one by one.
 
 ## Use cases
 
