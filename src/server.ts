@@ -11,6 +11,7 @@ import { PlanStore, type Plan } from "./plan.js";
 import { ADAPTERS, DEFAULT_KINDS, RESOURCE_KINDS, type ResourceKind } from "./resources/index.js";
 import { DEFAULT_OWNER_TYPES } from "./resources/metafieldDefinitions.js";
 import type { AdminClient } from "./shopify/client.js";
+import { diffMarkdown, planMarkdown, themesMarkdown } from "./report.js";
 import { DEFAULT_THEME_FILES, type ThemeDiff } from "./themes.js";
 
 /** Read from package.json, so there is one place to bump. */
@@ -74,6 +75,10 @@ const scopeArgs = {
     .optional()
     .describe('Only keys matching one of these globs, e.g. ["PRODUCT.custom.*", "faq/*", "fr:*"].'),
   exclude: z.array(z.string()).optional().describe("Drop keys matching any of these globs."),
+  include_reserved: z
+    .boolean()
+    .optional()
+    .describe('metafield_definitions: also compare Shopify-reserved ones (namespace "shopify", the category metafields that drive storefront filters). Compared only: a plan reports them as conflicts and never writes them.'),
 };
 
 type ScopeArgs = {
@@ -86,6 +91,7 @@ type ScopeArgs = {
   as_drafts?: boolean;
   include?: string[];
   exclude?: string[];
+  include_reserved?: boolean;
 };
 
 const toScope = (a: ScopeArgs): Scope => ({
@@ -96,11 +102,13 @@ const toScope = (a: ScopeArgs): Scope => ({
   locales: a.locales,
   prices: a.prices,
   drafts: a.as_drafts,
+  includeReserved: a.include_reserved,
   include: a.include,
   exclude: a.exclude,
 });
 
 const json = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] });
+const text = (value: string) => ({ content: [{ type: "text" as const, text: value }] });
 const fail = (message: string) => ({ content: [{ type: "text" as const, text: message }], isError: true });
 
 function describeStore(s: StoreConfig) {
@@ -115,7 +123,8 @@ function describeStore(s: StoreConfig) {
   };
 }
 
-export function summarizeDiff(d: ResourceDiff, showValues: boolean, limit: number) {
+/** `maxChars`: values longer than this are shortened (Infinity: never, as in the command line's --json). */
+export function summarizeDiff(d: ResourceDiff, showValues: boolean, limit: number, maxChars = 160) {
   return {
     kind: d.kind,
     counts: {
@@ -127,7 +136,7 @@ export function summarizeDiff(d: ResourceDiff, showValues: boolean, limit: numbe
     onlyInSource: d.onlyInSource.slice(0, limit).map((i) => i.key),
     changed: d.changed.slice(0, limit).map((c) => ({
       key: c.key,
-      changes: c.changes.map((ch) => (showValues ? { path: ch.path, source: preview(ch.source), target: preview(ch.target) } : ch.path)),
+      changes: c.changes.map((ch) => (showValues ? { path: ch.path, source: preview(ch.source, maxChars), target: preview(ch.target, maxChars) } : ch.path)),
     })),
     onlyInTarget: d.onlyInTarget.slice(0, limit).map((i) => i.key),
     truncated: Math.max(d.onlyInSource.length, d.changed.length, d.onlyInTarget.length) > limit || undefined,
@@ -153,7 +162,7 @@ export function summarizePlan(plan: Plan, full = false) {
       action: o.action,
       reason: o.reason,
       missingRefs: o.missingRefs,
-      changes: o.changes?.map((c) => ({ path: c.path, from: preview(c.target), to: preview(c.source) })),
+      changes: o.changes?.map((c) => ({ path: c.path, from: preview(c.target, full ? Infinity : 160), to: preview(c.source, full ? Infinity : 160) })),
     })),
     opsTruncated: plan.ops.length > limit ? plan.ops.length - limit : undefined,
     onlyInTarget: plan.onlyInTarget.map((x) => ({ kind: x.kind, count: x.keys.length, keys: x.keys.slice(0, 50) })),
@@ -162,7 +171,7 @@ export function summarizePlan(plan: Plan, full = false) {
   };
 }
 
-export function summarizeThemes(d: ThemeDiff, limit = 100) {
+export function summarizeThemes(d: ThemeDiff, limit = 100, maxChars = 160) {
   return {
     source: d.source,
     target: d.target,
@@ -171,10 +180,11 @@ export function summarizeThemes(d: ThemeDiff, limit = 100) {
     onlyInTarget: d.onlyInTarget,
     changed: d.changed.map((f) => ({
       file: f.file,
-      changes: f.changes.slice(0, limit).map((c) => ({ path: c.path, source: preview(c.source), target: preview(c.target) })),
+      changes: f.changes.slice(0, limit).map((c) => ({ path: c.path, source: preview(c.source, maxChars), target: preview(c.target, maxChars) })),
       more: f.changes.length > limit ? f.changes.length - limit : undefined,
     })),
     unreadable: d.unreadable.length ? d.unreadable : undefined,
+    ignoredSettings: d.ignored,
     note: "Read-only comparison. This server never writes to themes.",
   };
 }
@@ -352,11 +362,15 @@ export function createServer(deps: ServerDeps): McpServer {
         ...scopeArgs,
         show_values: z.boolean().optional().describe("Include before/after values for each changed field (default true)."),
         limit: z.number().int().min(1).max(5000).optional().describe("Max keys listed per section (default 100)."),
+        format: z.enum(["json", "markdown"]).optional().describe('"markdown" returns a report to paste into a ticket or an email.'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    guard(async (args: ScopeArgs & { source: string; target: string; show_values?: boolean; limit?: number }, extra) => {
-      const { diffs, skipped } = await engine.compare(spec(args.source), spec(args.target), toScope(args), reading(extra));
+    guard(async (args: ScopeArgs & { source: string; target: string; show_values?: boolean; limit?: number; format?: "json" | "markdown" }, extra) => {
+      const { diffs, skipped, source, target } = await engine.compare(spec(args.source), spec(args.target), toScope(args), reading(extra));
+      if (args.format === "markdown") {
+        return text(diffMarkdown({ alias: args.source, domain: source.domain }, { alias: args.target, domain: target.domain }, diffs, skipped));
+      }
       return json({
         source: args.source,
         target: args.target,
@@ -394,10 +408,11 @@ export function createServer(deps: ServerDeps): McpServer {
       inputSchema: {
         plan_id: z.string().optional(),
         full: z.boolean().optional().describe("Return every op, untruncated."),
+        format: z.enum(["json", "markdown"]).optional().describe('"markdown" returns the plan as a report, to share before applying it.'),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    guard(async (args: { plan_id?: string; full?: boolean }) => {
+    guard(async (args: { plan_id?: string; full?: boolean; format?: "json" | "markdown" }) => {
       if (!args.plan_id) {
         const list = engine.plans
           .list()
@@ -408,6 +423,7 @@ export function createServer(deps: ServerDeps): McpServer {
       }
       const plan = engine.plans.get(args.plan_id);
       if (!plan) return fail(`no plan with id ${args.plan_id}`);
+      if (args.format === "markdown") return text(planMarkdown(plan));
       return json(summarizePlan(plan, args.full));
     }),
   );
@@ -465,20 +481,27 @@ export function createServer(deps: ServerDeps): McpServer {
         target_theme: z.string().optional().describe('"main" (default) or a theme id'),
         files: z.array(z.string()).optional().describe('Theme file patterns, e.g. ["templates/product*.json"]'),
         exclude: z.array(z.string()).optional(),
+        ignore_settings: z
+          .array(z.string())
+          .optional()
+          .describe(
+            'Settings to leave out, as globs on their path, optionally limited to files: ["current.sections.header.*", "config/settings_data.json:current.color_*"]. Use it to quiet settings that differ on purpose between stores.',
+          ),
+        format: z.enum(["json", "markdown"]).optional().describe('"markdown" returns a report to paste into a ticket or an email.'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    guard(async (args: { source: string; target: string; source_theme?: string; target_theme?: string; files?: string[]; exclude?: string[] }) =>
-      json(
-        summarizeThemes(
-          await engine.themes(args.source, args.target, {
-            sourceTheme: args.source_theme,
-            targetTheme: args.target_theme,
-            files: args.files,
-            exclude: args.exclude,
-          }),
-        ),
-      ),
+    guard(
+      async (args: { source: string; target: string; source_theme?: string; target_theme?: string; files?: string[]; exclude?: string[]; ignore_settings?: string[]; format?: "json" | "markdown" }) => {
+        const d = await engine.themes(args.source, args.target, {
+          sourceTheme: args.source_theme,
+          targetTheme: args.target_theme,
+          files: args.files,
+          exclude: args.exclude,
+          ignoreSettings: args.ignore_settings,
+        });
+        return args.format === "markdown" ? text(themesMarkdown(args.source, args.target, d)) : json(summarizeThemes(d));
+      },
     ),
   );
 

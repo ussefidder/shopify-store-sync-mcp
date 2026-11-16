@@ -49,7 +49,14 @@ async function connect(opts: { answer?: (message: string) => Answer; env?: NodeJ
       isError?: boolean;
     };
     const text = res.content[0]!.text;
-    return { isError: Boolean(res.isError), text, json: res.isError ? undefined : JSON.parse(text) };
+    const parsed = (() => {
+      try {
+        return JSON.parse(text);
+      } catch {
+        return undefined;
+      }
+    })();
+    return { isError: Boolean(res.isError), text, json: res.isError ? undefined : parsed };
   };
   return { client, call, dev, prod, asked, progress };
 }
@@ -66,6 +73,16 @@ describe("MCP server", () => {
     // export_snapshot writes local files only; apply_plan is the one tool that writes to Shopify.
     for (const t of tools) expect(t.annotations?.readOnlyHint).toBe(!["apply_plan", "export_snapshot"].includes(t.name));
     expect(tools.find((t) => t.name === "export_snapshot")?.annotations?.destructiveHint).toBe(false);
+  });
+
+  it("returns Markdown reports for a diff and a plan when asked", async () => {
+    const { call } = await connect();
+    const diff = await call("diff_stores", { ...SCOPE, format: "markdown" });
+    expect(diff.text).toContain("# Store diff: dev → prod");
+    expect(diff.text).toContain("| redirects | 1 | 0 | 0 | 0 |");
+    const plan = await call("plan_sync", SCOPE);
+    const md = await call("get_plan", { plan_id: plan.json.plan_id, format: "markdown" });
+    expect(md.text).toContain("**2** to create");
   });
 
   it("never returns secrets from list_stores", async () => {

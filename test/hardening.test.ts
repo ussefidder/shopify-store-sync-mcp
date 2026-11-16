@@ -118,7 +118,7 @@ describe("products keep what only the target has", () => {
     const engine = engineFor(dev, eu);
     const plan = await engine.plan("dev", "eu", { resources: ["products"] });
     // The target's own tag and media aren't differences; the tags it lacks are.
-    expect(plan.ops[0]!.changes!.map((c) => c.path)).toEqual(["tags", "title"]);
+    expect(plan.ops[0]!.changes!.map((c) => c.path)).toEqual(["tags[+]", "tags[+]", "title"]);
     await engine.apply(plan.id);
 
     const p = eu.state.products[0]!;
@@ -607,5 +607,122 @@ describe("shop and variant metafields", () => {
     const plan = await engine.plan("dev", "stg", { resources: ["metafields"], include: ["SHOP/*"] });
     await engine.apply(plan.id, {});
     expect(stg.state.shopMetafields).toEqual([mf("featured_variant", "gid://shopify/ProductVariant/71", "variant_reference")]);
+  });
+});
+
+describe("values that are JSON, and long values", () => {
+  it("JSON held in a string is compared entry by entry", async () => {
+    const { diffValues } = await import("../src/diff.js");
+    const src = JSON.stringify({ countries: ["FR", "DE", "IT"], markets: [{ code: "eu", currency: "EUR" }, { code: "uk", currency: "GBP" }] });
+    const tgt = JSON.stringify({ countries: ["FR", "DE"], markets: [{ code: "uk", currency: "GBP" }, { code: "eu", currency: "USD" }] });
+    expect(diffValues({ fields: { settings: src } }, { fields: { settings: tgt } })).toEqual([
+      { path: "fields.settings → countries[+]", source: "IT", target: undefined },
+      { path: "fields.settings → markets[eu].currency", source: "EUR", target: "USD" },
+    ]);
+  });
+
+  it("text that only looks like JSON is still compared as text", async () => {
+    const { diffValues } = await import("../src/diff.js");
+    expect(diffValues({ body: "[draft] new" }, { body: "[draft] old" })).toEqual([{ path: "body", source: "[draft] new", target: "[draft] old" }]);
+  });
+
+  it("--json never shortens values", async () => {
+    const { summarizeDiff } = await import("../src/server.js");
+    const long = "x".repeat(5000);
+    const d = { kind: "pages" as const, onlyInSource: [], onlyInTarget: [], identical: 0, changed: [{ key: "about", source: {} as any, target: {} as any, changes: [{ path: "body", source: long, target: "y" }] }] };
+    expect((summarizeDiff(d, true, Infinity, Infinity).changed[0]!.changes[0] as any).source).toBe(long);
+    expect((summarizeDiff(d, true, 100).changed[0]!.changes[0] as any).source).toMatch(/… \(5000 chars\)$/);
+  });
+});
+
+describe("Shopify-reserved metafield definitions", () => {
+  const def = (id: number, namespace: string, key: string, name = key) => ({
+    id: `gid://shopify/MetafieldDefinition/${id}`,
+    name,
+    namespace,
+    key,
+    description: null,
+    ownerType: "PRODUCT",
+    pinnedPosition: null,
+    type: { name: "list.metaobject_reference" },
+    access: { storefront: "PUBLIC_READ", customerAccount: "NONE" },
+    capabilities: { adminFilterable: { enabled: true }, smartCollectionCondition: { enabled: false }, uniqueValues: { enabled: false } },
+    validations: [],
+  });
+
+  it("are skipped by default, compared with includeReserved, and never written", async () => {
+    const dev = new FakeShop(FakeShop.config("dev"), {
+      metafieldDefinitions: [def(1, "shopify", "fabric", "Fabric"), def(2, "shopify", "cup-size", "Cup size"), def(3, "custom", "care")],
+    });
+    const stg = new FakeShop(FakeShop.config("stg"), { metafieldDefinitions: [def(8, "shopify", "fabric", "Fabric (old)")] });
+    const engine = engineFor(dev, stg);
+    const scope = { resources: ["metafield_definitions" as const], ownerTypes: ["PRODUCT"] };
+
+    const plain = await engine.compare("dev", "stg", scope);
+    expect(plain.diffs[0]!.onlyInSource.map((i) => i.key)).toEqual(["PRODUCT.custom.care"]);
+    expect(plain.skipped.map((s) => s.key)).toEqual(expect.arrayContaining(["PRODUCT.shopify.fabric", "PRODUCT.shopify.cup-size"]));
+
+    const all = await engine.compare("dev", "stg", { ...scope, includeReserved: true });
+    expect(all.diffs[0]!.onlyInSource.map((i) => i.key)).toEqual(["PRODUCT.custom.care", "PRODUCT.shopify.cup-size"]);
+    expect(all.diffs[0]!.changed.map((c) => `${c.key} ${c.changes.map((x) => x.path).join()}`)).toEqual(["PRODUCT.shopify.fabric name"]);
+
+    const plan = await engine.plan("dev", "stg", { ...scope, includeReserved: true });
+    expect(plan.ops.map((o) => `${o.action} ${o.key}`)).toEqual([
+      "create PRODUCT.custom.care",
+      "conflict PRODUCT.shopify.cup-size",
+      "conflict PRODUCT.shopify.fabric",
+    ]);
+    expect(plan.ops[1]!.reason).toMatch(/compared only, never written/);
+    await engine.apply(plan.id, {});
+    expect(stg.mutations()).toEqual(["metafieldDefinitionCreate"]);
+  });
+});
+
+describe("discounts (compared only)", () => {
+  const common = { status: "ACTIVE", startsAt: "2026-11-01T00:00:00Z", endsAt: null, discountClasses: ["PRODUCT"], combinesWith: { orderDiscounts: false, productDiscounts: false, shippingDiscounts: true } };
+  const auto = (id: number, title: string, summary: string) => ({ id: `gid://shopify/DiscountAutomaticNode/${id}`, discount: { __typename: "DiscountAutomaticBasic", title, summary, ...common } });
+  const code = (id: number, title: string, codes: string[], extra: Record<string, unknown> = {}) => ({
+    id: `gid://shopify/DiscountCodeNode/${id}`,
+    discount: { __typename: "DiscountCodeBasic", title, summary: "10% off entire order", ...common, codes: { nodes: codes.map((c) => ({ code: c })) }, codesCount: { count: codes.length }, usageLimit: null, appliesOncePerCustomer: false, ...extra },
+  });
+
+  it("are compared by method and title, and plans never write them", async () => {
+    const dev = new FakeShop(FakeShop.config("dev"), {
+      discounts: [auto(1, "Gift with purchase", "Free gift on orders over €80"), code(2, "Welcome", ["WELCOME10"]), auto(3, "Winter sale", "20% off Winter collection")],
+    });
+    const stg = new FakeShop(FakeShop.config("stg"), {
+      discounts: [auto(7, "Gift with purchase", "Free gift on orders over €100"), code(8, "Welcome", ["WELCOME10"]), code(9, "Staff", ["STAFF"])],
+    });
+    const engine = engineFor(dev, stg);
+    const { diffs } = await engine.compare("dev", "stg", { resources: ["discounts"] });
+    expect(diffs[0]!.onlyInSource.map((i) => i.key)).toEqual(["automatic/Winter sale"]);
+    expect(diffs[0]!.changed.map((c) => `${c.key}: ${c.changes.map((x) => x.path).join()}`)).toEqual(["automatic/Gift with purchase: summary"]);
+    expect(diffs[0]!.onlyInTarget.map((i) => i.key)).toEqual(["code/Staff"]);
+    expect(diffs[0]!.identical).toBe(1);
+
+    const plan = await engine.plan("dev", "stg", { resources: ["discounts"] });
+    expect(plan.ops.map((o) => o.action)).toEqual(["conflict", "conflict"]);
+    expect(plan.ops[0]!.reason).toMatch(/compared only, never written/);
+    await engine.apply(plan.id, {});
+    expect(stg.mutations()).toEqual([]);
+  });
+
+  it("bulk code sets are compared by count, duplicate titles are reported, and a missing scope doesn't stop the diff", async () => {
+    const bulk = Array.from({ length: 60 }, (_, i) => `VIP${i}`);
+    const dev = new FakeShop(FakeShop.config("dev"), { discounts: [code(1, "VIP", bulk.slice(0, 50), { codesCount: { count: 60 } }), auto(2, "Sale", "a"), auto(3, "Sale", "b")] });
+    const items = (await engineFor(dev, new FakeShop(FakeShop.config("stg"))).snapshot("dev", { resources: ["discounts"] })).snapshot.resources.discounts!;
+    expect(items.items.map((i) => [i.key, i.data.codes, i.data.codesCount])).toEqual([["code/VIP", undefined, 60]]);
+    expect(items.skipped).toEqual([expect.objectContaining({ key: "automatic/Sale", reason: expect.stringMatching(/same title|this title/) })]);
+
+    class NoDiscounts extends FakeShop {
+      override async request<T = any>(query: string, v: Record<string, any> = {}): Promise<T> {
+        if (/discountNodes\(/.test(query)) throw new ShopifyError(`${this.store.domain}: Access denied for discountNodes field.`, [{ message: "Access denied for discountNodes field.", extensions: { code: "ACCESS_DENIED" } }]);
+        return super.request<T>(query, v);
+      }
+    }
+    const engine = engineFor(new FakeShop(FakeShop.config("dev"), { discounts: [auto(1, "Sale", "a")] }), new NoDiscounts(FakeShop.config("stg")));
+    const r = await engine.compare("dev", "stg", { resources: ["discounts"] });
+    expect(r.diffs[0]!.onlyInSource).toEqual([]);
+    expect(r.skipped).toEqual([expect.objectContaining({ key: "* (in stg)", reason: expect.stringContaining("read_discounts") })]);
   });
 });

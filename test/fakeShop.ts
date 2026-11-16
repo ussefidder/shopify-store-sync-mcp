@@ -77,11 +77,13 @@ export interface FakeState {
   redirects: any[];
   shopId: string;
   shopMetafields: FakeMetafield[];
+  discounts: { id: string; discount: Record<string, unknown> }[];
 }
 
 export function emptyState(): FakeState {
   return {
     shopId: gid("Shop"),
+    discounts: [],
     shopMetafields: [],
     products: [],
     collections: [],
@@ -258,6 +260,8 @@ export class FakeShop implements AdminClient {
         return conn(s.customerAccountPages);
       case "shop":
         return { id: s.shopId, shopPolicies: s.shopPolicies, metafields: conn(filterNs(s.shopMetafields, v.namespace)) };
+      case "discountNodes":
+        return page(s.discounts, s.pageSize, v.after);
       case "productVariants": {
         const productId = /product_id:(\d+)/.exec(v.query ?? "")?.[1];
         const nodes = s.products

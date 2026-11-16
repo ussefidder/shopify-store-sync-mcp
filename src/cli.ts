@@ -4,8 +4,9 @@ import { preview, type ResourceDiff } from "./diff.js";
 import { Engine, type Scope } from "./engine.js";
 import type { Plan } from "./plan.js";
 import { RESOURCE_KINDS, type ResourceKind } from "./resources/index.js";
+import { diffMarkdown, planMarkdown, themesMarkdown } from "./report.js";
 import { summarizeDiff, summarizePlan, summarizeThemes } from "./server.js";
-import { cliBin, scopesFor, ShopifyCliClient, spawnCli } from "./shopify/cliClient.js";
+import { checkCliVersion, cliBin, scopesFor, ShopifyCliClient, spawnCli } from "./shopify/cliClient.js";
 
 export const COMMANDS = ["connect", "stores", "diff", "plan", "plans", "apply", "export", "themes", "help"] as const;
 
@@ -30,14 +31,20 @@ Options
   --exclude  glob,glob   drop keys matching
   --namespaces a,b       metafield value namespaces      --locales fr,de   translation locales
   --owner-types a,b      metafield owners, e.g. SHOP,PRODUCTVARIANT (definitions and values)
+  --include-reserved     also compare Shopify-reserved (category) metafield definitions; never written
   --with-prices          products: also copy variant prices
   --as-drafts            new pages are created hidden, new metaobject entries as drafts
   --writes               connect: also request write scopes (default: what the store config allows)
+  --scopes a,b           connect: extra read scopes, e.g. read_customers,read_orders (to compare
+                         those metafield definitions; off by default because they expose customer data)
   --confirm <domain>     the target's myshopify domain; required to apply to a protected store
   --only 1,2,3           apply only these plan steps
   --files a,b            theme file patterns              --source-theme / --target-theme <id>
+  --ignore-settings a,b  theme settings to leave out, e.g. "current.sections.header.*" or
+                         "config/settings_data.json:current.color_*"
   --exit-code            diff/themes: exit 2 when differences are found
-  --json                 machine-readable output`;
+  --json                 machine-readable output, values never shortened (same as --format json)
+  --format md            diff, plan and themes as a Markdown report, e.g. > report.md`;
 
 type Flags = Record<string, string | true>;
 
@@ -55,7 +62,7 @@ export function parseArgs(argv: string[]): { positional: string[]; flags: Flags 
       const [name, inline] = a.slice(2).split("=", 2) as [string, string | undefined];
       const next = argv[i + 1];
       if (inline !== undefined) flags[name] = inline;
-      else if (next !== undefined && !next.startsWith("--") && !["json", "exit-code", "values", "writes", "with-prices", "as-drafts"].includes(name)) flags[name] = argv[++i]!;
+      else if (next !== undefined && !next.startsWith("--") && !["json", "exit-code", "values", "writes", "with-prices", "as-drafts", "include-reserved"].includes(name)) flags[name] = argv[++i]!;
       else flags[name] = true;
     } else positional.push(a);
   }
@@ -79,6 +86,7 @@ export function scopeFromFlags(flags: Flags): Scope {
     drafts: flags["as-drafts"] === true,
     metaobjectTypes: list(flags["metaobject-types"]),
     ownerTypes: list(flags["owner-types"]),
+    includeReserved: flags["include-reserved"] === true,
   };
 }
 
@@ -117,7 +125,13 @@ function printPlan(plan: Plan) {
 export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.env, injected?: Engine): Promise<number> {
   const { positional, flags } = parseArgs(argv);
   const [cmd, a, b] = positional;
-  const asJson = flags.json === true;
+  const format = flags.format === undefined ? (flags.json === true ? "json" : "text") : flags.format;
+  if (!["text", "json", "md"].includes(String(format))) {
+    console.error(`unknown --format "${format}" (use: text, json, md)`);
+    return 1;
+  }
+  const asJson = format === "json";
+  const asMd = format === "md";
   const out = (v: unknown) => console.log(JSON.stringify(v, null, 2));
 
   if (!cmd || cmd === "help") {
@@ -136,8 +150,9 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.en
         const known = engine.registry.list().find((s) => s.alias === a || s.domain === a);
         const domain = known?.domain ?? (a!.includes(".") ? a! : `${a}.myshopify.com`);
         if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i.test(domain)) throw new Error(`"${a}" is not a configured store alias or a *.myshopify.com domain`);
-        const scopes = scopesFor({ allowWrites: flags.writes === true || Boolean(known?.allowWrites) });
+        const scopes = scopesFor({ allowWrites: flags.writes === true || Boolean(known?.allowWrites) }, list(flags.scopes));
         const bin = cliBin(env);
+        await checkCliVersion(bin);
         console.log(`Opening Shopify in your browser to approve access to ${domain} (${scopes.some((x) => x.startsWith("write_")) ? "read and write" : "read-only"})...`);
         const code = await interactive(bin, ["store", "auth", "--store", domain, "--scopes", scopes.join(",")]);
         if (code !== 0) throw new Error(`shopify store auth exited with code ${code}`);
@@ -160,10 +175,11 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.en
       }
       case "diff": {
         need(a, b);
-        const { diffs, skipped } = await engine.compare(a!, b!, scopeFromFlags(flags));
-        if (asJson) out(diffs.map((d) => summarizeDiff(d, true, 1000)));
+        const { diffs, skipped, source, target } = await engine.compare(a!, b!, scopeFromFlags(flags));
+        if (asJson) out(diffs.map((d) => summarizeDiff(d, true, Infinity, Infinity)));
+        else if (asMd) process.stdout.write(diffMarkdown({ alias: a!, domain: source.domain }, { alias: b!, domain: target.domain }, diffs, skipped));
         else printDiff(diffs, flags.values === true);
-        notCompared(skipped);
+        if (!asMd) notCompared(skipped);
         const changed = diffs.some((d) => d.onlyInSource.length || d.changed.length);
         return flags["exit-code"] && changed ? 2 : 0;
       }
@@ -171,8 +187,9 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.en
         need(a, b);
         const plan = await engine.plan(a!, b!, scopeFromFlags(flags));
         if (asJson) out(summarizePlan(plan, true));
+        else if (asMd) process.stdout.write(planMarkdown(plan));
         else printPlan(plan);
-        notCompared(plan.skipped);
+        if (!asMd) notCompared(plan.skipped);
         return 0;
       }
       case "plans": {
@@ -217,14 +234,16 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.en
           sourceTheme: typeof flags["source-theme"] === "string" ? flags["source-theme"] : undefined,
           targetTheme: typeof flags["target-theme"] === "string" ? flags["target-theme"] : undefined,
           files: list(flags.files),
+          ignoreSettings: list(flags["ignore-settings"]),
         });
-        if (asJson) out(summarizeThemes(d));
+        if (asJson) out(summarizeThemes(d, Infinity, Infinity));
+        else if (asMd) process.stdout.write(themesMarkdown(a!, b!, d));
         else {
           console.log(`${bold("Themes")} ${d.source.name} (${a}) vs ${d.target.name} (${b})`);
           for (const f of d.onlyInSource) console.log(`  ${green("+")} ${f}`);
           for (const f of d.changed) console.log(`  ${yellow("~")} ${f.file} ${dim(`${f.changes.length} setting(s): ${f.changes.slice(0, 5).map((x) => x.path).join(", ")}${f.changes.length > 5 ? "…" : ""}`)}`);
           for (const f of d.onlyInTarget) console.log(`  ${blue("·")} ${f} ${dim("(only in target)")}`);
-          console.log(dim(`\n${d.identical} identical`));
+          console.log(dim(`\n${d.identical} identical${d.ignored ? `, ${d.ignored} setting difference(s) ignored` : ""}`));
         }
         return flags["exit-code"] && (d.changed.length || d.onlyInSource.length) ? 2 : 0;
       }

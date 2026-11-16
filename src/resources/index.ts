@@ -1,4 +1,5 @@
 import { collections } from "./collections.js";
+import { discounts } from "./discounts.js";
 import { menus } from "./menus.js";
 import { metafields } from "./metafields.js";
 import { metafieldDefinitions } from "./metafieldDefinitions.js";
@@ -24,6 +25,7 @@ export const ADAPTERS: Record<ResourceKind, ResourceAdapter> = {
   redirects,
   metafields,
   translations,
+  discounts,
 };
 
 export function orderKinds(kinds: readonly ResourceKind[]): ResourceKind[] {

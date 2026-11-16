@@ -69,10 +69,11 @@ export async function buildPlan(input: BuildPlanInput): Promise<Plan> {
   for (const d of diffs) {
     const adapter = ADAPTERS[d.kind];
     for (const item of d.onlyInSource) {
-      ops.push({ seq: 0, kind: d.kind, key: item.key, action: "create", data: item.data });
+      const readOnly = adapter.readOnly?.(item);
+      ops.push({ seq: 0, kind: d.kind, key: item.key, action: readOnly ? "conflict" : "create", data: item.data, reason: readOnly });
     }
     for (const c of d.changed) {
-      const reason = adapter.conflict?.(c.source, c.target);
+      const reason = adapter.readOnly?.(c.source) ?? adapter.conflict?.(c.source, c.target);
       const kept = reason ? [] : (adapter.targetOnly?.(c.source.data, c.target.data) ?? []);
       if (kept.length) {
         const shown = kept.slice(0, 5).map((k) => `"${k}"`).join(", ");

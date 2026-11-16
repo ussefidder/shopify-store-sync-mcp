@@ -125,11 +125,18 @@ export const metafieldDefinitions: ResourceAdapter = {
     for (const nodes of lists) {
       for (const n of nodes) {
         const reason = reservedPrefix(n.namespace);
-        if (reason) skipped.push({ key: `${n.ownerType}.${n.namespace}.${n.key}`, reason });
+        if (reason === "Shopify-reserved" && opts.includeReserved) items.push(normalizeMetafieldDefinition(n));
+        else if (reason) skipped.push({ key: `${n.ownerType}.${n.namespace}.${n.key}`, reason });
         else items.push(normalizeMetafieldDefinition(n));
       }
     }
     return { items, skipped };
+  },
+
+  readOnly(item) {
+    return reservedPrefix(String(item.data.namespace ?? ""))
+      ? "Shopify-reserved definition (category metafield): compared only, never written. Enable it in the target's admin, under Settings > Custom data, or by setting the product category"
+      : undefined;
   },
 
   conflict(source, target) {

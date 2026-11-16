@@ -29,6 +29,7 @@ export const READ_SCOPES = [
   "read_files",
   "read_themes",
   "read_content",
+  "read_discounts",
 ];
 export const WRITE_SCOPES = [
   "write_products",
@@ -41,9 +42,44 @@ export const WRITE_SCOPES = [
   "write_files",
 ];
 
-/** Scopes to request for a store: read-only unless the store config allows writes. */
-export function scopesFor(store: Pick<StoreConfig, "allowWrites">): string[] {
-  return store.allowWrites ? [...READ_SCOPES, ...WRITE_SCOPES] : READ_SCOPES;
+/**
+ * Scopes to request for a store: read-only unless the store config allows writes. `extra` adds
+ * read scopes the defaults leave out on purpose, such as read_customers or read_orders, for
+ * comparing the metafield definitions of those owner types. Only read_* scopes can be added.
+ */
+export function scopesFor(store: Pick<StoreConfig, "allowWrites">, extra: string[] = []): string[] {
+  for (const s of extra) {
+    if (!/^read_[a-z_]+$/.test(s)) throw new Error(`"${s}": only read scopes (read_...) can be added; write access follows the store's allowWrites`);
+  }
+  const base = store.allowWrites ? [...READ_SCOPES, ...WRITE_SCOPES] : READ_SCOPES;
+  return [...new Set([...base, ...extra])];
+}
+
+/** Oldest Shopify CLI this tool works with (`store execute --no-input` and friends). */
+export const MIN_CLI_VERSION = "4.9.0";
+
+export function parseCliVersion(text: string): string | undefined {
+  return /(\d+)\.(\d+)\.(\d+)/.exec(text)?.[0];
+}
+
+/** Negative when a is older than b. */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) - (pb[i] ?? 0);
+  return 0;
+}
+
+/** The installed Shopify CLI version; throws a clear message when it is too old. */
+export async function checkCliVersion(bin = cliBin(), run: Runner = defaultRunner): Promise<string | undefined> {
+  const res = await run(bin, ["version"]);
+  const version = parseCliVersion(`${res.stdout}\n${res.stderr}`);
+  if (version && compareVersions(version, MIN_CLI_VERSION) < 0) {
+    throw new ShopifyError(
+      `Shopify CLI ${version} is too old: this tool needs ${MIN_CLI_VERSION} or newer. Update it with: npm install -g @shopify/cli@latest`,
+    );
+  }
+  return version;
 }
 
 export function cliBin(env: NodeJS.ProcessEnv = process.env): string {
@@ -238,6 +274,10 @@ export class ShopifyCliClient implements AdminClient {
             );
           }
           throw new ShopifyError(`${this.store.domain}: ${msg}`, out.error);
+        }
+        if (res.code !== 0 && /nonexistent flag|unknown flag|command .* not found/i.test(`${res.stdout}${res.stderr}`)) {
+          // An older CLI lacks flags this tool passes; say which version is needed instead of the raw error.
+          await checkCliVersion(this.bin, this.run);
         }
         if (res.code !== 0 || !out || out.data === undefined || out.data === null) {
           const detail = (res.stderr || res.stdout).trim().slice(0, 500);

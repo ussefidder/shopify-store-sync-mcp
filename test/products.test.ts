@@ -119,7 +119,7 @@ describe("products", () => {
     const plan = await engine.plan("dev", "eu", { resources: ["products"] });
     expect(plan.ops.map((o) => `${o.action} ${o.key}`)).toEqual(["update linen-shirt"]);
     // The target's own image and its Black variant aren't differences: they're kept.
-    expect(plan.ops[0]!.changes!.map((c) => c.path)).toEqual(["options[0].values[2]", "title", "variants"]);
+    expect(plan.ops[0]!.changes!.map((c) => c.path)).toEqual(["options[Color].values[2]", "title", "variants"]);
     const { results } = await engine.apply(plan.id);
     expect(results.map((r) => r.outcome)).toEqual(["updated"]);
 

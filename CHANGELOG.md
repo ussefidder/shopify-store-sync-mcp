@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0
+
+- **Full values in `--json`**: nothing is shortened any more, on `diff`, `plan` and `themes`
+- **JSON values compared entry by entry**: a json metafield or a JSON setting that differs now says which entries differ (`fields.settings → markets[eu].currency`, `countries[+]`) instead of showing two long texts. Lists of objects are matched by key, handle, code, id or name rather than position
+- **Markdown reports**: `--format md` on `diff`, `plan` and `themes`, and `format: "markdown"` on the `diff_stores`, `get_plan` and `diff_themes` tools, to paste into a ticket, a pull request or an email
+- **Shopify CLI version check**: `connect` checks for Shopify CLI 4.9 or newer first, and an older CLI's "Nonexistent flag" error now says which version is needed
+- **`connect --scopes read_customers,read_orders`**: extra read scopes, off by default because they expose customer data, to compare those owner types' metafield definitions. Only read scopes can be added
+- **Shopify-reserved metafield definitions**: `include_reserved` (`--include-reserved`) compares the `shopify` namespace ones (category metafields behind storefront filters). Compared only: plans report them as conflicts and never write them
+- **Theme diff, settings left out on purpose**: `ignore_settings` (`--ignore-settings`) takes globs on setting paths, optionally per file (`config/settings_data.json:current.color_*`); the report counts what was left out
+- **Discounts, compared only** (opt-in `discounts`): automatic and code discounts by title, with Shopify's summary of what they give, status, dates, combinations, codes and usage limits. Never written. Needs `read_discounts`, now part of the read scopes `connect` asks for
+
 ## 0.6.0
 
 - Metafield values on **product variants** (`PRODUCTVARIANT/<product handle>/<option values>/<namespace.key>`), matched to the target variant with the same option values; a variant the target doesn't have is skipped with a warning

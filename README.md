@@ -60,9 +60,10 @@ The store setup that usually gets rebuilt by hand, plus the images it uses. Refe
 | `shop_policies` | `type` | Refund, privacy, terms, shipping and contact policy text. |
 | `products` *(opt-in)* | `handle` | Title, description, vendor, type, category, tags, template, SEO, options, variants (matched by option values; SKU, taxable flag and inventory policy are copied) and images. **New products are created as drafts.** Prices only with `prices: true` (`--with-prices`). On update, the tags, variants, option values and media (images, videos, 3D models) that only the target has are kept, and don't count as differences. Gift cards are skipped. See "What product sync leaves alone" below. |
 | `metafields` *(opt-in)* | `PRODUCT/handle/namespace.key`, `COLLECTION/handle/…`, `PRODUCTVARIANT/handle/Size=M/…`, `SHOP/namespace.key` | Metafield **values** on products, collections, product variants and the shop. A value lands on the item with the same handle in the target; a variant value on the variant with the same option values; a shop value on the target's own shop. Reference values (including references to variants) are remapped. Filter with `namespaces` and `owner_types`. |
+| `discounts` *(opt-in, compared only)* | `automatic/title`, `code/title` | Automatic and code discounts: type, Shopify's summary of what they give, status, dates, combinations, codes (or their count for bulk sets) and usage limits. **Never written**: a plan lists differences as conflicts, since a discount changes what customers pay. Two discounts with the same title are reported instead of matched. |
 | `translations` *(opt-in)* | `locale:Type/handle` | Translations of products, pages, collections, metaobjects, menus and policies. Registered against the target's own text, after the content itself is synced. A translated field only the target has is kept. The plan warns when a language isn't added to the target. |
 
-`products`, `metafields` and `translations` can be large, so they're read only when you ask for them (`resources: ["products"]`). Name what you want and only that is read: exact product handles or prefixes (`include: ["linen-shirt", "linen-*"]`) for products, and patterns that name their owner (`include: ["PRODUCT/linen-shirt/*", "PRODUCTVARIANT/linen-shirt/*", "SHOP/*"]`) for metafield values. `owner_types` (`--owner-types`) limits metafield definitions and values to some owners, e.g. `["SHOP"]`. App-owned (`app--…`) and Shopify-reserved (`shopify--…`) data is skipped and listed in the report.
+`products`, `metafields`, `translations` and `discounts` are read only when you ask for them (`resources: ["products"]`). Name what you want and only that is read: exact product handles or prefixes (`include: ["linen-shirt", "linen-*"]`) for products, and patterns that name their owner (`include: ["PRODUCT/linen-shirt/*", "PRODUCTVARIANT/linen-shirt/*", "SHOP/*"]`) for metafield values. `owner_types` (`--owner-types`) limits metafield definitions and values to some owners, e.g. `["SHOP"]`. App-owned (`app--…`) and Shopify-reserved (`shopify--…`) data is skipped and listed in the report. Shopify's category metafield definitions (namespace `shopify`, the ones behind storefront filters such as fabric or size) can be compared with `include_reserved` (`--include-reserved`); they are never written, so a plan lists them as conflicts to enable in the target's admin.
 
 **Files and images** referenced by any of the above are matched by file name in the target. When one is missing, the plan says so and `apply_plan` uploads it from the source store.
 
@@ -132,7 +133,7 @@ Most people only need the first option: no app to create. The other two are for 
 </p>
 
 ```bash
-npm install -g @shopify/cli
+npm install -g @shopify/cli                                # 4.9 or newer
 npx shopify-store-sync-mcp connect my-dev-store            # read-only
 npx shopify-store-sync-mcp connect my-staging-store --writes
 ```
@@ -145,6 +146,10 @@ Each `connect` opens Shopify in your browser; click **Install** to approve. It a
 ```json
 { "stores": { "my-dev-store": { "domain": "my-dev-store.myshopify.com", "auth": "shopify-cli" } } }
 ```
+
+It needs Shopify CLI 4.9 or newer; `connect` checks the version first and says so when it's older.
+
+To compare the metafield definitions of customers, orders and other owners that hold customer data, add their read scopes: `connect my-dev-store --scopes read_customers,read_orders`. They're left out by default because they open up customer data, and only read scopes can be added this way. A later `connect` without `--scopes` drops them again.
 
 Requests then run through `shopify store execute`, Shopify CLI's supported command, using the sign-in it saved. Each request starts Shopify CLI (about a second), so a full diff takes tens of seconds instead of one or two with an app. That sign-in belongs to you and expires after a while; when it does, the tool says so and you run `connect` again. Because of that, use option 2 or 3 for scheduled or unattended runs.
 
@@ -194,6 +199,7 @@ An existing Admin API access token (`shpat_...`) from a custom app that was crea
 | translations | `read_translations`, `read_locales` | `write_translations` |
 | files | `read_files` | `write_files` (to upload missing files) |
 | theme diff | `read_themes` | none, never writes |
+| discounts | `read_discounts` | none, never writes |
 | ID remapping | `read_products`, `read_content` | none |
 
 Metafield definitions of some owner types (customers, orders, draft orders, companies, locations, markets) need that owner's read scope too, such as `read_customers`. The Shopify CLI sign-in doesn't ask for those, since they open up customer and order data. When a store won't show an owner type, the diff carries on: that owner type is listed as "not compared", on both stores, with the scope Shopify asked for.
@@ -201,7 +207,7 @@ Metafield definitions of some owner types (customers, orders, draft orders, comp
 Everything at once (the set used for the live tests), ready to paste:
 
 ```text
-read_products,write_products,read_metaobjects,write_metaobjects,read_metaobject_definitions,write_metaobject_definitions,read_online_store_pages,write_online_store_pages,read_online_store_navigation,write_online_store_navigation,read_legal_policies,write_legal_policies,read_translations,write_translations,read_locales,read_files,write_files,read_themes,read_content
+read_products,write_products,read_metaobjects,write_metaobjects,read_metaobject_definitions,write_metaobject_definitions,read_online_store_pages,write_online_store_pages,read_online_store_navigation,write_online_store_navigation,read_legal_policies,write_legal_policies,read_translations,write_translations,read_locales,read_files,write_files,read_themes,read_content,read_discounts
 ```
 
 Give source stores read-only scopes when you can.
@@ -358,9 +364,9 @@ What `diff_stores` reports, field by field (real output):
 | `list_stores` | no | Configured stores and their write permissions. Secrets are never returned. |
 | `list_resource_types` | no | What can be synced and how it's keyed. |
 | `snapshot_store` | no | Read one store's configuration in portable form. |
-| `diff_stores` | no | Only-in-source, changed (field by field), only-in-target. |
+| `diff_stores` | no | Only-in-source, changed (field by field, and entry by entry inside JSON values), only-in-target. `format: "markdown"` returns a report to paste into a ticket. |
 | `plan_sync` | no | Dry-run plan: creates, updates, conflicts, missing references. Returns a `plan_id`. |
-| `get_plan` | no | Show a plan, or list recent ones. |
+| `get_plan` | no | Show a plan, or list recent ones. `format: "markdown"` returns it as a report to share before applying. |
 | `apply_plan` | **yes** | Execute a plan, with every safety check above. For a protected store your client asks you to confirm. |
 | `export_snapshot` | local files only | Write a store's configuration to a folder for git ([config as code](#config-as-code)). |
 | `diff_themes` | no | Compare theme templates and settings between two stores ([theme settings](#theme-settings-diff)). |
@@ -388,10 +394,11 @@ npx shopify-store-sync-mcp diff dev eu --resources pages,menus
 npx shopify-store-sync-mcp plan dev eu --as-drafts
 npx shopify-store-sync-mcp apply <plan-id> --confirm my-brand-eu.myshopify.com
 npx shopify-store-sync-mcp export eu ./store-config
-npx shopify-store-sync-mcp themes dev eu
+npx shopify-store-sync-mcp themes dev eu --ignore-settings "current.sections.header.*"
+npx shopify-store-sync-mcp diff dev eu --format md > drift-report.md
 ```
 
-`--json` gives machine-readable output and `--exit-code` makes `diff` and `themes` exit with 2 when they find differences, handy for a scheduled drift check. Run `npx shopify-store-sync-mcp help` for every option.
+`--json` gives machine-readable output with every value in full, `--format md` a Markdown report for a ticket, a pull request or a client, and `--exit-code` makes `diff` and `themes` exit with 2 when they find differences, handy for a scheduled drift check. Run `npx shopify-store-sync-mcp help` for every option.
 
 </details>
 
@@ -424,7 +431,7 @@ Any command or tool that takes a source also takes `dir:<path>`:
 <details>
 <summary><b>Theme settings diff (read-only)</b></summary>
 
-`diff_themes` (or `themes` on the command line) compares the published themes of two stores: JSON templates, section groups and `config/settings_data.json`, setting by setting. Pass theme ids to compare other themes, and `files` to narrow it down (for example `templates/product*.json`). It is read-only: themes are never written to.
+`diff_themes` (or `themes` on the command line) compares the published themes of two stores: JSON templates, section groups and `config/settings_data.json`, setting by setting. Pass theme ids to compare other themes, and `files` to narrow it down (for example `templates/product*.json`). Settings that differ on purpose between stores (a header logo, an announcement bar, market colors) can be left out with `ignore_settings` (`--ignore-settings`): globs on the setting's path, optionally limited to a file, such as `current.sections.header.*` or `config/settings_data.json:current.color_*`. The report says how many differences were left out. It is read-only: themes are never written to.
 
 </details>
 
@@ -471,7 +478,7 @@ Two references followed from the source store to the target, as the sample sync 
 ## Tested on real stores
 
 <p align="center">
-  <img src="docs/images/tested.png" alt="111 automated tests, 61 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
+  <img src="docs/images/tested.png" alt="123 automated tests, 62 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
 </p>
 
 <details>
@@ -523,6 +530,7 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 - [x] Two-pass writes for items that point at each other or at themselves
 - [x] Filters: resource types, include and exclude patterns, namespaces, metaobject types, owner types, languages
 - [x] `as_drafts`: new pages hidden, new metaobject entries as drafts, published state of existing ones left alone
+- [x] Compared only, never written: discounts (automatic and code) and Shopify's category metafield definitions
 
 *Safety*
 - [x] Dry-run plans that expire after an hour, applied in full or step by step (`--only`)
@@ -536,14 +544,15 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 
 *Ways to use it*
 - [x] MCP server with 9 tools, read-only tools annotated for auto-approval, progress reported on long calls
-- [x] Command line with `--json` output and `--exit-code` for scheduled drift checks
+- [x] Command line with `--json` output (values never shortened), `--format md` reports and `--exit-code` for scheduled drift checks
 - [x] Config as code: export a store to files and use the folder as a source (`dir:`)
-- [x] Read-only theme settings diff
+- [x] Read-only theme settings diff, with settings that differ on purpose left out
+- [x] JSON values (json metafields, settings) compared entry by entry
 - [x] Connect without creating an app (Shopify CLI sign-in), or with a Dev Dashboard app or an access token
 - [x] Published on npm, runs with `npx`
 
 *Quality*
-- [x] 111 automated tests against an in-memory Shopify, plus MCP protocol tests
+- [x] 123 automated tests against an in-memory Shopify, plus MCP protocol tests
 - [x] Every GraphQL operation validated against Shopify's schema for 2026-04, 2026-10 and 2027-01
 - [x] Tested live between two stores on Linux and Windows, Shopify CLI 4.9 and 5
 - [x] Parallel reads and writes with throttle-aware retries; clear errors for missing installs, expired sign-ins and auto-managed policies
@@ -558,6 +567,7 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 - [ ] Metafield values on pages and blogs; metafield definition constraints
 - [ ] Menu item (link) translations
 - [ ] Markets and market web presences
+- [ ] Discounts: sync them, behind an explicit flag (compared only today)
 - [ ] Undo: restore the previous values of an applied plan from the audit log
 - [ ] Optional deletes, behind an explicit flag
 

@@ -28,6 +28,8 @@ export interface ThemeDiff {
   changed: ThemeFileDiff[];
   identical: number;
   unreadable: string[];
+  /** Number of setting differences left out by ignoreSettings. */
+  ignored?: number;
 }
 
 /** Resolve "main" (the live theme) or a theme id / numeric id. */
@@ -78,11 +80,29 @@ export async function readThemeFiles(client: AdminClient, themeId: string, patte
   return files;
 }
 
-export async function diffThemes(
-  source: AdminClient,
-  target: AdminClient,
-  opts: { sourceTheme?: string; targetTheme?: string; files?: string[]; exclude?: string[] } = {},
-): Promise<ThemeDiff> {
+export interface ThemeDiffOptions {
+  sourceTheme?: string;
+  targetTheme?: string;
+  files?: string[];
+  exclude?: string[];
+  /**
+   * Settings to leave out, as globs on the setting's path ("current.sections.header.*"), optionally
+   * limited to some files ("config/settings_data.json:current.color_*"). Only * is special.
+   */
+  ignoreSettings?: string[];
+}
+
+/** A predicate telling whether a change at `path` in `file` is ignored. */
+export function settingFilter(patterns: string[] = []): (file: string, path: string) => boolean {
+  const rules = patterns.map((p) => {
+    const i = p.indexOf(":");
+    return i > 0 ? { file: p.slice(0, i), path: p.slice(i + 1) } : { file: "*", path: p };
+  });
+  return (file, path) => rules.some((r) => matchesFilter(file, { include: [r.file] }) && matchesFilter(path, { include: [r.path] }));
+}
+
+export async function diffThemes(source: AdminClient, target: AdminClient, opts: ThemeDiffOptions = {}): Promise<ThemeDiff> {
+  const ignored = settingFilter(opts.ignoreSettings);
   const patterns = opts.files?.length ? opts.files : DEFAULT_THEME_FILES;
   const [st, tt] = await Promise.all([findTheme(source, opts.sourceTheme), findTheme(target, opts.targetTheme)]);
   const [sf, tf] = await Promise.all([readThemeFiles(source, st.id, patterns), readThemeFiles(target, tt.id, patterns)]);
@@ -98,7 +118,9 @@ export async function diffThemes(
     }
     let changes: FieldChange[];
     try {
-      changes = diffValues(parseThemeJson(text), parseThemeJson(other));
+      const all = diffValues(parseThemeJson(text), parseThemeJson(other));
+      changes = all.filter((c) => !ignored(file, c.path));
+      if (changes.length < all.length) result.ignored = (result.ignored ?? 0) + all.length - changes.length;
     } catch {
       result.unreadable.push(file);
       continue;

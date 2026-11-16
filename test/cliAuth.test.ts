@@ -174,6 +174,67 @@ describe("Shopify CLI sign-in", () => {
     expect(Date.now() - started).toBeLessThan(10_000);
   });
 
+  /** A fake `shopify` on disk that logs its calls; `version` answers `version`. */
+  function fakeCli(version: string) {
+    const dir = tmp("fake-cli-");
+    const log = join(dir, "calls.log");
+    const script = join(dir, "fake-shopify.js");
+    const bin = process.platform === "win32" ? join(dir, "shopify.cmd") : join(dir, "shopify");
+    if (process.platform === "win32") writeFileSync(bin, `@node "${script}" %*\r\n`);
+    writeFileSync(
+      process.platform === "win32" ? script : bin,
+      `#!/usr/bin/env node
+const fs = require("fs");
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)) + "\\n");
+if (process.argv[2] === "version") console.log(${JSON.stringify(version)});
+if (process.argv[3] === "execute") console.log(JSON.stringify({ data: { shop: { name: "Demo Shop" } } }));
+`,
+    );
+    chmodSync(bin, 0o755);
+    const calls = () => readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l) as string[]);
+    return { bin, calls };
+  }
+
+  async function connect(bin: string, ...flags: string[]) {
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...a) => void lines.push(a.join(" ")));
+    const err = vi.spyOn(console, "error").mockImplementation((...a) => void lines.push(a.join(" ")));
+    try {
+      const code = await runCli(["connect", "demo-shop", ...flags], { SHOPIFY_CLI_BIN: bin, SHOPIFY_STORES: "{}" } as any);
+      return { code, out: lines.join("\n") };
+    } finally {
+      spy.mockRestore();
+      err.mockRestore();
+    }
+  }
+
+  it("connect asks for extra read scopes with --scopes, and refuses write scopes there", async () => {
+    const { bin, calls } = fakeCli("4.9.4");
+    expect((await connect(bin, "--scopes", "read_customers,read_orders")).code).toBe(0);
+    const auth = calls().find((c) => c[1] === "auth")!;
+    expect(arg(auth, "--scopes")!.split(",")).toEqual(expect.arrayContaining(["read_products", "read_customers", "read_orders"]));
+    expect(arg(auth, "--scopes")).not.toContain("write_");
+
+    const refused = await connect(bin, "--scopes", "write_customers");
+    expect(refused.code).toBe(1);
+    expect(refused.out).toMatch(/only read scopes/);
+  });
+
+  it("connect stops early with a clear message when Shopify CLI is too old", async () => {
+    const { bin, calls } = fakeCli("4.6.1");
+    const r = await connect(bin);
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/Shopify CLI 4\.6\.1 is too old: this tool needs 4\.9\.0 or newer/);
+    expect(calls().map((c) => c[0])).toEqual(["version"]);
+  });
+
+  it("a request that hits an older CLI's missing flag says which version is needed", async () => {
+    const run: Runner = async (_bin, args) =>
+      args[0] === "version" ? { code: 0, stdout: "4.6.1\n", stderr: "" } : { code: 2, stdout: "", stderr: "Error: Nonexistent flag: --no-input" };
+    const client = new ShopifyCliClient({ alias: "dev", domain: "dev.myshopify.com", auth: "shopify-cli", apiVersion: "2026-10", allowWrites: false, protected: false }, run, "shopify");
+    await expect(client.request("query { shop { name } }")).rejects.toThrow(/Shopify CLI 4\.6\.1 is too old/);
+  });
+
   it("connect runs store auth with the right scopes, then checks the sign-in", async () => {
     const dir = tmp("fake-cli-");
     const log = join(dir, "calls.log");
@@ -185,6 +246,7 @@ describe("Shopify CLI sign-in", () => {
       `#!/usr/bin/env node
 const fs = require("fs");
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)) + "\\n");
+if (process.argv[2] === "version") console.log("4.9.4");
 if (process.argv[3] === "execute") console.log(JSON.stringify({ data: { shop: { name: "Demo Shop" } } }));
 `,
     );
@@ -197,7 +259,7 @@ if (process.argv[3] === "execute") console.log(JSON.stringify({ data: { shop: { 
     } finally {
       spy.mockRestore();
     }
-    const calls = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l) as string[]);
+    const calls = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l) as string[]).slice(1);
     expect(calls[0]!.slice(0, 4)).toEqual(["store", "auth", "--store", "demo-shop.myshopify.com"]);
     expect(arg(calls[0]!, "--scopes")).toContain("write_metaobjects");
     expect(calls[1]!.slice(0, 2)).toEqual(["store", "execute"]);

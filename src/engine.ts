@@ -8,7 +8,7 @@ import { ShopifyAdminClient, type AdminClient } from "./shopify/client.js";
 import { ShopifyCliClient } from "./shopify/cliClient.js";
 import { applyView, takeSnapshot, type ReadProgress, type Snapshot } from "./snapshot.js";
 import { exportSnapshot, readSnapshot, type ExportResult } from "./snapshotFiles.js";
-import { diffThemes, type ThemeDiff } from "./themes.js";
+import { diffThemes, type ThemeDiff, type ThemeDiffOptions } from "./themes.js";
 
 /** One place for everything the MCP tools and the CLI do, so both behave the same. */
 
@@ -24,6 +24,8 @@ export interface Scope {
   drafts?: boolean;
   include?: string[];
   exclude?: string[];
+  /** Compare Shopify-reserved metafield definitions too (read-only). */
+  includeReserved?: boolean;
 }
 
 export const DIR_PREFIX = "dir:";
@@ -57,6 +59,7 @@ export class Engine {
   static fetchOptions(scope: Scope): FetchOptions {
     return {
       ownerTypes: scope.ownerTypes ?? Engine.ownerTypes(scope.include),
+      includeReserved: scope.includeReserved || undefined,
       metaobjectTypes: scope.metaobjectTypes,
       namespaces: scope.namespaces,
       locales: scope.locales,
@@ -252,7 +255,7 @@ export class Engine {
     return exportSnapshot(snapshot, dir);
   }
 
-  async themes(source: string, target: string, opts: { sourceTheme?: string; targetTheme?: string; files?: string[]; exclude?: string[] }): Promise<ThemeDiff> {
+  async themes(source: string, target: string, opts: ThemeDiffOptions): Promise<ThemeDiff> {
     if (isDirSpec(source) || isDirSpec(target)) throw new Error("theme comparison needs two stores");
     return diffThemes(this.client(source), this.client(target), opts);
   }

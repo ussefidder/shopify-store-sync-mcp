@@ -14,12 +14,13 @@ export const RESOURCE_KINDS = [
   "redirects",
   "metafields",
   "translations",
+  "discounts",
 ] as const;
 
 export type ResourceKind = (typeof RESOURCE_KINDS)[number];
 
-/** Read by default. products, metafields and translations can be large, so they are opt-in. */
-export const OPT_IN_KINDS: readonly ResourceKind[] = ["products", "metafields", "translations"];
+/** Read by default. products, metafields and translations can be large, so they are opt-in; discounts are compare-only. */
+export const OPT_IN_KINDS: readonly ResourceKind[] = ["products", "metafields", "translations", "discounts"];
 export const DEFAULT_KINDS: readonly ResourceKind[] = RESOURCE_KINDS.filter((k) => !OPT_IN_KINDS.includes(k));
 
 /** A resource as fetched from a store. `data` is what gets compared and copied. */
@@ -32,6 +33,8 @@ export interface Item {
 }
 
 export interface FetchOptions {
+  /** Also read Shopify-reserved metafield definitions (namespace "shopify", category metafields), to compare them. They are never written. */
+  includeReserved?: boolean;
   /** Metafield owner types to read definitions for (and values: PRODUCT, COLLECTION, PRODUCTVARIANT, SHOP). */
   ownerTypes?: string[];
   /** Metaobject types to read entries for. Defaults to every syncable definition type. */
@@ -84,6 +87,11 @@ export interface ResourceAdapter {
    * (e.g. a metafield definition whose type differs). The op is then reported as a conflict.
    */
   conflict?(source: Item, target: Item): string | undefined;
+  /**
+   * Items this tool compares but never writes (Shopify-reserved definitions read with
+   * includeReserved). The reason is reported as a conflict in plans instead of a create or update.
+   */
+  readOnly?(item: Item): string | undefined;
   /** Portable ref the created resource can be found by, so later ops in the same plan can point at it. */
   refFor?(key: string): string | undefined;
   /**

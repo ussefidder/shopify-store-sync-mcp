@@ -59,10 +59,31 @@ export function hashData(value: unknown): string {
 
 const isObj = (v: unknown): v is Record<string, unknown> => Boolean(v) && typeof v === "object" && !Array.isArray(v);
 
-/** Arrays of objects that all carry a string `key` are matched by key, not by position. */
-function keyedArray(v: unknown[]): Map<string, unknown> | undefined {
-  if (!v.every((x) => isObj(x) && typeof x.key === "string")) return undefined;
-  return new Map(v.map((x) => [(x as { key: string }).key, x]));
+/**
+ * Arrays of objects that all carry the same identifying field (key, handle, code, id or name),
+ * with no duplicates, are matched by that field rather than by position.
+ */
+const IDENTITY_FIELDS = ["key", "handle", "code", "id", "name"] as const;
+function identityField(...arrays: unknown[][]): string | undefined {
+  const all = arrays.flat();
+  if (!all.length || !all.every(isObj)) return undefined;
+  return IDENTITY_FIELDS.find((f) =>
+    arrays.every((a) => {
+      const ids = a.map((x) => (x as Record<string, unknown>)[f]);
+      return ids.every((id) => typeof id === "string" || typeof id === "number") && new Set(ids).size === ids.length;
+    }),
+  );
+}
+
+/** A string holding a JSON object or array (json metafields, theme settings...), parsed; else undefined. */
+function jsonOf(v: unknown): unknown {
+  if (typeof v !== "string" || v.length < 2 || !/^\s*[[{]/.test(v)) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(v);
+    return parsed && typeof parsed === "object" ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -86,15 +107,37 @@ export function diffValues(source: unknown, target: unknown, path = ""): FieldCh
   }
 
   if (Array.isArray(source) && Array.isArray(target)) {
-    const s = keyedArray(source);
-    const t = keyedArray(target);
-    if (s && t) {
+    const field = identityField(source, target);
+    if (field) {
+      const s = new Map(source.map((x) => [String((x as Record<string, unknown>)[field]), x]));
+      const t = new Map(target.map((x) => [String((x as Record<string, unknown>)[field]), x]));
       const keys = [...new Set([...s.keys(), ...t.keys()])];
       return keys.flatMap((k) => diffValues(s.get(k), t.get(k), `${path}[${k}]`));
     }
     if (source.length === target.length) {
       return source.flatMap((v, i) => diffValues(v, target[i], `${path}[${i}]`));
     }
+    // Lists of plain values (country codes, tags...) of different lengths: say which entries differ.
+    if ([...source, ...target].every((x) => x === null || typeof x !== "object")) {
+      const inT = new Set(target.map((x) => stableStringify(x)));
+      const inS = new Set(source.map((x) => stableStringify(x)));
+      const added = source.filter((x) => !inT.has(stableStringify(x)));
+      const removed = target.filter((x) => !inS.has(stableStringify(x)));
+      if (added.length + removed.length > 0) {
+        return [
+          ...added.map((x) => ({ path: `${path}[+]`, source: x, target: undefined })),
+          ...removed.map((x) => ({ path: `${path}[-]`, source: undefined, target: x })),
+        ];
+      }
+    }
+  }
+
+  // JSON held in a string (json metafields, settings): compare entry by entry, not as one long text.
+  const sj = jsonOf(source);
+  const tj = jsonOf(target);
+  if (sj !== undefined && tj !== undefined) {
+    const inner = diffValues(sj, tj, path ? `${path} →` : "→");
+    if (inner.length) return inner.map((c) => ({ ...c, path: c.path.replace("→.", "→ ").replace("→[", "→ [") }));
   }
 
   return [{ path: path || "(root)", source, target }];
@@ -126,8 +169,9 @@ export function diffItems(kind: ResourceKind, source: Item[], target: Item[], fi
   return result;
 }
 
-/** Shorten long values (page bodies, rich text) for display. */
+/** Shorten long values (page bodies, rich text) for display. Infinity keeps them whole. */
 export function preview(value: unknown, max = 160): unknown {
+  if (!Number.isFinite(max)) return value;
   if (typeof value === "string") return value.length > max ? `${value.slice(0, max)}… (${value.length} chars)` : value;
   const s = stableStringify(value);
   return s && s.length > max ? `${s.slice(0, max)}… (${s.length} chars)` : value;

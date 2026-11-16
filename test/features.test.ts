@@ -365,6 +365,32 @@ describe("theme settings diff", () => {
     expect(eu.mutations()).toEqual([]);
   });
 
+  it("leaves out the settings named in ignoreSettings, per file or everywhere", async () => {
+    const theme = (id: number, settings: unknown, product: unknown) => ({
+      id: `gid://shopify/OnlineStoreTheme/${id}`,
+      name: `t${id}`,
+      role: "MAIN",
+      files: { "config/settings_data.json": JSON.stringify(settings), "templates/product.json": JSON.stringify(product) },
+    });
+    const dev = new FakeShop(FakeShop.config("dev"), {
+      themes: [theme(1, { current: { color_accent: "#000", announcement: "Dev build", sections: { header: { settings: { logo: "a.png" } } } } }, { sections: { main: { settings: { gallery: "grid", sticky: true } } } })],
+    });
+    const eu = new FakeShop(FakeShop.config("eu"), {
+      themes: [theme(9, { current: { color_accent: "#111", announcement: "Livraison offerte", sections: { header: { settings: { logo: "b.png" } } } } }, { sections: { main: { settings: { gallery: "list", sticky: true } } } })],
+    });
+    const engine = engineFor(dev, eu);
+
+    const all = await engine.themes("dev", "eu", {});
+    expect(all.changed.flatMap((f) => f.changes.map((c) => c.path)).sort()).toEqual(
+      ["current.announcement", "current.color_accent", "current.sections.header.settings.logo", "sections.main.settings.gallery"].sort(),
+    );
+
+    const quiet = await engine.themes("dev", "eu", { ignoreSettings: ["current.sections.header.*", "config/settings_data.json:current.announcement", "*.gallery"] });
+    expect(quiet.changed).toEqual([{ file: "config/settings_data.json", changes: [{ path: "current.color_accent", source: "#000", target: "#111" }] }]);
+    expect(quiet.identical).toBe(1);
+    expect(quiet.ignored).toBe(3);
+  });
+
   it("parses theme JSON with a leading comment", () => {
     expect(parseThemeJson("/* hi */ {\"a\":1}")).toEqual({ a: 1 });
   });
@@ -383,6 +409,35 @@ describe("CLI", () => {
       positional: ["diff", "dev", "eu"],
       flags: { resources: "pages,menus", json: true, include: "faq*" },
     });
+  });
+
+  it("writes diff and plan as Markdown reports with --format md", async () => {
+    const dev = new FakeShop(FakeShop.config("dev"), {
+      redirects: [
+        { id: "gid://shopify/UrlRedirect/1", path: "/a", target: "/b" },
+        { id: "gid://shopify/UrlRedirect/2", path: "/c", target: "/new|page" },
+      ],
+    });
+    const eu = new FakeShop(FakeShop.config("eu"), { redirects: [{ id: "gid://shopify/UrlRedirect/9", path: "/c", target: "/old" }] });
+    const engine = engineFor(dev, eu);
+    let md = "";
+    const write = vi.spyOn(process.stdout, "write").mockImplementation((s: any) => ((md += s), true));
+    try {
+      expect(await runCli(["diff", "dev", "eu", "--resources", "redirects", "--format", "md"], {}, engine)).toBe(0);
+      expect(md).toContain("# Store diff: dev → eu");
+      expect(md).toContain("| redirects | 1 | 1 | 0 | 0 |");
+      expect(md).toContain("- `/a`");
+      expect(md).toContain("| `/c` | `target` | /old | /new\\|page |");
+
+      md = "";
+      expect(await runCli(["plan", "dev", "eu", "--resources", "redirects", "--format", "md"], {}, engine)).toBe(0);
+      expect(md).toMatch(/# Sync plan `[\w-]+`: dev → eu/);
+      expect(md).toContain("**1** to create · **1** to update · **0** conflicts");
+      expect(md).toContain("| 1 | create | redirects | `/a` |");
+    } finally {
+      write.mockRestore();
+    }
+    expect(await runCli(["diff", "dev", "eu", "--format", "pdf"], {}, engine)).toBe(1);
   });
 
   it("runs diff, plan, apply and export through the same engine", async () => {
