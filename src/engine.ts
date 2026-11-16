@@ -83,16 +83,20 @@ export class Engine {
   }
 
   /**
-   * When every include pattern names its owner ("PRODUCT/linen-shirt/*", "COLLECTION/sale/custom.x"),
-   * metafield values are read from those products and collections only.
+   * When every include pattern names its owner ("PRODUCT/linen-shirt/*", "COLLECTION/sale/custom.x",
+   * "PRODUCTVARIANT/linen-shirt/*", "SHOP/custom.*"), metafield values are read from those owners only.
    */
   static metafieldOwners(include?: string[]): FetchOptions["metafieldOwners"] {
     if (!include?.length) return undefined;
-    const owners: { PRODUCT: string[]; COLLECTION: string[] } = { PRODUCT: [], COLLECTION: [] };
+    const owners: { PRODUCT: string[]; COLLECTION: string[]; PRODUCTVARIANT: string[]; SHOP: boolean } = { PRODUCT: [], COLLECTION: [], PRODUCTVARIANT: [], SHOP: false };
     for (const p of include) {
-      const m = /^(PRODUCT|COLLECTION)\/([a-z0-9][a-z0-9-]*)\/.+$/.exec(p);
+      if (p.startsWith("SHOP/")) {
+        owners.SHOP = true;
+        continue;
+      }
+      const m = /^(PRODUCT|COLLECTION|PRODUCTVARIANT)\/([a-z0-9][a-z0-9-]*)\/.+$/.exec(p);
       if (!m) return undefined;
-      const list = owners[m[1] as "PRODUCT" | "COLLECTION"];
+      const list = owners[m[1] as "PRODUCT" | "COLLECTION" | "PRODUCTVARIANT"];
       if (!list.includes(m[2]!)) list.push(m[2]!);
     }
     return owners;

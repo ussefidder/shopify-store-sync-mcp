@@ -32,7 +32,7 @@ export interface Item {
 }
 
 export interface FetchOptions {
-  /** Metafield owner types to read definitions for. */
+  /** Metafield owner types to read definitions for (and values: PRODUCT, COLLECTION, PRODUCTVARIANT, SHOP). */
   ownerTypes?: string[];
   /** Metaobject types to read entries for. Defaults to every syncable definition type. */
   metaobjectTypes?: string[];
@@ -48,10 +48,10 @@ export interface FetchOptions {
    */
   drafts?: boolean;
   /**
-   * Narrows which product and collection metafields are read, taken from include patterns shaped
-   * like "PRODUCT/<handle>/..." Undefined means every owner.
+   * Narrows which metafield values are read, taken from include patterns shaped like
+   * "PRODUCT/<handle>/...", "PRODUCTVARIANT/<product handle>/..." or "SHOP/...". Undefined means every owner.
    */
-  metafieldOwners?: { PRODUCT?: string[]; COLLECTION?: string[] };
+  metafieldOwners?: { PRODUCT?: string[]; COLLECTION?: string[]; PRODUCTVARIANT?: string[]; SHOP?: boolean };
   /**
    * Narrows which products are read, taken from include patterns that are plain handles
    * ("linen-shirt") or handle prefixes ("linen-*"). Undefined means every product.

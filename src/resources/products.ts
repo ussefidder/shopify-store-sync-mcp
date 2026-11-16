@@ -1,5 +1,5 @@
 import { assertNoUserErrors, paginate, type AdminClient } from "../shopify/client.js";
-import { REF_PREFIX } from "../refs.js";
+import { REF_PREFIX, variantKey } from "../refs.js";
 import type { FetchOptions, Item, ResourceAdapter } from "./types.js";
 import { compact, PAGE_INFO } from "./util.js";
 
@@ -119,12 +119,7 @@ interface Node {
   variants: { nodes: VariantNode[]; pageInfo: PageInfo };
 }
 
-/** Identity of a variant across stores: its option values, in option order. */
-export function variantKey(options: Record<string, string>): string {
-  return Object.entries(options)
-    .map(([k, v]) => `${k}=${v}`)
-    .join(" / ");
-}
+export { variantKey } from "../refs.js";
 
 export function normalizeProduct(n: Node, opts: Pick<FetchOptions, "prices"> = {}): Item {
   const options = [...n.options].sort((a, b) => a.position - b.position);

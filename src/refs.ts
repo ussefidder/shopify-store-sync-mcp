@@ -15,15 +15,27 @@ import { paginate, type AdminClient } from "./shopify/client.js";
  *   gid://shopify/Menu/1                 -> shopify://Menu/<handle>
  *   gid://shopify/MetafieldDefinition/1  -> shopify://MetafieldDefinition/<OWNER>.<namespace>.<key>
  *   gid://shopify/MediaImage/1           -> shopify://File/<filename>   (also GenericFile, Video)
+ *   gid://shopify/ProductVariant/1       -> shopify://ProductVariant/<product handle>/<option values, URL-encoded>
+ *   gid://shopify/Shop/1                 -> shopify://Shop   (there is one per store)
  *
  * Files keep their source URL on the side, so a missing file can be uploaded to the target.
- * Anything we can't map (variants, articles...) becomes shopify://unresolved/<Type>/<id>
+ * Anything we can't map (articles...) becomes shopify://unresolved/<Type>/<id>
  * and is reported as a warning instead of being silently copied.
  */
 
 export const GID_RE = /^gid:\/\/shopify\/([A-Za-z]+)\/(\d+)$/;
 export const REF_PREFIX = "shopify://";
 export const UNRESOLVED_PREFIX = "shopify://unresolved/";
+
+/** Identity of a variant across stores: its option values, in option order ("Size=M / Color=Black"). */
+export function variantKey(options: Record<string, string>): string {
+  return Object.entries(options)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(" / ");
+}
+
+const variantRef = (handle: string, selectedOptions: { name: string; value: string }[]) =>
+  `${REF_PREFIX}ProductVariant/${handle}/${encodeURIComponent(variantKey(Object.fromEntries(selectedOptions.map((o) => [o.name, o.value]))))}`;
 
 export function isGid(v: unknown): v is string {
   return typeof v === "string" && GID_RE.test(v);
@@ -89,6 +101,7 @@ const NODES_QUERY = /* GraphQL */ `
       ... on ShopPolicy { policyType: type }
       ... on Menu { handle }
       ... on MetafieldDefinition { ownerType namespace definitionKey: key }
+      ... on ProductVariant { product { handle } selectedOptions { name value } }
       ... on MediaImage { alt image { url } }
       ... on GenericFile { alt url }
       ... on Video { alt filename originalSource { url } }
@@ -156,6 +169,7 @@ type RefNode =
   | { __typename: "ShopPolicy"; id: string; policyType: string }
   | { __typename: "Menu"; id: string; handle: string }
   | { __typename: "MetafieldDefinition"; id: string; ownerType: string; namespace: string; definitionKey: string }
+  | { __typename: "ProductVariant"; id: string; product: { handle: string }; selectedOptions: { name: string; value: string }[] }
   | { __typename: "MediaImage"; id: string; alt: string | null; image: { url: string } | null }
   | { __typename: "GenericFile"; id: string; alt: string | null; url: string | null }
   | { __typename: "Video"; id: string; alt: string | null; filename: string; originalSource: { url: string } | null }
@@ -193,6 +207,10 @@ export function nodeToRef(node: RefNode): string | undefined {
       return `${REF_PREFIX}ShopPolicy/${(node as { policyType: string }).policyType}`;
     case "Menu":
       return `${REF_PREFIX}Menu/${(node as { handle: string }).handle}`;
+    case "ProductVariant": {
+      const n = node as { product: { handle: string }; selectedOptions: { name: string; value: string }[] };
+      return variantRef(n.product.handle, n.selectedOptions);
+    }
     case "MetafieldDefinition": {
       const n = node as { ownerType: string; namespace: string; definitionKey: string };
       return `${REF_PREFIX}MetafieldDefinition/${n.ownerType}.${n.namespace}.${n.definitionKey}`;
@@ -218,6 +236,7 @@ export class GidToRefMapper {
   constructor(private readonly client: AdminClient) {}
 
   async load(gids: Iterable<string>): Promise<void> {
+    for (const g of gids) if (GID_RE.exec(g)?.[1] === "Shop") this.cache.set(g, `${REF_PREFIX}Shop`);
     const missing = [...new Set(gids)].filter((g) => !this.cache.has(g));
     for (let i = 0; i < missing.length; i += 100) {
       const batch = missing.slice(i, i + 100);
@@ -345,6 +364,29 @@ export class RefToGidResolver {
           { o: ownerType, n: namespace, k: key.join(".") },
         );
         return d.metafieldDefinitions.nodes[0]?.id;
+      }
+      case "Shop":
+        return (await c.request(`query { shop { id } }`)).shop.id;
+      case "ProductVariant": {
+        // Every variant of the product is looked up at once and remembered, so the next one is free.
+        const [handle] = rest;
+        const variants = await paginate<{ id: string; selectedOptions: { name: string; value: string }[] }>(
+          c,
+          `query VariantRefs($h: String!, $after: String) {
+            productByIdentifier(identifier: { handle: $h }) {
+              variants(first: 250, after: $after) { nodes { id selectedOptions { name value } } pageInfo { hasNextPage endCursor } }
+            }
+          }`,
+          { h: handle },
+          (d) => d.productByIdentifier?.variants ?? { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
+        );
+        let found: string | undefined;
+        for (const v of variants) {
+          const r = variantRef(handle!, v.selectedOptions);
+          if (r === ref) found = v.id;
+          else if (!this.cache.has(r)) this.remember(r, v.id);
+        }
+        return found;
       }
       case "File":
         return this.findOrUploadFile(ref, rest.join("/"));

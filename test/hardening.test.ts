@@ -406,7 +406,8 @@ describe("metafield values of named products", () => {
     expect(snapshot.resources.metafields!.items.map((i) => i.key).sort()).toEqual(["PRODUCT/p3/custom.material", "PRODUCT/p7/custom.material"]);
     expect(dev.calls.map((c) => c.field).filter((f) => f !== "nodes").sort()).toEqual(["productByIdentifier", "productByIdentifier"]);
 
-    expect(Engine.metafieldOwners(["PRODUCT/p3/*", "COLLECTION/linen/custom.x"])).toEqual({ PRODUCT: ["p3"], COLLECTION: ["linen"] });
+    expect(Engine.metafieldOwners(["PRODUCT/p3/*", "COLLECTION/linen/custom.x"])).toEqual({ PRODUCT: ["p3"], COLLECTION: ["linen"], PRODUCTVARIANT: [], SHOP: false });
+    expect(Engine.metafieldOwners(["PRODUCTVARIANT/p3/*", "SHOP/custom.*"])).toEqual({ PRODUCT: [], COLLECTION: [], PRODUCTVARIANT: ["p3"], SHOP: true });
     // Anything that doesn't name its owner means a full read.
     for (const broad of [["PRODUCT/*"], ["PRODUCT/p*/custom.x"], ["faq/*", "PRODUCT/p3/*"], []]) expect(Engine.metafieldOwners(broad)).toBeUndefined();
   });
@@ -522,5 +523,89 @@ describe("an owner type the sign-in can't read", () => {
     }
     const engine = engineFor(new Broken(FakeShop.config("dev")), new FakeShop(FakeShop.config("stg")));
     await expect(engine.compare("dev", "stg", { resources: ["metafield_definitions"] })).rejects.toThrow("Internal error");
+  });
+});
+
+describe("shop and variant metafields", () => {
+  const mf = (key: string, value: string, type = "single_line_text_field") => ({ namespace: "custom", key, type, value });
+  const shirt = (id: number, variants: { id: number; size: string; metafields?: any[] }[]) => ({
+    id: `gid://shopify/Product/${id}`,
+    handle: "linen-shirt",
+    options: [{ name: "Size", values: variants.map((v) => v.size) }],
+    variants: variants.map((v) => ({ id: `gid://shopify/ProductVariant/${v.id}`, options: { Size: v.size }, metafields: v.metafields })),
+  });
+
+  it("are compared by shop and by product handle plus option values, and land on the target's own shop and variants", async () => {
+    const dev = new FakeShop(FakeShop.config("dev"), {
+      shopMetafields: [mf("free_shipping", "50"), mf("banner", "Winter sale")],
+      products: [shirt(1, [{ id: 11, size: "S", metafields: [mf("fit", "slim")] }, { id: 12, size: "M/L", metafields: [mf("fit", "regular")] }])],
+    });
+    const stg = new FakeShop(FakeShop.config("stg"), {
+      shopMetafields: [mf("free_shipping", "60")],
+      products: [shirt(7, [{ id: 71, size: "M/L" }, { id: 72, size: "S" }])],
+    });
+    const engine = engineFor(dev, stg);
+
+    const { diffs } = await engine.compare("dev", "stg", { resources: ["metafields"] });
+    expect(diffs[0]!.onlyInSource.map((i) => i.key).sort()).toEqual([
+      "PRODUCTVARIANT/linen-shirt/Size=M/L/custom.fit",
+      "PRODUCTVARIANT/linen-shirt/Size=S/custom.fit",
+      "SHOP/custom.banner",
+    ]);
+    expect(diffs[0]!.changed.map((c) => c.key)).toEqual(["SHOP/custom.free_shipping"]);
+
+    const plan = await engine.plan("dev", "stg", { resources: ["metafields"] });
+    expect(plan.ops.filter((o) => o.action === "conflict")).toEqual([]);
+    await engine.apply(plan.id, {});
+
+    expect(stg.state.shopMetafields.map((m) => `${m.key}=${m.value}`).sort()).toEqual(["banner=Winter sale", "free_shipping=50"]);
+    const variants = stg.state.products[0]!.variants!;
+    expect(variants.find((v) => v.options.Size === "S")!.metafields).toEqual([mf("fit", "slim")]);
+    expect(variants.find((v) => v.options.Size === "M/L")!.metafields).toEqual([mf("fit", "regular")]);
+    expect(dev.state.shopMetafields).toHaveLength(2);
+  });
+
+  it("a variant the target doesn't have is skipped with a warning, not written elsewhere", async () => {
+    const dev = new FakeShop(FakeShop.config("dev"), { products: [shirt(1, [{ id: 11, size: "XL", metafields: [mf("fit", "loose")] }])] });
+    const stg = new FakeShop(FakeShop.config("stg"), { products: [shirt(7, [{ id: 71, size: "S" }])] });
+    const engine = engineFor(dev, stg);
+    const plan = await engine.plan("dev", "stg", { resources: ["metafields"] });
+    expect(plan.warnings.join(" ")).toMatch(/doesn't exist in the target/);
+    await engine.apply(plan.id, {});
+    expect(stg.state.products[0]!.variants![0]!.metafields ?? []).toEqual([]);
+  });
+
+  it("include patterns and owner_types narrow what is read", async () => {
+    const dev = new FakeShop(FakeShop.config("dev"), {
+      shopMetafields: [mf("banner", "x")],
+      products: [shirt(1, [{ id: 11, size: "S", metafields: [mf("fit", "slim")] }])],
+    });
+    const engine = engineFor(dev, new FakeShop(FakeShop.config("stg")));
+
+    const shopOnly = await engine.snapshot("dev", { resources: ["metafields"], include: ["SHOP/*"] });
+    expect(shopOnly.snapshot.resources.metafields!.items.map((i) => i.key)).toEqual(["SHOP/custom.banner"]);
+    expect(dev.calls.map((c) => c.field).filter((f) => f !== "nodes")).toEqual(["shop"]);
+
+    dev.calls.length = 0;
+    const variantsOnly = await engine.snapshot("dev", { resources: ["metafields"], ownerTypes: ["PRODUCTVARIANT"] });
+    expect(variantsOnly.snapshot.resources.metafields!.items.map((i) => i.key)).toEqual(["PRODUCTVARIANT/linen-shirt/Size=S/custom.fit"]);
+    expect(dev.calls.map((c) => c.field).filter((f) => f !== "nodes")).toEqual(["productVariants"]);
+
+    dev.calls.length = 0;
+    const oneProduct = await engine.snapshot("dev", { resources: ["metafields"], include: ["PRODUCTVARIANT/linen-shirt/*"] });
+    expect(oneProduct.snapshot.resources.metafields!.items.map((i) => i.key)).toEqual(["PRODUCTVARIANT/linen-shirt/Size=S/custom.fit"]);
+    expect(dev.calls.find((c) => c.field === "productVariants")!.variables.query).toBe("product_id:1");
+  });
+
+  it("variant references inside values are remapped too", async () => {
+    const dev = new FakeShop(FakeShop.config("dev"), {
+      shopMetafields: [mf("featured_variant", "gid://shopify/ProductVariant/12", "variant_reference")],
+      products: [shirt(1, [{ id: 11, size: "S" }, { id: 12, size: "M" }])],
+    });
+    const stg = new FakeShop(FakeShop.config("stg"), { products: [shirt(7, [{ id: 71, size: "M" }, { id: 72, size: "S" }])] });
+    const engine = engineFor(dev, stg);
+    const plan = await engine.plan("dev", "stg", { resources: ["metafields"], include: ["SHOP/*"] });
+    await engine.apply(plan.id, {});
+    expect(stg.state.shopMetafields).toEqual([mf("featured_variant", "gid://shopify/ProductVariant/71", "variant_reference")]);
   });
 });

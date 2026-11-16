@@ -29,6 +29,7 @@ Options
   --include  glob,glob   only keys matching, e.g. "PRODUCT.custom.*,faq/*"
   --exclude  glob,glob   drop keys matching
   --namespaces a,b       metafield value namespaces      --locales fr,de   translation locales
+  --owner-types a,b      metafield owners, e.g. SHOP,PRODUCTVARIANT (definitions and values)
   --with-prices          products: also copy variant prices
   --as-drafts            new pages are created hidden, new metaobject entries as drafts
   --writes               connect: also request write scopes (default: what the store config allows)

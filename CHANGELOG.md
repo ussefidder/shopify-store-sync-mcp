@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0
+
+- Metafield values on **product variants** (`PRODUCTVARIANT/<product handle>/<option values>/<namespace.key>`), matched to the target variant with the same option values; a variant the target doesn't have is skipped with a warning
+- Metafield values on the **shop** (`SHOP/<namespace.key>`), written to the target's own shop
+- References to variants are remapped (`shopify://ProductVariant/<handle>/<option values>`), in metafield values and metaobject fields alike; before, they were reported as unresolved
+- `owner_types` (`--owner-types`) now also limits metafield values, and include patterns `PRODUCTVARIANT/<handle>/*` and `SHOP/*` read only those owners
+- No new permissions: variants are covered by `read_products` / `write_products`
+
 ## 0.5.2
 
 - Fixed: a store whose sign-in can't read some metafield owner types (customers, orders, locations, markets... need extra permissions) made the whole diff fail with "Access denied for pinnedPosition field". Those owner types are now reported as not compared, on both stores, and everything else is compared as usual

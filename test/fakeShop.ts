@@ -15,6 +15,7 @@ type FakeMetafield = { namespace: string; key: string; type: string; value: stri
 export type FakeVariant = {
   id: string;
   options: Record<string, string>;
+  metafields?: FakeMetafield[];
   sku?: string;
   price?: string;
   compareAtPrice?: string | null;
@@ -74,10 +75,14 @@ export interface FakeState {
   pages: any[];
   menus: any[];
   redirects: any[];
+  shopId: string;
+  shopMetafields: FakeMetafield[];
 }
 
 export function emptyState(): FakeState {
   return {
+    shopId: gid("Shop"),
+    shopMetafields: [],
     products: [],
     collections: [],
     files: [],
@@ -153,8 +158,14 @@ export class FakeShop implements AdminClient {
           : { __typename: "MediaImage", id: f.id, alt: f.alt ?? null, image: f.url ? { url: f.url } : null },
       );
     const defs = s.metafieldDefinitions.filter((d) => d.id === id).map((d) => ({ ...d, __typename: "MetafieldDefinition", definitionKey: d.key }));
+    const variants = s.products.flatMap((p) =>
+      (p.variants ?? [])
+        .filter((x) => x.id === id)
+        .map((x) => ({ __typename: "ProductVariant", id: x.id, product: { handle: p.handle }, selectedOptions: Object.entries(x.options).map(([name, value]) => ({ name, value })) })),
+    );
     return (
       [
+        ...variants,
         ...typed("Product", s.products),
         ...typed("Collection", s.collections),
         ...files,
@@ -246,7 +257,21 @@ export class FakeShop implements AdminClient {
       case "customerAccountPages":
         return conn(s.customerAccountPages);
       case "shop":
-        return { shopPolicies: s.shopPolicies };
+        return { id: s.shopId, shopPolicies: s.shopPolicies, metafields: conn(filterNs(s.shopMetafields, v.namespace)) };
+      case "productVariants": {
+        const productId = /product_id:(\d+)/.exec(v.query ?? "")?.[1];
+        const nodes = s.products
+          .filter((p) => !productId || p.id.endsWith(`/${productId}`))
+          .flatMap((p) =>
+            (p.variants ?? []).map((x) => ({
+              id: x.id,
+              product: { handle: p.handle },
+              selectedOptions: Object.entries(x.options).map(([name, value]) => ({ name, value })),
+              metafields: conn(filterNs(x.metafields, v.namespace)),
+            })),
+          );
+        return page(nodes, s.pageSize, v.after);
+      }
       case "metaobjectDefinitionByType":
         return s.metaobjectDefinitions.find((d) => d.type === v.t) ?? null;
       case "metafieldDefinitions":
@@ -467,7 +492,9 @@ export class FakeShop implements AdminClient {
       case "metafieldsSet": {
         const out = [];
         for (const m of v.m) {
-          const owner = [...s.products, ...s.collections].find((o) => o.id === m.ownerId);
+          const shop = m.ownerId === s.shopId ? { metafields: s.shopMetafields } : undefined;
+          const owner: { metafields?: FakeMetafield[] } | undefined =
+            shop ?? [...s.products, ...s.collections, ...s.products.flatMap((p) => p.variants ?? [])].find((o) => o.id === m.ownerId);
           if (!owner) return { metafields: [], userErrors: [{ field: ["ownerId"], message: "Owner not found" }] };
           owner.metafields ??= [];
           const existing = owner.metafields.find((x) => x.namespace === m.namespace && x.key === m.key);

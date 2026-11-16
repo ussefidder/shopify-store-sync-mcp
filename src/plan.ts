@@ -157,7 +157,7 @@ export async function buildPlan(input: BuildPlanInput): Promise<Plan> {
   }
   const conflicts = ops.filter((o) => o.action === "conflict").length;
   if (missingOwners) {
-    warnings.unshift(`${missingOwners} value(s) belong to something that doesn't exist in the target (a product, collection, page...); they will be skipped.`);
+    warnings.unshift(`${missingOwners} value(s) belong to something that doesn't exist in the target (a product, variant, collection, page...); they will be skipped.`);
   }
   const otherConflicts = conflicts - missingOwners;
   if (otherConflicts) warnings.unshift(`${otherConflicts} conflict(s) need a manual fix in the target; they will be skipped.`);

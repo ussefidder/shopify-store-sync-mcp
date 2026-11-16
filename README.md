@@ -59,10 +59,10 @@ The store setup that usually gets rebuilt by hand, plus the images it uses. Refe
 | `collections` | `handle` | Title, description, sort order, template, SEO and smart-collection rules (rules on a metafield definition are remapped). Manual collections keep their own product list. A new collection is not published to any sales channel. Manual versus smart is reported as a conflict. |
 | `shop_policies` | `type` | Refund, privacy, terms, shipping and contact policy text. |
 | `products` *(opt-in)* | `handle` | Title, description, vendor, type, category, tags, template, SEO, options, variants (matched by option values; SKU, taxable flag and inventory policy are copied) and images. **New products are created as drafts.** Prices only with `prices: true` (`--with-prices`). On update, the tags, variants, option values and media (images, videos, 3D models) that only the target has are kept, and don't count as differences. Gift cards are skipped. See "What product sync leaves alone" below. |
-| `metafields` *(opt-in)* | `OWNER/handle/namespace.key` | Metafield **values** on products and collections, landed on the item with the same handle. Reference values are remapped. Filter with `namespaces`. |
+| `metafields` *(opt-in)* | `PRODUCT/handle/namespace.key`, `COLLECTION/handle/…`, `PRODUCTVARIANT/handle/Size=M/…`, `SHOP/namespace.key` | Metafield **values** on products, collections, product variants and the shop. A value lands on the item with the same handle in the target; a variant value on the variant with the same option values; a shop value on the target's own shop. Reference values (including references to variants) are remapped. Filter with `namespaces` and `owner_types`. |
 | `translations` *(opt-in)* | `locale:Type/handle` | Translations of products, pages, collections, metaobjects, menus and policies. Registered against the target's own text, after the content itself is synced. A translated field only the target has is kept. The plan warns when a language isn't added to the target. |
 
-`products`, `metafields` and `translations` can be large, so they're read only when you ask for them (`resources: ["products"]`). Name what you want and only that is read: exact product handles or prefixes (`include: ["linen-shirt", "linen-*"]`) for products, and patterns that name their owner (`include: ["PRODUCT/linen-shirt/*"]`) for metafield values. App-owned (`app--…`) and Shopify-reserved (`shopify--…`) data is skipped and listed in the report.
+`products`, `metafields` and `translations` can be large, so they're read only when you ask for them (`resources: ["products"]`). Name what you want and only that is read: exact product handles or prefixes (`include: ["linen-shirt", "linen-*"]`) for products, and patterns that name their owner (`include: ["PRODUCT/linen-shirt/*", "PRODUCTVARIANT/linen-shirt/*", "SHOP/*"]`) for metafield values. `owner_types` (`--owner-types`) limits metafield definitions and values to some owners, e.g. `["SHOP"]`. App-owned (`app--…`) and Shopify-reserved (`shopify--…`) data is skipped and listed in the report.
 
 **Files and images** referenced by any of the above are matched by file name in the target. When one is missing, the plan says so and `apply_plan` uploads it from the source store.
 
@@ -449,6 +449,8 @@ gid://shopify/CustomerAccountPage/12   →  shopify://CustomerAccountPage/orders
 gid://shopify/ShopPolicy/5             →  shopify://ShopPolicy/PRIVACY_POLICY
 gid://shopify/Menu/41                  →  shopify://Menu/main-menu
 gid://shopify/MetafieldDefinition/9    →  shopify://MetafieldDefinition/PRODUCT.custom.fabric
+gid://shopify/ProductVariant/4412      →  shopify://ProductVariant/linen-shirt/Size%3DM
+gid://shopify/Shop/1                   →  shopify://Shop
 gid://shopify/MediaImage/730           →  shopify://File/size-chart.png
 ```
 
@@ -513,7 +515,7 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 - [x] Metafield definitions, metaobject definitions and metaobject entries
 - [x] Products: content, category, options, variants matched by option values (SKU, taxable flag, inventory policy), images; new ones as drafts, prices only when asked
 - [x] Collections with smart-collection rules, pages, menus (3 levels, customer account menus too), redirects, store policies
-- [x] Metafield values on products and collections, translations per language, products included (opt-in)
+- [x] Metafield values on products, collections, product variants and the shop, translations per language, products included (opt-in)
 - [x] Images and files matched by file name, uploaded to the target when missing
 - [x] Cross-store ID remapping by handle, including list references and rules on metafield definitions
 - [x] Two-pass writes for items that point at each other or at themselves
@@ -550,8 +552,8 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 - [ ] Batch writes for very large syncs (`urlRedirectImport`, bulk operations): writes run 4 at a time today
 - [ ] Product prices per market and inventory levels, as explicit opt-ins
 - [ ] Barcodes, weight and variant images on products; translations of option names and values
-- [ ] Remap product variants and blog articles, so references to them sync too
-- [ ] Metafield values on variants, pages, blogs and the shop; metafield definition constraints
+- [ ] Remap blog articles, so references to them sync too
+- [ ] Metafield values on pages and blogs; metafield definition constraints
 - [ ] Menu item (link) translations
 - [ ] Markets and market web presences
 - [ ] Undo: restore the previous values of an applied plan from the audit log

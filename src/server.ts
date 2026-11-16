@@ -58,7 +58,9 @@ const scopeArgs = {
   owner_types: z
     .array(z.string())
     .optional()
-    .describe(`Metafield owner types for metafield_definitions. Default: ${DEFAULT_OWNER_TYPES.join(", ")}.`),
+    .describe(
+      `Metafield owner types. For metafield_definitions, default: ${DEFAULT_OWNER_TYPES.join(", ")}. For metafield values (metafields): PRODUCT, COLLECTION, PRODUCTVARIANT, SHOP (all by default).`,
+    ),
   metaobject_types: z.array(z.string()).optional().describe("Limit metaobjects to these types. Default: all non-reserved types."),
   namespaces: z.array(z.string()).optional().describe("Limit metafield values (metafields) to these namespaces."),
   locales: z.array(z.string()).optional().describe("Limit translations to these locales, e.g. [\"fr\", \"de\"]. Default: every non-primary locale."),
