@@ -205,3 +205,31 @@ describe("bulk reads", async () => {
     ]);
   });
 });
+
+describe("bulk writes in parts", async () => {
+  const { bulkMutation, bulkIO } = await import("../src/shopify/bulk.js");
+  it("splits a big write into a few operations at once and keeps results in line order", async () => {
+    const files = new Map<string, string>();
+    const ops = new Map<string, string>();
+    let n = 0;
+    bulkIO.wait = async () => {};
+    bulkIO.upload = async (_u, form) => void files.set(String(form.get("key")), await (form.get("file") as Blob).text());
+    bulkIO.download = async (url) => ops.get(url) ?? "";
+    const client = {
+      store: { alias: "s", domain: "s.myshopify.com" } as any,
+      request: async (q: string, v: any) => {
+        if (q.includes("stagedUploadsCreate")) return { stagedUploadsCreate: { stagedTargets: [{ url: "u", parameters: [{ name: "key", value: `k${++n}` }] }], userErrors: [] } };
+        if (q.includes("bulkOperationRunMutation")) {
+          const lines = files.get(v.stagedUploadPath)!.split("\n");
+          ops.set(`dl-${v.stagedUploadPath}`, lines.map((l, i) => JSON.stringify({ data: { echo: JSON.parse(l).x }, __lineNumber: i })).join("\n"));
+          return { bulkOperationRunMutation: { bulkOperation: { id: v.stagedUploadPath }, userErrors: [] } };
+        }
+        return { node: { status: "COMPLETED", errorCode: null, objectCount: "0", url: `dl-${v.id}`, partialDataUrl: null } };
+      },
+    };
+    const lines = Array.from({ length: 250 }, (_, i) => ({ x: i }));
+    const res = await bulkMutation(client as any, "mutation M($x: Int) { echo }", lines);
+    expect(n).toBe(3);
+    expect(res.map((r) => r.data?.echo)).toEqual(lines.map((l) => l.x));
+  });
+});

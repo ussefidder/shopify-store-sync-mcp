@@ -355,7 +355,7 @@ export class RefToGidResolver {
       group.forEach((r, i) => {
         const id = byName.get(names[i]!);
         if (id) this.cache.set(r, Promise.resolve(id));
-        else if (complete && !this.uploads?.has(r)) this.cache.set(r, Promise.resolve(undefined));
+        else if (complete && (!this.allowUploads || !this.uploads?.has(r))) this.cache.set(r, Promise.resolve(undefined));
       });
     });
   }

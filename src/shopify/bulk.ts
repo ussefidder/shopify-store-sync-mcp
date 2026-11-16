@@ -130,20 +130,15 @@ const defaultUpload: Upload = async (url, form) => {
 /** Thrown when a bulk write can't start at all, so the caller can fall back to one request per item. */
 export class BulkUnavailable extends Error {}
 
-/**
- * Run the mutation once per entry of `lines` (its variables) as one bulk operation.
- * Returns one result per line, in line order: the mutation's data, or the errors for that line.
- */
-export async function bulkMutation(
-  client: AdminClient,
-  mutation: string,
-  lines: Record<string, unknown>[],
-  opts: BulkOptions & { upload?: Upload } = {},
-): Promise<{ data?: Record<string, any>; errors?: { message: string }[] }[]> {
-  const domain = client.store.domain;
-  if (!lines.length) return [];
-  const jsonl = lines.map((l) => JSON.stringify(l)).join("\n");
+/** How many bulk write operations run at once on one store (Shopify allows 5 from API 2026-01). */
+export const bulkParallel = () => envNumber("SYNC_BULK_PARALLEL", 5);
 
+type LineResult = { data?: Record<string, any>; errors?: { message: string }[] };
+
+/** Upload one file of variables and start the bulk operation on it. Returns its id. */
+async function startMutation(client: AdminClient, mutation: string, lines: Record<string, unknown>[], opts: { upload?: Upload }): Promise<string> {
+  const domain = client.store.domain;
+  const jsonl = lines.map((l) => JSON.stringify(l)).join("\n");
   const staged = await client.request<{
     stagedUploadsCreate: { stagedTargets: { url: string; parameters: { name: string; value: string }[] }[]; userErrors: { message: string }[] };
   }>(STAGE, { input: [{ resource: "BULK_MUTATION_VARIABLES", filename: "variables.jsonl", mimeType: "text/jsonl", httpMethod: "POST" }] });
@@ -160,7 +155,6 @@ export async function bulkMutation(
   });
   const path = target.parameters.find((p) => p.name === "key")?.value;
   if (!path) throw new BulkUnavailable(`${domain}: bulk write upload returned no path`);
-
   const started = await client.request<{
     bulkOperationRunMutation: { bulkOperation: { id: string } | null; userErrors: { message: string; code?: string }[] };
   }>(RUN_MUTATION, { mutation, stagedUploadPath: path });
@@ -168,11 +162,53 @@ export async function bulkMutation(
   if (userErrors?.length || !bulkOperation) {
     throw new BulkUnavailable(`${domain}: bulk write could not start: ${userErrors.map((e) => e.message).join("; ") || "no operation returned"}`);
   }
-  const rows = await pollAndDownload(client, bulkOperation.id, opts);
-  const out: { data?: Record<string, any>; errors?: { message: string }[] }[] = lines.map(() => ({ errors: [{ message: "no result for this line" }] }));
-  for (const r of rows) {
-    const i = Number(r.__lineNumber);
-    if (Number.isInteger(i) && i >= 0 && i < out.length) out[i] = { data: r.data ?? undefined, errors: r.errors ?? undefined };
+  return bulkOperation.id;
+}
+
+/**
+ * Run the mutation once per entry of `lines` (its variables), as a few bulk operations at once.
+ * Returns one result per line, in line order: the mutation's data, or the errors for that line.
+ */
+export async function bulkMutation(
+  client: AdminClient,
+  mutation: string,
+  lines: Record<string, unknown>[],
+  opts: BulkOptions & { upload?: Upload } = {},
+): Promise<LineResult[]> {
+  if (!lines.length) return [];
+  // Shopify works through one operation's lines one after the other, so big writes are split.
+  const parts = Math.max(1, Math.min(bulkParallel(), Math.ceil(lines.length / 100)));
+  const size = Math.ceil(lines.length / parts);
+  const chunks = Array.from({ length: parts }, (_, i) => ({ start: i * size, lines: lines.slice(i * size, i * size + size) })).filter((c) => c.lines.length);
+
+  const running: Promise<void>[] = [];
+  const out: LineResult[] = lines.map(() => ({ errors: [{ message: "no result for this line" }] }));
+  const collect = (start: number, count: number, rows: Record<string, any>[]) => {
+    for (const r of rows) {
+      const n = Number(r.__lineNumber);
+      if (Number.isInteger(n) && n >= 0 && n < count) out[start + n] = { data: r.data ?? undefined, errors: r.errors ?? undefined };
+    }
+  };
+  for (const [n, c] of chunks.entries()) {
+    let id: string;
+    try {
+      id = await startMutation(client, mutation, c.lines, opts);
+    } catch (e) {
+      // The store runs fewer at once than asked (an older API version, say): finish the running ones, then go on.
+      if (!(e instanceof BulkUnavailable) || n === 0) throw e;
+      try {
+        if (!/limit|in progress|already/i.test(e.message)) throw e;
+        await Promise.all(running.splice(0));
+        id = await startMutation(client, mutation, c.lines, opts);
+      } catch (again) {
+        // Earlier parts are already writing, so this part is reported as not written rather than retried one by one.
+        const message = `not written: ${(again as Error).message}`;
+        c.lines.forEach((_, k) => (out[c.start + k] = { errors: [{ message }] }));
+        continue;
+      }
+    }
+    running.push(pollAndDownload(client, id, opts).then((rows) => collect(c.start, c.lines.length, rows)));
   }
+  await Promise.all(running);
   return out;
 }

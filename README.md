@@ -286,6 +286,7 @@ You can also pass the whole config as JSON in `SHOPIFY_STORES`, or point `SHOPIF
 | `SYNC_WRITE_CONCURRENCY` | `4` | How many independent writes run at once |
 | `SYNC_BULK_THRESHOLD` | `250` | Above this many products, reads and new products (and metafield values) go through one Shopify bulk operation instead of single requests |
 | `SYNC_BULK_TIMEOUT_MS` | `1800000` | How long to wait for a bulk operation to finish |
+| `SYNC_BULK_PARALLEL` | `5` | How many bulk write operations run at once on one store (a big write is split into parts) |
 | `SYNC_CLI_CONCURRENCY` | `4` | With the Shopify CLI sign-in, how many `shopify` processes run at once per store (up to 16) |
 | `SYNC_AUDIT_LOG` | `~/.shopify-store-sync/audit.log` | Where every write is logged |
 | `SYNC_STATE_DIR` | `~/.shopify-store-sync` | Where plans and the audit log are kept |
@@ -503,7 +504,7 @@ Two references followed from the source store to the target, as the sample sync 
 ## Tested on real stores
 
 <p align="center">
-  <img src="docs/images/tested.png" alt="138 automated tests, 79 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
+  <img src="docs/images/tested.png" alt="139 automated tests, 79 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
 </p>
 
 <details>
@@ -579,7 +580,7 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 - [x] Published on npm, runs with `npx`
 
 *Quality*
-- [x] 138 automated tests against an in-memory Shopify, plus MCP protocol tests
+- [x] 139 automated tests against an in-memory Shopify, plus MCP protocol tests
 - [x] Every GraphQL operation validated against Shopify's schema for 2026-04, 2026-10 and 2027-01
 - [x] Tested live between two stores on Linux and Windows, Shopify CLI 4.9 and 5
 - [x] Parallel reads and writes (metaobject types read and entries written in parallel; the check before writing re-reads only what the plan touches) with throttle-aware retries; clear errors for missing installs, expired sign-ins and auto-managed policies
