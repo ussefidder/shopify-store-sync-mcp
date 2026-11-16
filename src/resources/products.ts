@@ -747,6 +747,7 @@ export const products: ResourceAdapter = {
       input: withSources(inputs[k]!, ctx.files),
     }));
     for (const [k, r] of early) ctx.onDone?.(k, r);
+    ctx.onPhase?.(`writing ${lines.length} products in Shopify bulk operations`);
     const toResult = (r: LineResult): { id?: string; error?: string } => {
       const ps = r.data?.productSet;
       const errors = [...(r.errors ?? []), ...(ps?.userErrors ?? [])].map((e: { message: string }) => e.message);

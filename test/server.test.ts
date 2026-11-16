@@ -18,6 +18,7 @@ type Answer = { action: "accept" | "decline" | "cancel"; content?: Record<string
  */
 async function connect(opts: { answer?: (message: string) => Answer; env?: NodeJS.ProcessEnv; cwd?: string } = {}) {
   process.env.SYNC_AUDIT_LOG = join(mkdtempSync(join(tmpdir(), "audit-")), "audit.log");
+  process.env.SYNC_STATE_DIR = mkdtempSync(join(tmpdir(), "state-"));
   const dev = new FakeShop(FakeShop.config("dev", { accessToken: "shpat_secret_dev" }), {
     redirects: [{ id: "gid://shopify/UrlRedirect/1", path: "/a", target: "/b" }],
     pages: [{ id: "gid://shopify/Page/1", handle: "faq", title: "FAQ", body: "x", isPublished: true, templateSuffix: null }],
@@ -183,6 +184,11 @@ describe("MCP server", () => {
       expect(status.json).toMatchObject({ state: "done", planStatus: "applied", totals: { created: 2, failed: 0, left: 0 } });
       expect(status.json.byResource.pages).toMatchObject({ total: 1, created: 1, left: 0 });
       expect(prod.mutations()).toHaveLength(2);
+      // The same status is in a file, for `shopify-store-sync-mcp status` in a terminal.
+      const { readJobFile, jobLine } = await import("../src/jobs.js");
+      const file = readJobFile(join(process.env.SYNC_STATE_DIR!, "jobs"))!;
+      expect(file).toMatchObject({ plan_id: plan.json.plan_id, state: "done", totals: { created: 2, left: 0 } });
+      expect(jobLine(file)).toMatch(/^done: 2 of 2 steps finished \| 2 written, 0 failed, 0 left/);
       // Waiting is still possible, and a finished plan isn't applied twice.
       expect((await call("apply_plan", { plan_id: plan.json.plan_id, wait: true })).text).toMatch(/Refused: plan was already applied/);
     });

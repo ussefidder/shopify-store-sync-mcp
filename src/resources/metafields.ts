@@ -295,6 +295,7 @@ export const metafields: ResourceAdapter = {
         }),
       }));
       const first = round === 0;
+      ctx.onPhase?.(`writing ${pending.length} metafield values in Shopify bulk operations${first ? "" : ` (retry ${round})`}`);
       const res = await bulkMutation(ctx.client, BULK_SET, lines, {
         timeoutMs: bulkTimeoutMs(),
         onProgress: first ? (n) => ctx.onWritten?.(Math.min(n * 25, items.length)) : undefined,

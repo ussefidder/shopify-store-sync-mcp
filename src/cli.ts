@@ -1,15 +1,17 @@
+import { join } from "node:path";
 import { ApplyRefused } from "./apply.js";
 import { DEFAULT_API_VERSION, loadStores, StoreRegistry, type StoreConfig } from "./config.js";
 import { preview, type ResourceDiff } from "./diff.js";
 import { Engine, type ItemCheck, type Scope } from "./engine.js";
-import type { Plan } from "./plan.js";
+import { jobLine, readJobFile } from "./jobs.js";
+import { stateDir, type Plan } from "./plan.js";
 import { RESOURCE_KINDS, type ResourceKind } from "./resources/index.js";
 import { createReporter } from "./progress.js";
 import { checkMarkdown, diffMarkdown, planMarkdown, scopeLine, themesMarkdown } from "./report.js";
 import { summarizeDiff, summarizePlan, summarizeThemes } from "./server.js";
 import { checkCliVersion, cliBin, scopesFor, ShopifyCliClient, spawnCli } from "./shopify/cliClient.js";
 
-export const COMMANDS = ["connect", "stores", "diff", "check", "plan", "plans", "apply", "export", "themes", "help"] as const;
+export const COMMANDS = ["connect", "stores", "diff", "check", "plan", "plans", "apply", "status", "export", "themes", "help"] as const;
 
 const HELP = `shopify-store-sync: diff and sync configuration between Shopify stores
 
@@ -24,6 +26,9 @@ Usage
   shopify-store-sync-mcp plan   <source> <target> dry-run plan, prints a plan id
   shopify-store-sync-mcp apply  <plan-id>         apply a plan
   shopify-store-sync-mcp plans                    list recent plans
+  shopify-store-sync-mcp status [plan-id] [--watch]
+                                                  how far an apply started from an MCP client has got;
+                                                  --watch keeps the line updating until it finishes
   shopify-store-sync-mcp export <store> <dir>     write a store's config to files (for git)
   shopify-store-sync-mcp themes <source> <target> compare theme settings (read-only)
 
@@ -166,6 +171,21 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.en
   if (!cmd || cmd === "help") {
     console.log(HELP);
     return 0;
+  }
+  if (cmd === "status") {
+    // Reads the status file the MCP server writes while it applies; no store is contacted.
+    const dir = join(stateDir(env), "jobs");
+    for (;;) {
+      const j = readJobFile(dir, a);
+      if (!j) {
+        console.error(a ? `no apply found for plan ${a}` : "no apply has been started from an MCP client yet");
+        return 1;
+      }
+      if (asJson) out(j);
+      else console.log(`[${new Date().toTimeString().slice(0, 8)}] ${jobLine(j)}`);
+      if (j.state !== "running" || flags.watch !== true || asJson) return j.state === "error" || j.totals.failed ? 1 : 0;
+      await new Promise((r) => setTimeout(r, 10_000));
+    }
   }
   const engine = injected ?? new Engine(new StoreRegistry(loadStores(env)));
   const need = (...vals: (string | undefined)[]) => {

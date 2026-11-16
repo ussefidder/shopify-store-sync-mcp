@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { isAbsolute, parse as parsePath, relative, resolve } from "node:path";
+import { isAbsolute, join, parse as parsePath, relative, resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ElicitResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
@@ -8,7 +8,7 @@ import { ApplyJobs, jobStatus } from "./jobs.js";
 import type { StoreConfig, StoreRegistry } from "./config.js";
 import { preview, type ResourceDiff } from "./diff.js";
 import { DIR_PREFIX, Engine, isDirSpec, type Scope } from "./engine.js";
-import { PlanStore, type Plan } from "./plan.js";
+import { PlanStore, stateDir, type Plan } from "./plan.js";
 import { ADAPTERS, DEFAULT_KINDS, RESOURCE_KINDS, type ResourceKind } from "./resources/index.js";
 import { DEFAULT_OWNER_TYPES } from "./resources/metafieldDefinitions.js";
 import { envNumber, type AdminClient } from "./shopify/client.js";
@@ -227,7 +227,7 @@ function tallies(results: OpResult[]) {
 export function createServer(deps: ServerDeps): McpServer {
   const engine = new Engine(deps.registry, deps.plans ?? new PlanStore(), deps.clientFactory);
   const env = deps.env ?? process.env;
-  const jobs = new ApplyJobs();
+  const jobs = new ApplyJobs(join(stateDir({ ...process.env, ...env }), "jobs"));
   /** Plans with more steps than this are applied in the background unless the caller asks to wait. */
   const backgroundSteps = envNumber("SYNC_BACKGROUND_STEPS", 50, env);
   const base = () => snapshotBase(env, deps.cwd);

@@ -1,3 +1,5 @@
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ApplyOptions, OpResult } from "./apply.js";
 import type { Plan } from "./plan.js";
 
@@ -37,6 +39,24 @@ const KEEP_FINISHED = 20;
 
 export class ApplyJobs {
   private jobs = new Map<string, ApplyJob>();
+  private lastWrite = new Map<string, number>();
+
+  /** `dir`: where each job's status is also written as JSON, so `shopify-store-sync-mcp status` can show it live. */
+  constructor(private readonly dir?: string) {}
+
+  /** Write the job's status file, at most every 2 seconds unless `force`. */
+  private persist(job: ApplyJob, force = false) {
+    if (!this.dir) return;
+    const now = Date.now();
+    if (!force && now - (this.lastWrite.get(job.planId) ?? 0) < 2000) return;
+    this.lastWrite.set(job.planId, now);
+    try {
+      mkdirSync(this.dir, { recursive: true });
+      writeFileSync(join(this.dir, `${job.planId}.json`), JSON.stringify({ ...jobStatus(job, now), updatedAt: new Date(now).toISOString() }, null, 2));
+    } catch {
+      // A status file is a convenience; the apply goes on without it.
+    }
+  }
 
   get(planId: string): ApplyJob | undefined {
     return this.jobs.get(planId);
@@ -80,16 +100,19 @@ export class ApplyJobs {
       ...opts,
       onPhase: (m) => {
         job.phase = m;
+        this.persist(job, true);
         opts.onPhase?.(m);
       },
       onResult: (r) => {
         job.results.set(r.seq, r);
         if (r.outcome !== "skipped") job.firstWriteAt ??= now();
+        this.persist(job);
         opts.onResult?.(r);
       },
       onBulkProgress: (kind, written, total) => {
         const before = job.bulk?.kind === kind ? job.bulk.before : [...job.results.values()].filter((r) => r.kind === kind).length;
         job.bulk = written >= total ? undefined : { kind, written, total, before };
+        this.persist(job);
         opts.onBulkProgress?.(kind, written, total);
       },
     };
@@ -100,14 +123,17 @@ export class ApplyJobs {
         job.finishedAt = now();
         job.bulk = undefined;
         job.phase = "finished";
+        this.persist(job, true);
       },
       (err: unknown) => {
         job.state = "error";
         job.error = err instanceof Error ? err.message : String(err);
         job.finishedAt = now();
         job.bulk = undefined;
+        this.persist(job, true);
       },
     );
+    this.persist(job, true);
     return job;
   }
 
@@ -167,4 +193,33 @@ export function jobStatus(job: ApplyJob, now: number = Date.now(), failuresShown
         ? "Still writing. Call apply_status again in a minute or two; every result is also in the audit log."
         : "Finished. Every result is in the audit log.",
   };
+}
+
+export type JobFile = ReturnType<typeof jobStatus> & { updatedAt: string };
+
+/** The status file of one apply, or of the most recent one. */
+export function readJobFile(dir: string, planId?: string): JobFile | undefined {
+  try {
+    const name =
+      planId ? `${planId}.json` : readdirSync(dir).filter((f) => f.endsWith(".json")).sort((a, b) => statSync(join(dir, b)).mtimeMs - statSync(join(dir, a)).mtimeMs)[0];
+    return name ? (JSON.parse(readFileSync(join(dir, name), "utf8")) as JobFile) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** One line for a terminal: written, failed and left, the bulk progress and the time left. */
+export function jobLine(j: JobFile, now = Date.now()): string {
+  const t = j.totals;
+  const age = Math.round((now - Date.parse(j.updatedAt)) / 1000);
+  const stale = j.state === "running" && age > 600 ? `  (no news for ${Math.round(age / 60)} min: is the server still running?)` : "";
+  return [
+    `${j.state}: ${j.progress}`,
+    `${t.created + t.updated} written, ${t.failed} failed, ${t.left} left`,
+    j.bulk,
+    j.remaining ? `about ${j.remaining} left` : undefined,
+    `elapsed ${j.elapsed}`,
+  ]
+    .filter(Boolean)
+    .join(" | ") + `\n  ${j.phase}${stale}`;
 }
