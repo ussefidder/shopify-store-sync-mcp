@@ -361,3 +361,13 @@ describe("decimals written two ways", async () => {
     expect(diffItems("metafields", mf("0.40", "single_line_text_field"), mf("0.4", "single_line_text_field")).changed).toHaveLength(1);
   });
 });
+
+describe("snapshot folders read like a store", async () => {
+  const { applyView } = await import("../src/snapshot.js");
+  const product = { handle: "tee", variants: [{ options: { Size: "M" }, sku: "T-M", price: "37", inventory: { Shop: 27 } }] };
+  it("leaves prices and stock out unless asked for", () => {
+    expect(applyView("products", product, {}).variants).toEqual([{ options: { Size: "M" }, sku: "T-M" }]);
+    expect(applyView("products", product, { prices: true, inventory: true }).variants).toEqual(product.variants);
+    expect(applyView("products", product, { inventory: true }).variants).toEqual([{ options: { Size: "M" }, sku: "T-M", inventory: { Shop: 27 } }]);
+  });
+});

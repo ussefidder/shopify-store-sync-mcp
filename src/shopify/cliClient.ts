@@ -272,8 +272,13 @@ export class ShopifyCliClient implements AdminClient {
         if (out?.error) {
           const msg = out.error.message ?? "Shopify CLI failed";
           if (/no stored app authentication|re-run .*store auth|missing.*scope|not authenticated|expired/i.test(msg)) {
+            // Another process may be renewing the same sign-in at this moment: a read is asked once more.
+            if (!mutation && attempt < 1 && !/no stored app authentication/i.test(msg)) {
+              await this.wait(1500);
+              continue;
+            }
             throw new ShopifyError(
-              `${this.store.domain}: not signed in through Shopify CLI, or the sign-in expired or lacks a scope. Run: shopify-store-sync-mcp connect ${this.store.alias}`,
+              `${this.store.domain}: not signed in through Shopify CLI, or the sign-in expired or lacks a scope (Shopify CLI said: ${msg.trim().slice(0, 300)}). Run: shopify-store-sync-mcp connect ${this.store.alias}`,
               out.error,
             );
           }

@@ -87,8 +87,19 @@ describe("Shopify CLI sign-in", () => {
       stderr: "",
     });
     await expect(new ShopifyCliClient(store, run, "shopify").request("query { shop { name } }")).rejects.toThrow(
-      "not signed in through Shopify CLI, or the sign-in expired or lacks a scope. Run: shopify-store-sync-mcp connect dev",
+      "not signed in through Shopify CLI, or the sign-in expired or lacks a scope (Shopify CLI said: No stored app authentication found for dev.myshopify.com.). Run: shopify-store-sync-mcp connect dev",
     );
+  });
+
+  it("asks a read once more when the sign-in looks expired, in case another process was renewing it", async () => {
+    let calls = 0;
+    const run: Runner = async () =>
+      ++calls === 1
+        ? { code: 1, stdout: `${progress}\n{"error":{"type":"abort","message":"Your store auth has expired. Re-run shopify store auth.","nextSteps":[]}}`, stderr: "" }
+        : { code: 0, stdout: `${progress}\n{"shop":{"name":"Dev"}}`, stderr: "" };
+    const client = new ShopifyCliClient(cliStore("dev"), run, "shopify", undefined, async () => {});
+    await expect(client.request("query { shop { name } }")).resolves.toEqual({ shop: { name: "Dev" } });
+    expect(calls).toBe(2);
   });
 
   it("runs at most a few CLI processes at once", async () => {

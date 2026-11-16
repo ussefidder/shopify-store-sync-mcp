@@ -19,7 +19,16 @@ export interface Snapshot {
 
 /** The data as the read options ask for it (today: without published state when `drafts` is on). */
 export function applyView(kind: ResourceKind, data: Record<string, unknown>, opts: FetchOptions): Record<string, unknown> {
-  return opts.drafts ? draftView(kind, data) : data;
+  let out = opts.drafts ? draftView(kind, data) : data;
+  // A folder may hold prices and stock; they are compared only when asked for, as with a store.
+  if (kind === "products" && Array.isArray(out.variants) && (!opts.prices || !opts.inventory)) {
+    const variants = (out.variants as Record<string, unknown>[]).map((v) => {
+      const { price, compareAtPrice, inventory, ...rest } = v;
+      return { ...rest, ...(opts.prices ? { price, compareAtPrice } : {}), ...(opts.inventory ? { inventory } : {}) };
+    });
+    out = { ...out, variants: variants.map((v) => Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined))) };
+  }
+  return out;
 }
 
 /** Called when one resource type has been read from a store. */

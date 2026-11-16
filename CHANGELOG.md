@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.1
+
+- "Not signed in" errors now include what Shopify CLI said, and a read that hits an expired-looking sign-in is asked once more, in case another process was renewing it at that moment
+- A snapshot folder holding prices or stock no longer shows them as differences unless `prices` or `inventory` is asked for, the same as when reading a store
+
 ## 0.10.0
 
 - **A big apply no longer blocks.** A plan of more than 50 steps (`SYNC_BACKGROUND_STEPS`) is applied in the background and `apply_plan` returns at once, so a client's time limit on one call no longer cuts it off. Pass `wait: true` to wait as before
