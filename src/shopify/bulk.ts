@@ -31,7 +31,7 @@ const POLL = /* GraphQL */ `
 export type Download = (url: string) => Promise<string>;
 
 const defaultDownload: Download = async (url) => {
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(5 * 60_000) });
   if (!res.ok) throw new Error(`download failed with HTTP ${res.status}`);
   return res.text();
 };
@@ -74,19 +74,35 @@ async function pollAndDownload(client: AdminClient, id: string, opts: BulkOption
   const wait = opts.wait ?? bulkIO.wait;
   const pollMs = opts.pollMs ?? 2000;
   const deadline = Date.now() + (opts.timeoutMs ?? 30 * 60_000);
+  // The operation runs on Shopify's side whatever happens here, so a failed status check or download is
+  // tried again a few times instead of giving up on writes that are going through anyway.
+  let misses = 0;
+  const again = async (e: Error, what: string) => {
+    if (++misses > 5) throw new ShopifyError(`${domain}: bulk operation ${id}: ${what} kept failing (${e.message}). It may still finish on Shopify's side.`);
+    await wait(Math.min(30_000, pollMs * 2 ** misses));
+  };
   for (;;) {
     await wait(pollMs);
-    const { node } = await client.request<{
-      node: { status: string; errorCode: string | null; objectCount: string; url: string | null; partialDataUrl: string | null } | null;
-    }>(POLL, { id });
+    let node: { status: string; errorCode: string | null; objectCount: string; url: string | null; partialDataUrl: string | null } | null;
+    try {
+      ({ node } = await client.request<{ node: typeof node }>(POLL, { id }));
+    } catch (e) {
+      await again(e as Error, "checking its status");
+      continue;
+    }
     if (!node) throw new ShopifyError(`${domain}: bulk operation ${id} disappeared`);
     if (node.status === "COMPLETED") {
       if (!node.url) return [];
-      const text = await (opts.download ?? bulkIO.download)(node.url).catch((e: Error) => {
-        throw new ShopifyError(`${domain}: bulk operation finished but its file could not be downloaded: ${e.message}`);
-      });
+      let text: string;
+      try {
+        text = await (opts.download ?? bulkIO.download)(node.url);
+      } catch (e) {
+        await again(e as Error, "downloading its results");
+        continue;
+      }
       return parseJsonl(text);
     }
+    misses = 0;
     if (node.status === "FAILED" || node.status === "CANCELED" || node.status === "EXPIRED") {
       throw new ShopifyError(`${domain}: bulk operation ${node.status.toLowerCase()}${node.errorCode ? ` (${node.errorCode})` : ""}`);
     }
@@ -123,7 +139,7 @@ const RUN_MUTATION = /* GraphQL */ `
 export type Upload = (url: string, form: FormData) => Promise<void>;
 
 const defaultUpload: Upload = async (url, form) => {
-  const res = await fetch(url, { method: "POST", body: form });
+  const res = await fetch(url, { method: "POST", body: form, signal: AbortSignal.timeout(5 * 60_000) });
   if (!res.ok) throw new Error(`upload failed with HTTP ${res.status}`);
 };
 

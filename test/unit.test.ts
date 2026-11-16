@@ -180,6 +180,29 @@ describe("bulk reads", async () => {
     expect(rows.map((r) => r.id)).toEqual(["gid://shopify/Product/1", "gid://shopify/Product/2"]);
   });
 
+  it("keeps waiting through a few failed status checks and downloads: the operation runs on Shopify's side anyway", async () => {
+    let polls = 0;
+    let downloads = 0;
+    const client = {
+      store,
+      request: async (q: string) => {
+        if (/bulkOperationRunQuery/.test(q)) return { bulkOperationRunQuery: { bulkOperation: { id: "b" }, userErrors: [] } };
+        if (++polls <= 2) throw new Error("Shopify CLI gave no answer and was stopped");
+        return { node: { status: "COMPLETED", errorCode: null, objectCount: "1", url: "https://files/x.jsonl", partialDataUrl: null } };
+      },
+    };
+    const rows = await bulkQuery(client as any, "{}", {
+      wait: async () => {},
+      download: async () => {
+        if (++downloads === 1) throw new Error("socket hang up");
+        return '{"id":"1"}';
+      },
+    });
+    expect(rows).toEqual([{ id: "1" }]);
+    const dead = { store, request: async (q: string) => (/RunQuery/.test(q) ? { bulkOperationRunQuery: { bulkOperation: { id: "b" }, userErrors: [] } } : Promise.reject(new Error("offline"))) };
+    await expect(bulkQuery(dead as any, "{}", { wait: async () => {} })).rejects.toThrow(/checking its status kept failing \(offline\)/);
+  });
+
   it("says why when Shopify fails the operation", async () => {
     const client = {
       store,

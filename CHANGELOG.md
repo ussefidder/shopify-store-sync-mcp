@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.2
+
+- A bulk write no longer stops the whole apply when one status check or result download fails: it tries again a few times, since the operation keeps running on Shopify's side. In the 4,000-product live test on 0.9.2, all products arrived but the apply stopped silently before the metafield values
+- Bulk file uploads and downloads give up after 5 minutes instead of waiting forever
+
 ## 0.10.1
 
 - "Not signed in" errors now include what Shopify CLI said, and a read that hits an expired-looking sign-in is asked once more, in case another process was renewing it at that moment
