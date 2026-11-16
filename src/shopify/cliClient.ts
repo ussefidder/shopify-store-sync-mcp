@@ -190,12 +190,13 @@ export function parseCliOutput(text: string): CliOutput | undefined {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** At most this many `shopify` processes run at once per store. */
-export const CLI_CONCURRENCY = 4;
+/** At most this many `shopify` processes run at once per store (SYNC_CLI_CONCURRENCY, default 4). */
+export const cliConcurrency = () => Math.max(1, Math.min(16, envNumber("SYNC_CLI_CONCURRENCY", 4)));
 
 export class ShopifyCliClient implements AdminClient {
   private active = 0;
   private readonly queue: (() => void)[] = [];
+  private readonly limit = cliConcurrency();
 
   constructor(
     readonly store: StoreConfig,
@@ -206,7 +207,7 @@ export class ShopifyCliClient implements AdminClient {
   ) {}
 
   async request<T = any>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
-    if (this.active >= CLI_CONCURRENCY) await new Promise<void>((r) => this.queue.push(r));
+    if (this.active >= this.limit) await new Promise<void>((r) => this.queue.push(r));
     this.active++;
     try {
       return await this.execute<T>(query, variables);

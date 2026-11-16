@@ -1,13 +1,14 @@
 import { applyPlan, type ApplyOptions, type OpResult } from "./apply.js";
 import type { StoreConfig, StoreRegistry } from "./config.js";
-import { diffItems, type KeyFilter, type ResourceDiff } from "./diff.js";
+import { diffItems, type FieldChange, type KeyFilter, type ResourceDiff } from "./diff.js";
 import { buildPlan, PlanStore, type Plan } from "./plan.js";
-import { RefToGidResolver } from "./refs.js";
+import { collectRefs, REF_PREFIX, RefToGidResolver, UNRESOLVED_PREFIX } from "./refs.js";
 import { DEFAULT_KINDS, type FetchOptions, type ResourceKind } from "./resources/index.js";
 import { ShopifyAdminClient, type AdminClient } from "./shopify/client.js";
 import { ShopifyCliClient } from "./shopify/cliClient.js";
 import { applyView, takeSnapshot, type ReadProgress, type Snapshot } from "./snapshot.js";
 import { exportSnapshot, readSnapshot, type ExportResult } from "./snapshotFiles.js";
+import { keySet, metafieldOwnersOf, ownerTypesOf, productHandlesOf } from "./narrow.js";
 import { diffThemes, type ThemeDiff, type ThemeDiffOptions } from "./themes.js";
 
 /** One place for everything the MCP tools and the CLI do, so both behave the same. */
@@ -28,14 +29,42 @@ export interface Scope {
   includeReserved?: boolean;
 }
 
+export interface ItemCheck {
+  kind: ResourceKind;
+  key: string;
+  source: string;
+  target: string;
+  status: "identical" | "different" | "only in source" | "only in target" | "in neither";
+  changes: FieldChange[];
+  sourceData?: Record<string, unknown>;
+  targetData?: Record<string, unknown>;
+  /** Items the checked item points at (as "Product/linen-shirt" etc.), and whether the target has them. */
+  refs: { ref: string; inTarget: boolean | string }[];
+  notCompared: { kind: string; key: string; reason: string }[];
+}
+
 export const DIR_PREFIX = "dir:";
 
 export function isDirSpec(spec: string): boolean {
   return spec.startsWith(DIR_PREFIX);
 }
 
+/** What a long run is doing, for a progress display. All optional. */
+export interface EngineEvents {
+  /** A request was sent to a store. */
+  request?: (store: string) => void;
+  /** A resource type was read from a store. */
+  read?: (store: string, kind: ResourceKind, items: number) => void;
+  /** The run moved to its next phase. */
+  phase?: (message: string) => void;
+  /** A write step finished. */
+  step?: (done: number, total: number, message: string) => void;
+}
+
 export class Engine {
   private readonly clients = new Map<string, AdminClient>();
+  /** Progress listeners (the command line sets them; the MCP server reports through its own). */
+  events: EngineEvents = {};
 
   constructor(
     readonly registry: StoreRegistry,
@@ -46,7 +75,15 @@ export class Engine {
   client(alias: string): AdminClient {
     let c = this.clients.get(alias);
     if (!c) {
-      c = this.clientFactory(this.registry.get(alias));
+      const inner = this.clientFactory(this.registry.get(alias));
+      // Every request is counted for the progress display; the client itself is untouched.
+      c = {
+        store: inner.store,
+        request: <T>(query: string, variables?: Record<string, unknown>) => {
+          this.events.request?.(alias);
+          return inner.request<T>(query, variables);
+        },
+      };
       this.clients.set(alias, c);
     }
     return c;
@@ -67,59 +104,13 @@ export class Engine {
       drafts: scope.drafts || undefined,
       productHandles: Engine.productHandles(scope.include),
       metafieldOwners: Engine.metafieldOwners(scope.include),
+      keys: keySet(scope.include),
     };
   }
 
-  /**
-   * When every include pattern starts with a metafield owner type ("PRODUCT.*", "COLLECTION.custom.*"),
-   * metafield definitions are read for those owner types only.
-   */
-  static ownerTypes(include?: string[]): FetchOptions["ownerTypes"] {
-    if (!include?.length) return undefined;
-    const types: string[] = [];
-    for (const p of include) {
-      const m = /^([A-Z][A-Z_]*)\./.exec(p);
-      if (!m) return undefined;
-      if (!types.includes(m[1]!)) types.push(m[1]!);
-    }
-    return types;
-  }
-
-  /**
-   * When every include pattern names its owner ("PRODUCT/linen-shirt/*", "COLLECTION/sale/custom.x",
-   * "PRODUCTVARIANT/linen-shirt/*", "SHOP/custom.*"), metafield values are read from those owners only.
-   */
-  static metafieldOwners(include?: string[]): FetchOptions["metafieldOwners"] {
-    if (!include?.length) return undefined;
-    const owners: { PRODUCT: string[]; COLLECTION: string[]; PRODUCTVARIANT: string[]; SHOP: boolean } = { PRODUCT: [], COLLECTION: [], PRODUCTVARIANT: [], SHOP: false };
-    for (const p of include) {
-      if (p.startsWith("SHOP/")) {
-        owners.SHOP = true;
-        continue;
-      }
-      const m = /^(PRODUCT|COLLECTION|PRODUCTVARIANT)\/([a-z0-9][a-z0-9-]*)\/.+$/.exec(p);
-      if (!m) return undefined;
-      const list = owners[m[1] as "PRODUCT" | "COLLECTION" | "PRODUCTVARIANT"];
-      if (!list.includes(m[2]!)) list.push(m[2]!);
-    }
-    return owners;
-  }
-
-  /**
-   * When every include pattern is a plain handle or a handle prefix, only those products need reading.
-   * Anything else (a pattern for another resource type, a wildcard in the middle) means a full read.
-   */
-  static productHandles(include?: string[]): FetchOptions["productHandles"] {
-    if (!include?.length) return undefined;
-    const exact: string[] = [];
-    const prefixes: string[] = [];
-    for (const p of include) {
-      const m = /^([a-z0-9][a-z0-9-]*)(\*?)$/.exec(p);
-      if (!m) return undefined;
-      (m[2] ? prefixes : exact).push(m[1]!);
-    }
-    return { exact, prefixes };
-  }
+  static ownerTypes = ownerTypesOf;
+  static metafieldOwners = metafieldOwnersOf;
+  static productHandles = productHandlesOf;
 
   /** Languages present in a snapshot's translations. */
   static locales(snapshot: Snapshot): string[] {
@@ -143,7 +134,15 @@ export class Engine {
       }
       return snapshot;
     }
-    return takeSnapshot(this.client(spec), kinds, opts, onRead);
+    return takeSnapshot(this.client(spec), kinds, opts, this.reading(onRead));
+  }
+
+  /** The caller's read callback, plus the progress listener. */
+  private reading(onRead?: ReadProgress): ReadProgress {
+    return (store, kind, items) => {
+      onRead?.(store, kind, items);
+      this.events.read?.(store, kind, items);
+    };
   }
 
   async snapshot(spec: string, scope: Scope): Promise<{ snapshot: Snapshot; diffs: ResourceDiff[] }> {
@@ -188,10 +187,47 @@ export class Engine {
     return { source: a, target: b, diffs, skipped };
   }
 
+  /**
+   * One item, side by side: whether each store has it, which fields differ, and whether the items
+   * it points at exist in the target. Reads only that item where the resource type allows it.
+   */
+  async check(source: string, target: string, kind: ResourceKind, key: string, scope: Omit<Scope, "resources" | "include"> = {}): Promise<ItemCheck> {
+    const { source: a, target: b, diffs, skipped } = await this.compare(source, target, { ...scope, resources: [kind], include: [key] });
+    const s = a.resources[kind]?.items.find((i) => i.key === key);
+    const t = b.resources[kind]?.items.find((i) => i.key === key);
+    const changes = diffs[0]?.changed.find((c) => c.key === key)?.changes ?? [];
+    const status: ItemCheck["status"] = !s && !t ? "in neither" : !t ? "only in source" : !s ? "only in target" : changes.length ? "different" : "identical";
+
+    // What the source item points at, and whether each exists in the target.
+    const refs: ItemCheck["refs"] = [];
+    const from = s ?? t;
+    if (from && !isDirSpec(target)) {
+      const resolver = new RefToGidResolver(this.client(target));
+      const all = [...collectRefs(from.data)].sort();
+      const found = await Promise.all(all.map((r) => (r.startsWith(UNRESOLVED_PREFIX) ? Promise.resolve(undefined) : resolver.resolve(r))));
+      all.forEach((ref, i) =>
+        refs.push({ ref: ref.slice(REF_PREFIX.length), inTarget: ref.startsWith(UNRESOLVED_PREFIX) ? "can't be matched across stores" : Boolean(found[i]) }),
+      );
+    }
+    return {
+      kind,
+      key,
+      source: a.store,
+      target: b.store,
+      status,
+      changes,
+      sourceData: s?.data,
+      targetData: t?.data,
+      refs,
+      notCompared: skipped.filter((x) => x.key.includes("*")),
+    };
+  }
+
   async plan(source: string, target: string, scope: Scope, onRead?: ReadProgress): Promise<Plan> {
     if (isDirSpec(target)) throw new Error("the target of a sync must be a store, not a snapshot folder");
     const { source: a, diffs, skipped } = await this.compare(source, target, scope, onRead);
     const t = this.client(target);
+    this.events.phase?.(`checking what ${t.store.alias} already has that the changes point at`);
     const plan = await buildPlan({
       source: { alias: a.store, domain: a.domain },
       target: { alias: t.store.alias, domain: t.store.domain },
@@ -244,14 +280,24 @@ export class Engine {
   async apply(planId: string, opts: ApplyOptions = {}): Promise<{ plan: Plan; results: OpResult[] }> {
     const plan = this.plans.get(planId);
     if (!plan) throw new Error(`no plan with id ${planId}`);
-    const results = await applyPlan(plan, this.client(plan.target.alias), opts);
+    const results = await applyPlan(plan, this.client(plan.target.alias), {
+      ...opts,
+      onPhase: (m) => {
+        opts.onPhase?.(m);
+        this.events.phase?.(m);
+      },
+      onProgress: (done, total, m) => {
+        opts.onProgress?.(done, total, m);
+        this.events.step?.(done, total, m);
+      },
+    });
     this.plans.save(plan);
     return { plan, results };
   }
 
   async export(store: string, dir: string, scope: Scope, onRead?: ReadProgress): Promise<ExportResult> {
     if (isDirSpec(store)) throw new Error("export reads from a store; give a store alias");
-    const snapshot = await takeSnapshot(this.client(store), Engine.kinds(scope), Engine.fetchOptions(scope), onRead);
+    const snapshot = await takeSnapshot(this.client(store), Engine.kinds(scope), Engine.fetchOptions(scope), this.reading(onRead));
     return exportSnapshot(snapshot, dir);
   }
 

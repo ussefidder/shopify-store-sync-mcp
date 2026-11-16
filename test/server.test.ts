@@ -68,7 +68,7 @@ describe("MCP server", () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
-      ["apply_plan", "diff_stores", "diff_themes", "export_snapshot", "get_plan", "list_resource_types", "list_stores", "plan_sync", "snapshot_store"].sort(),
+      ["apply_plan", "compare_item", "diff_stores", "diff_themes", "export_snapshot", "get_plan", "list_resource_types", "list_stores", "plan_sync", "snapshot_store"].sort(),
     );
     // export_snapshot writes local files only; apply_plan is the one tool that writes to Shopify.
     for (const t of tools) expect(t.annotations?.readOnlyHint).toBe(!["apply_plan", "export_snapshot"].includes(t.name));
@@ -83,6 +83,14 @@ describe("MCP server", () => {
     const plan = await call("plan_sync", SCOPE);
     const md = await call("get_plan", { plan_id: plan.json.plan_id, format: "markdown" });
     expect(md.text).toContain("**2** to create");
+  });
+
+  it("compares one item with compare_item", async () => {
+    const { call } = await connect();
+    const r = await call("compare_item", { source: "dev", target: "prod", resource: "pages", key: "faq" });
+    expect(r.json).toMatchObject({ kind: "pages", key: "faq", status: "only in source" });
+    const md = await call("compare_item", { source: "dev", target: "prod", resource: "pages", key: "faq", format: "markdown" });
+    expect(md.text).toContain("# pages `faq`: dev → prod");
   });
 
   it("never returns secrets from list_stores", async () => {

@@ -60,6 +60,12 @@ export interface FetchOptions {
    * ("linen-shirt") or handle prefixes ("linen-*"). Undefined means every product.
    */
   productHandles?: { exact: string[]; prefixes: string[] };
+  /**
+   * Narrows the read to items whose key is one of `exact` or starts with one of `prefixes`, taken
+   * from include patterns (or from the keys a plan touches). Adapters that can look items up
+   * directly use it (metaobjects, collections); the others read everything and the filter runs after.
+   */
+  keys?: { exact: string[]; prefixes: string[] };
 }
 
 export interface FetchResult {

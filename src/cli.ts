@@ -1,14 +1,15 @@
 import { ApplyRefused } from "./apply.js";
 import { DEFAULT_API_VERSION, loadStores, StoreRegistry, type StoreConfig } from "./config.js";
 import { preview, type ResourceDiff } from "./diff.js";
-import { Engine, type Scope } from "./engine.js";
+import { Engine, type ItemCheck, type Scope } from "./engine.js";
 import type { Plan } from "./plan.js";
 import { RESOURCE_KINDS, type ResourceKind } from "./resources/index.js";
-import { diffMarkdown, planMarkdown, themesMarkdown } from "./report.js";
+import { createReporter } from "./progress.js";
+import { checkMarkdown, diffMarkdown, planMarkdown, scopeLine, themesMarkdown } from "./report.js";
 import { summarizeDiff, summarizePlan, summarizeThemes } from "./server.js";
 import { checkCliVersion, cliBin, scopesFor, ShopifyCliClient, spawnCli } from "./shopify/cliClient.js";
 
-export const COMMANDS = ["connect", "stores", "diff", "plan", "plans", "apply", "export", "themes", "help"] as const;
+export const COMMANDS = ["connect", "stores", "diff", "check", "plan", "plans", "apply", "export", "themes", "help"] as const;
 
 const HELP = `shopify-store-sync: diff and sync configuration between Shopify stores
 
@@ -17,6 +18,9 @@ Usage
   shopify-store-sync-mcp connect <store>          sign in to a store through Shopify CLI (no app needed)
   shopify-store-sync-mcp stores                   list configured stores
   shopify-store-sync-mcp diff   <source> <target> compare (read-only)
+  shopify-store-sync-mcp check  <source> <target> <resource> <key>
+                                                  one item side by side, and whether what it points at
+                                                  exists in the target, e.g. check dev eu metaobjects size_guide/shirts
   shopify-store-sync-mcp plan   <source> <target> dry-run plan, prints a plan id
   shopify-store-sync-mcp apply  <plan-id>         apply a plan
   shopify-store-sync-mcp plans                    list recent plans
@@ -44,7 +48,8 @@ Options
                          "config/settings_data.json:current.color_*"
   --exit-code            diff/themes: exit 2 when differences are found
   --json                 machine-readable output, values never shortened (same as --format json)
-  --format md            diff, plan and themes as a Markdown report, e.g. > report.md`;
+  --format md            diff, plan and themes as a Markdown report, e.g. > report.md
+  --quiet                no progress on stderr`;
 
 type Flags = Record<string, string | true>;
 
@@ -62,7 +67,7 @@ export function parseArgs(argv: string[]): { positional: string[]; flags: Flags 
       const [name, inline] = a.slice(2).split("=", 2) as [string, string | undefined];
       const next = argv[i + 1];
       if (inline !== undefined) flags[name] = inline;
-      else if (next !== undefined && !next.startsWith("--") && !["json", "exit-code", "values", "writes", "with-prices", "as-drafts", "include-reserved"].includes(name)) flags[name] = argv[++i]!;
+      else if (next !== undefined && !next.startsWith("--") && !["json", "exit-code", "values", "writes", "with-prices", "as-drafts", "include-reserved", "quiet"].includes(name)) flags[name] = argv[++i]!;
       else flags[name] = true;
     } else positional.push(a);
   }
@@ -109,6 +114,28 @@ function printDiff(diffs: ResourceDiff[], values: boolean) {
   }
 }
 
+function printCheck(r: ItemCheck) {
+  const color = r.status === "identical" ? green : r.status === "different" ? yellow : blue;
+  console.log(`${bold(r.kind)} ${r.key}  ${color(r.status)}${r.changes.length ? dim(` (${r.changes.length} field${r.changes.length === 1 ? "" : "s"})`) : ""}`);
+  const show = (v: unknown) => {
+    const p = preview(v, 200);
+    return v === undefined ? dim("(none)") : typeof p === "string" ? p : JSON.stringify(p);
+  };
+  for (const ch of r.changes) {
+    console.log(`\n  ${bold(ch.path)}`);
+    console.log(`    ${r.target.padEnd(10)} ${red(show(ch.target))}`);
+    console.log(`    ${r.source.padEnd(10)} ${green(show(ch.source))}`);
+  }
+  if (r.refs.length) {
+    console.log(`\n${bold("Points at")}`);
+    for (const x of r.refs) {
+      const mark = x.inTarget === true ? green("✓") : x.inTarget === false ? red("✗") : dim("-");
+      const note = x.inTarget === true ? dim(`in ${r.target}`) : x.inTarget === false ? red(`missing in ${r.target}`) : dim(String(x.inTarget));
+      console.log(`  ${mark} ${x.ref}  ${note}`);
+    }
+  }
+}
+
 function printPlan(plan: Plan) {
   const s = summarizePlan(plan, true);
   console.log(`${bold("Plan")} ${plan.id}  ${plan.source.alias} -> ${plan.target.alias} (${plan.target.domain})`);
@@ -124,7 +151,7 @@ function printPlan(plan: Plan) {
 
 export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.env, injected?: Engine): Promise<number> {
   const { positional, flags } = parseArgs(argv);
-  const [cmd, a, b] = positional;
+  const [cmd, a, b, c3, c4] = positional;
   const format = flags.format === undefined ? (flags.json === true ? "json" : "text") : flags.format;
   if (!["text", "json", "md"].includes(String(format))) {
     console.error(`unknown --format "${format}" (use: text, json, md)`);
@@ -141,6 +168,16 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.en
   const engine = injected ?? new Engine(new StoreRegistry(loadStores(env)));
   const need = (...vals: (string | undefined)[]) => {
     if (vals.some((v) => !v)) throw new Error(`missing arguments; run "shopify-store-sync-mcp help"`);
+  };
+
+  // Long commands show what they're doing on stderr, unless --quiet.
+  const progress = ["diff", "plan", "apply", "export", "themes", "check"].includes(cmd) && flags.quiet !== true ? createReporter() : undefined;
+  if (progress) engine.events = progress.events;
+  let finished = false;
+  const finish = (summary?: string) => {
+    if (finished) return;
+    finished = true;
+    progress?.done(summary);
   };
 
   try {
@@ -176,16 +213,34 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.en
       case "diff": {
         need(a, b);
         const { diffs, skipped, source, target } = await engine.compare(a!, b!, scopeFromFlags(flags));
+        finish(`${diffs.reduce((n, d) => n + d.onlyInSource.length + d.changed.length, 0)} difference(s)`);
+        const scope = scopeFromFlags(flags);
         if (asJson) out(diffs.map((d) => summarizeDiff(d, true, Infinity, Infinity)));
-        else if (asMd) process.stdout.write(diffMarkdown({ alias: a!, domain: source.domain }, { alias: b!, domain: target.domain }, diffs, skipped));
-        else printDiff(diffs, flags.values === true);
+        else if (asMd) process.stdout.write(diffMarkdown({ alias: a!, domain: source.domain }, { alias: b!, domain: target.domain }, diffs, skipped, scope));
+        else {
+          console.log(dim(`Compared ${a} -> ${b}: ${scopeLine(diffs.map((d) => d.kind), scope)}\n`));
+          printDiff(diffs, flags.values === true);
+        }
         if (!asMd) notCompared(skipped);
         const changed = diffs.some((d) => d.onlyInSource.length || d.changed.length);
         return flags["exit-code"] && changed ? 2 : 0;
       }
+      case "check": {
+        need(a, b, c3, c4);
+        if (!(RESOURCE_KINDS as readonly string[]).includes(c3!)) throw new Error(`unknown resource "${c3}" (use: ${RESOURCE_KINDS.join(", ")})`);
+        const { resources: _r, include: _i, ...rest } = scopeFromFlags(flags);
+        const r = await engine.check(a!, b!, c3 as ResourceKind, c4!, rest);
+        finish(r.status);
+        if (asJson) out(r);
+        else if (asMd) process.stdout.write(checkMarkdown(r));
+        else printCheck(r);
+        if (!asMd) notCompared(r.notCompared);
+        return flags["exit-code"] && r.status !== "identical" ? 2 : 0;
+      }
       case "plan": {
         need(a, b);
         const plan = await engine.plan(a!, b!, scopeFromFlags(flags));
+        finish(`${plan.ops.length} step(s) planned`);
         if (asJson) out(summarizePlan(plan, true));
         else if (asMd) process.stdout.write(planMarkdown(plan));
         else printPlan(plan);
@@ -202,6 +257,7 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.en
         need(a);
         const only = list(flags.only)?.map(Number);
         const { plan, results } = await engine.apply(a!, { confirm: typeof flags.confirm === "string" ? flags.confirm : undefined, only });
+        finish(`${results.filter((r) => r.outcome === "created" || r.outcome === "updated").length} written, ${results.filter((r) => r.outcome === "failed").length} failed`);
         if (asJson) out({ status: plan.status, results });
         else {
           for (const r of results) {
@@ -221,6 +277,7 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.en
       case "export": {
         need(a, b);
         const res = await engine.export(a!, b!, scopeFromFlags(flags));
+        finish();
         if (asJson) out(res);
         else {
           for (const k of res.kinds) console.log(`${k.kind.padEnd(24)} ${k.items} item${k.items === 1 ? "" : "s"}`);
@@ -236,6 +293,7 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.en
           files: list(flags.files),
           ignoreSettings: list(flags["ignore-settings"]),
         });
+        finish();
         if (asJson) out(summarizeThemes(d, Infinity, Infinity));
         else if (asMd) process.stdout.write(themesMarkdown(a!, b!, d));
         else {
@@ -248,10 +306,12 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.en
         return flags["exit-code"] && (d.changed.length || d.onlyInSource.length) ? 2 : 0;
       }
       default:
+        finish();
         console.error(`unknown command "${cmd}"\n\n${HELP}`);
         return 1;
     }
   } catch (err) {
+    finish("stopped");
     const msg = err instanceof Error ? err.message : String(err);
     console.error(red(err instanceof ApplyRefused ? `Refused: ${msg}` : msg));
     return 1;

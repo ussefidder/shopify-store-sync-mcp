@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.0
+
+- **Targeted checks.** `check <source> <target> <resource> <key>` (tool: `compare_item`) compares one item side by side: each field that differs, and whether what it points at exists in the target. It reads only that item where Shopify allows it
+- **Include patterns limit what is read**, not only what is shown: metaobject entries by handle (`size_guide/shirts`), metaobject types (`size_guide/*`, `size*`) and collections by handle, on top of products and metafield values. Every report now starts with what was compared
+- **Faster**: metaobject types are read in parallel, metaobject entries are written 4 at a time, and the check before writing re-reads only the items the plan touches instead of whole resource types (the refresh before the second pass too). `SYNC_CLI_CONCURRENCY` sets how many Shopify CLI processes run at once
+- **Progress on the command line**, on stderr: what was read, which step is being written and about how long is left, and a "still working" line every 10 seconds otherwise. `--quiet` turns it off
+
 ## 0.7.0
 
 - **Full values in `--json`**: nothing is shortened any more, on `diff`, `plan` and `themes`

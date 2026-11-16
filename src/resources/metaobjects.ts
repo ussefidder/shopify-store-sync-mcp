@@ -27,6 +27,21 @@ const QUERY = /* GraphQL */ `
   }
 `;
 
+const BY_HANDLE = /* GraphQL */ `
+  query MetaobjectByHandle($handle: MetaobjectHandleInput!) {
+    metaobjectByHandle(handle: $handle) {
+      id
+      type
+      handle
+      fields { key value }
+      capabilities { publishable { status } }
+    }
+  }
+`;
+
+/** Up to this many entries of one type are looked up one by one; more and the whole type is read (100 per request). */
+const LOOKUP_LIMIT = 3;
+
 interface Node {
   id: string;
   type: string;
@@ -79,8 +94,24 @@ export const metaobjects: ResourceAdapter = {
 
   async fetch(client, opts) {
     const skipped: { key: string; reason: string }[] = [];
+    // What the include patterns (or a plan's keys) ask for: entries by handle, whole types, or type prefixes.
+    const handles = new Map<string, string[]>();
+    const wholeTypes = new Set<string>();
+    const typePrefixes: string[] = [];
+    let narrow = Boolean(opts.keys);
+    for (const k of opts.keys?.exact ?? []) {
+      const i = k.indexOf("/");
+      if (i > 0) handles.set(k.slice(0, i), [...(handles.get(k.slice(0, i)) ?? []), k.slice(i + 1)]);
+    }
+    for (const p of opts.keys?.prefixes ?? []) {
+      const i = p.indexOf("/");
+      if (i > 0) wholeTypes.add(p.slice(0, i));
+      else typePrefixes.push(p);
+    }
+    if (opts.keys && !handles.size && !wholeTypes.size && !typePrefixes.length) narrow = false;
+
     let types = opts.metaobjectTypes;
-    if (!types?.length) {
+    if (!types?.length && (!narrow || typePrefixes.length)) {
       const all = await paginate<{ type: string }>(client, TYPES_QUERY, {}, (d) => d.metaobjectDefinitions);
       types = [];
       for (const { type } of all) {
@@ -89,13 +120,37 @@ export const metaobjects: ResourceAdapter = {
         else types.push(type);
       }
     }
-    const items: Item[] = [];
-    for (const type of types) {
-      const nodes = await paginate<Node>(client, QUERY, { type }, (d) => d.metaobjects);
-      items.push(...nodes.map(normalizeMetaobject));
+    // Types to read in full, and entries to look up one by one.
+    let full: string[];
+    const lookups: { type: string; handle: string }[] = [];
+    if (!narrow) full = types ?? [];
+    else {
+      const wanted = new Set([...wholeTypes, ...(types ?? []).filter((t) => typePrefixes.some((p) => t.startsWith(p)))]);
+      for (const [type, list] of handles) {
+        if (wanted.has(type) || reservedPrefix(type)) continue;
+        if (list.length > LOOKUP_LIMIT) wanted.add(type);
+        else for (const handle of list) lookups.push({ type, handle });
+      }
+      full = [...wanted].filter((t) => !reservedPrefix(t) && (!opts.metaobjectTypes?.length || opts.metaobjectTypes.includes(t)));
     }
+    const allowed = (t: string) => !opts.metaobjectTypes?.length || opts.metaobjectTypes.includes(t);
+
+    // Types are independent, so they are read in parallel (the client limits how many run at once).
+    const [lists, found] = await Promise.all([
+      Promise.all(full.map((type) => paginate<Node>(client, QUERY, { type }, (d) => d.metaobjects))),
+      Promise.all(
+        lookups
+          .filter((l) => allowed(l.type))
+          .map(async (handle) => (await client.request<{ metaobjectByHandle: Node | null }>(BY_HANDLE, { handle })).metaobjectByHandle),
+      ),
+    ]);
+    const items = [...lists.flat(), ...found.filter((n): n is Node => Boolean(n))].map(normalizeMetaobject);
     return { items, skipped };
   },
+
+  // Entries are written a few at a time. One that points at another new entry not created yet is
+  // finished in the second pass, like any other reference that isn't there yet.
+  parallel: true,
 
   refFor(key) {
     return `${REF_PREFIX}Metaobject/${key}`;

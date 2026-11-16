@@ -726,3 +726,104 @@ describe("discounts (compared only)", () => {
     expect(r.skipped).toEqual([expect.objectContaining({ key: "* (in stg)", reason: expect.stringContaining("read_discounts") })]);
   });
 });
+
+describe("targeted reads", () => {
+  const def = (type: string) => ({ id: `gid://shopify/MetaobjectDefinition/${type.length}`, type, name: type, fieldDefinitions: [] });
+  const mo = (id: number, type: string, handle: string, fields: Record<string, string>) => ({
+    id: `gid://shopify/Metaobject/${id}`,
+    type,
+    handle,
+    fields: Object.entries(fields).map(([key, value]) => ({ key, value })),
+    capabilities: { publishable: { status: "ACTIVE" } },
+  });
+  const stores = () => {
+    const dev = new FakeShop(FakeShop.config("dev"), {
+      metaobjectDefinitions: [def("size_guide"), def("faq"), def("store_hours")],
+      metaobjects: [mo(1, "size_guide", "shirts", { chart: "S,M,L" }), mo(2, "size_guide", "trousers", { chart: "28,30" }), mo(3, "faq", "returns", { q: "Returns?" }), mo(4, "store_hours", "paris", { h: "9-19" })],
+      products: [{ id: "gid://shopify/Product/1", handle: "linen-shirt", options: [{ name: "Size", values: ["M"] }], variants: [{ id: "gid://shopify/ProductVariant/1", options: { Size: "M" } }] }],
+    });
+    const stg = new FakeShop(FakeShop.config("stg"), {
+      metaobjectDefinitions: [def("size_guide"), def("faq"), def("store_hours")],
+      metaobjects: [mo(11, "size_guide", "shirts", { chart: "S,M" }), mo(13, "faq", "returns", { q: "Returns?" }), mo(14, "store_hours", "paris", { h: "9-18" })],
+    });
+    return { dev, stg, engine: engineFor(dev, stg) };
+  };
+  const reads = (shop: FakeShop) => shop.calls.map((c) => (c.field === "metaobjects" ? `metaobjects:${c.variables.type}` : c.field)).filter((f) => f !== "nodes");
+
+  it("one entry is looked up by handle; a type pattern reads only that type", async () => {
+    const { dev, engine } = stores();
+    const one = await engine.compare("dev", "stg", { resources: ["metaobjects"], include: ["size_guide/shirts"] });
+    expect(one.diffs[0]!.changed.map((c) => c.key)).toEqual(["size_guide/shirts"]);
+    expect(reads(dev)).toEqual(["metaobjectByHandle"]);
+
+    dev.calls.length = 0;
+    const type = await engine.compare("dev", "stg", { resources: ["metaobjects"], include: ["size_guide/*"] });
+    expect(type.diffs[0]!.onlyInSource.map((i) => i.key)).toEqual(["size_guide/trousers"]);
+    expect(reads(dev)).toEqual(["metaobjects:size_guide"]);
+
+    dev.calls.length = 0;
+    await engine.compare("dev", "stg", { resources: ["metaobjects"], include: ["store*"] });
+    expect(reads(dev).sort()).toEqual(["metaobjectDefinitions", "metaobjects:store_hours"]);
+
+    dev.calls.length = 0;
+    await engine.compare("dev", "stg", { resources: ["metaobjects"], include: ["*/paris"] });
+    expect(reads(dev).filter((r) => r.startsWith("metaobjects:")).sort()).toEqual(["metaobjects:faq", "metaobjects:size_guide", "metaobjects:store_hours"]);
+  });
+
+  it("the check before writing re-reads only the entries the plan writes", async () => {
+    const { stg, engine } = stores();
+    const plan = await engine.plan("dev", "stg", { resources: ["metaobjects"] });
+    expect(plan.ops.map((o) => `${o.action} ${o.key}`).sort()).toEqual(["create size_guide/trousers", "update size_guide/shirts", "update store_hours/paris"]);
+    stg.calls.length = 0;
+    const { results } = await engine.apply(plan.id, {});
+    expect(results.map((r) => r.outcome).sort()).toEqual(["created", "updated", "updated"]);
+    const before = stg.calls.slice(0, stg.calls.findIndex((c) => c.field === "metaobjectUpsert"));
+    expect(reads({ calls: before } as FakeShop).sort()).toEqual(["metaobjectByHandle", "metaobjectByHandle", "metaobjectByHandle"]);
+  });
+
+  it("a few collections are looked up by handle", async () => {
+    const dev = new FakeShop(FakeShop.config("dev"), { collections: [{ id: "gid://shopify/Collection/1", handle: "linen", title: "Linen", ruleSet: null }] });
+    const engine = engineFor(dev, new FakeShop(FakeShop.config("stg")));
+    const { diffs } = await engine.compare("dev", "stg", { resources: ["collections"], include: ["linen"] });
+    expect(diffs[0]!.onlyInSource.map((i) => i.key)).toEqual(["linen"]);
+    expect(dev.calls.map((c) => c.field)).toEqual(["collectionByIdentifier"]);
+  });
+
+  it("check shows one item side by side, and whether what it points at exists in the target", async () => {
+    const { dev, stg, engine } = stores();
+    dev.state.metaobjects.push(mo(5, "faq", "fit", { product: "gid://shopify/Product/1", q: "Fit?" }));
+    stg.state.metaobjects.push(mo(15, "faq", "fit", { q: "How does it fit?" }));
+    const r = await engine.check("dev", "stg", "metaobjects", "faq/fit");
+    expect(r.status).toBe("different");
+    expect(r.changes.map((c) => c.path)).toEqual(["fields.product", "fields.q"]);
+    expect(r.refs).toEqual([{ ref: "Product/linen-shirt", inTarget: false }]);
+    expect((await engine.check("dev", "stg", "metaobjects", "faq/returns")).status).toBe("identical");
+    expect((await engine.check("dev", "stg", "metaobjects", "size_guide/trousers")).status).toBe("only in source");
+    expect((await engine.check("dev", "stg", "metaobjects", "faq/nothing")).status).toBe("in neither");
+  });
+});
+
+describe("progress on the command line", () => {
+  it("prints a line per event when not in a terminal, with time left while writing, and a heartbeat", async () => {
+    const { createReporter } = await import("../src/progress.js");
+    let t = 0;
+    const out: string[] = [];
+    const r = createReporter({ tty: false, write: (s) => void out.push(s.trim()), now: () => t, heartbeatMs: 10_000 });
+    r.events.request!("dev");
+    r.events.read!("dev", "metaobjects", 12);
+    t = 4000;
+    r.events.phase!("writing 4 steps to stg");
+    t = 8000;
+    r.events.step!(1, 4, "metaobjects size_guide/shirts");
+    t = 12_000;
+    r.events.step!(2, 4, "metaobjects faq/fit");
+    r.done("4 written, 0 failed");
+    expect(out).toEqual([
+      "[0:00] read dev: metaobjects (12 items)",
+      "[0:04] writing 4 steps to stg",
+      "[0:08] writing 1/4, about 0:12 left: metaobjects size_guide/shirts",
+      "[0:12] writing 2/4, about 0:08 left: metaobjects faq/fit",
+      "[0:12] done: 4 written, 0 failed, 1 request",
+    ]);
+  });
+});

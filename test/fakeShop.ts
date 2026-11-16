@@ -239,7 +239,9 @@ export class FakeShop implements AdminClient {
       }
       case "collectionByIdentifier": {
         const c = s.collections.find((p) => p.handle === (v.h ?? v.handle)) ?? null;
-        return c && query.includes("metafields(") ? { ...c, metafields: conn(filterNs(c.metafields, v.namespace)) } : c;
+        if (!c) return null;
+        const view = { title: c.handle, descriptionHtml: "", sortOrder: "BEST_SELLING", templateSuffix: null, seo: { title: null, description: null }, ruleSet: null, ...c };
+        return query.includes("metafields(") ? { ...view, metafields: conn(filterNs(c.metafields, v.namespace)) } : view;
       }
       case "menu": {
         const menu = s.menus.find((m) => m.id === v.id);
@@ -255,7 +257,7 @@ export class FakeShop implements AdminClient {
         return { id: menu.id, items: withIds(menu.items) };
       }
       case "metaobjectByHandle":
-        return s.metaobjects.find((o) => o.type === v.t && o.handle === v.h) ?? null;
+        return s.metaobjects.find((o) => o.type === (v.t ?? v.handle?.type) && o.handle === (v.h ?? v.handle?.handle)) ?? null;
       case "customerAccountPages":
         return conn(s.customerAccountPages);
       case "shop":

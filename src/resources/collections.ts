@@ -44,6 +44,32 @@ const QUERY = /* GraphQL */ `
   }
 `;
 
+const BY_HANDLE = /* GraphQL */ `
+  query CollectionByHandle($handle: String!) {
+    collectionByIdentifier(identifier: { handle: $handle }) {
+      id
+      handle
+      title
+      descriptionHtml
+      sortOrder
+      templateSuffix
+      seo { title description }
+      ruleSet {
+        appliedDisjunctively
+        rules {
+          column
+          relation
+          condition
+          conditionObject {
+            __typename
+            ... on CollectionRuleMetafieldCondition { metafieldDefinition { id } }
+          }
+        }
+      }
+    }
+  }
+`;
+
 interface Node {
   id: string;
   handle: string;
@@ -125,7 +151,15 @@ export const collections: ResourceAdapter = {
   description:
     "Collections, keyed by handle: title, description, sort order, template, SEO and smart-collection rules. Manual collection membership and sales-channel publishing are not copied, so a new collection is not visible on any channel until someone publishes it.",
 
-  async fetch(client) {
+  async fetch(client, opts) {
+    // A few exact handles (from include patterns or a plan's keys) are looked up directly.
+    const k = opts.keys;
+    if (k && !k.prefixes.length && k.exact.length && k.exact.length <= 3) {
+      const found = await Promise.all(
+        k.exact.map(async (handle) => (await client.request<{ collectionByIdentifier: Node | null }>(BY_HANDLE, { handle })).collectionByIdentifier),
+      );
+      return { items: found.filter((n): n is Node => Boolean(n)).map(normalizeCollection), skipped: [] };
+    }
     const nodes = await paginate<Node>(client, QUERY, {}, (d) => d.collections);
     return { items: nodes.map(normalizeCollection), skipped: [] };
   },

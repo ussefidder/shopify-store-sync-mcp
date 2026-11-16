@@ -2,8 +2,9 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { hashData } from "./diff.js";
 import { collectRefs, mapStrings, RefToGidResolver } from "./refs.js";
-import { ADAPTERS, orderKinds, type ResourceKind } from "./resources/index.js";
+import { ADAPTERS, orderKinds, type Item, type ResourceKind } from "./resources/index.js";
 import { envNumber, type AdminClient } from "./shopify/client.js";
+import { forKeys } from "./narrow.js";
 import { takeSnapshot } from "./snapshot.js";
 import { stateDir, type Plan, type PlanOp } from "./plan.js";
 
@@ -26,6 +27,8 @@ export interface ApplyOptions {
   auditLog?: string;
   /** Called as the apply moves along: steps finished, steps in total, and what just happened. */
   onProgress?: (done: number, total: number, message: string) => void;
+  /** Called when the apply moves to its next phase (checking the target, second pass...). */
+  onPhase?: (message: string) => void;
 }
 
 /** How many independent writes run at once (products, pages, redirects...). */
@@ -111,6 +114,20 @@ function dropUnmappable(data: Record<string, unknown>, kind: ResourceKind): Reco
   return mapStrings(data, (s) => (unmappable.has(s) ? "" : s)) as Record<string, unknown>;
 }
 
+/** The current target state of the items `ops` touch, per resource type, read as narrowly as each type allows. */
+async function readKeys(client: AdminClient, plan: Plan, ops: PlanOp[]): Promise<Map<ResourceKind, Item[]>> {
+  const kinds = [...new Set(ops.map((o) => o.kind))];
+  const read = await Promise.all(
+    kinds.map(async (k) => {
+      const keys = ops.filter((o) => o.kind === k).map((o) => o.key);
+      const snap = await takeSnapshot(client, [k], forKeys(plan.fetchOptions, k, keys));
+      const wanted = new Set(keys);
+      return [k, (snap.resources[k]?.items ?? []).filter((i) => wanted.has(i.key))] as const;
+    }),
+  );
+  return new Map(read);
+}
+
 export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOptions = {}): Promise<OpResult[]> {
   checkApplyAllowed(plan, client.store, opts);
   const log = opts.auditLog ?? process.env.SYNC_AUDIT_LOG ?? join(stateDir(), "audit.log");
@@ -125,9 +142,11 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
   }
 
   // Drift check: re-read the target and skip anything that changed since the plan was made.
+  // Only the items the plan touches are read again, not every item of their types.
   const kinds = [...new Set(runnable.map((o) => o.kind))];
-  const current = await takeSnapshot(client, kinds, plan.fetchOptions);
-  const currentByKind = new Map(kinds.map((k) => [k, new Map((current.resources[k]?.items ?? []).map((i) => [i.key, i]))]));
+  opts.onPhase?.(`checking ${plan.target.alias} hasn't changed since the plan (${runnable.length} item${runnable.length === 1 ? "" : "s"})`);
+  const current = await readKeys(client, plan, runnable);
+  const currentByKind = new Map(kinds.map((k) => [k, new Map((current.get(k) ?? []).map((i) => [i.key, i]))]));
   const ready: PlanOp[] = [];
   for (const op of runnable) {
     const now = currentByKind.get(op.kind)?.get(op.key);
@@ -196,6 +215,7 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
     audit(log, { plan: plan.id, target: plan.target.domain, source: plan.source.domain, ...r });
   };
 
+  if (ready.length) opts.onPhase?.(`writing ${ready.length} step${ready.length === 1 ? "" : "s"} to ${plan.target.alias}`);
   // Kinds go in dependency order. Inside a kind whose items don't depend on each other, a few are
   // written at a time; items that share a lane (the same product, say) still go one after the other.
   for (const kind of orderKinds([...new Set(ready.map((o) => o.kind))])) {
@@ -213,9 +233,9 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
     await runLanes([...lanes.values()], writeConcurrency(), (op) => run(op, 1));
   }
   if (retry.length) {
-    const retryKinds = [...new Set(retry.map((o) => o.kind))];
-    const fresh = await takeSnapshot(client, retryKinds, plan.fetchOptions);
-    pass2Targets = new Map(retryKinds.flatMap((k) => (fresh.resources[k]?.items ?? []).map((i) => [`${k}:${i.key}`, i] as const)));
+    opts.onPhase?.(`second pass: finishing ${retry.length} item${retry.length === 1 ? "" : "s"} that point at each other`);
+    const fresh = await readKeys(client, plan, retry);
+    pass2Targets = new Map([...fresh].flatMap(([k, items]) => items.map((i) => [`${k}:${i.key}`, i] as const)));
     for (const op of retry) {
       // An op that failed outright in pass 1 and still doesn't exist must be created, not updated.
       if (op.action === "create" && !pass2Targets.has(`${op.kind}:${op.key}`)) await run({ ...op }, 1);

@@ -440,6 +440,18 @@ describe("CLI", () => {
     expect(await runCli(["diff", "dev", "eu", "--format", "pdf"], {}, engine)).toBe(1);
   });
 
+  it("check prints one item side by side", async () => {
+    const dev = new FakeShop(FakeShop.config("dev"), { redirects: [{ id: "gid://shopify/UrlRedirect/1", path: "/a", target: "/new" }] });
+    const eu = new FakeShop(FakeShop.config("eu"), { redirects: [{ id: "gid://shopify/UrlRedirect/9", path: "/a", target: "/old" }] });
+    const engine = engineFor(dev, eu);
+    expect(await runCli(["check", "dev", "eu", "redirects", "/a", "--exit-code", "--quiet"], {}, engine)).toBe(2);
+    const text = logs.join("\n");
+    expect(text).toMatch(/redirects \/a\s+different/);
+    expect(text).toContain("/old");
+    expect(text).toContain("/new");
+    expect(await runCli(["check", "dev", "eu", "nope", "/a"], {}, engine)).toBe(1);
+  });
+
   it("runs diff, plan, apply and export through the same engine", async () => {
     const dev = new FakeShop(FakeShop.config("dev"), { redirects: [{ id: "gid://shopify/UrlRedirect/1", path: "/a", target: "/b" }] });
     const eu = new FakeShop(FakeShop.config("eu", { protected: true }));

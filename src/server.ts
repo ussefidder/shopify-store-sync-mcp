@@ -11,7 +11,7 @@ import { PlanStore, type Plan } from "./plan.js";
 import { ADAPTERS, DEFAULT_KINDS, RESOURCE_KINDS, type ResourceKind } from "./resources/index.js";
 import { DEFAULT_OWNER_TYPES } from "./resources/metafieldDefinitions.js";
 import type { AdminClient } from "./shopify/client.js";
-import { diffMarkdown, planMarkdown, themesMarkdown } from "./report.js";
+import { checkMarkdown, diffMarkdown, planMarkdown, scopeLine, themesMarkdown } from "./report.js";
 import { DEFAULT_THEME_FILES, type ThemeDiff } from "./themes.js";
 
 /** Read from package.json, so there is one place to bump. */
@@ -369,13 +369,39 @@ export function createServer(deps: ServerDeps): McpServer {
     guard(async (args: ScopeArgs & { source: string; target: string; show_values?: boolean; limit?: number; format?: "json" | "markdown" }, extra) => {
       const { diffs, skipped, source, target } = await engine.compare(spec(args.source), spec(args.target), toScope(args), reading(extra));
       if (args.format === "markdown") {
-        return text(diffMarkdown({ alias: args.source, domain: source.domain }, { alias: args.target, domain: target.domain }, diffs, skipped));
+        return text(diffMarkdown({ alias: args.source, domain: source.domain }, { alias: args.target, domain: target.domain }, diffs, skipped, toScope(args)));
       }
       return json({
         source: args.source,
         target: args.target,
+        compared: scopeLine(diffs.map((d) => d.kind), toScope(args)),
         resources: diffs.map((d) => summarizeDiff(d, args.show_values ?? true, args.limit ?? 100)),
         skipped: skipped.length ? skipped : undefined,
+      });
+    }),
+  );
+
+  server.registerTool(
+    "compare_item",
+    {
+      title: "Compare one item",
+      description:
+        "Compare a single item between two stores, side by side: whether each has it, every field that differs (entry by entry inside JSON values), and whether the items it points at (products, pages, metaobjects...) exist in the target. Reads only that item where possible, so it is quick. Use it for a targeted check instead of a full diff. Read-only.",
+      inputSchema: {
+        source: z.string().describe(SOURCE_HELP),
+        target: z.string().describe(SOURCE_HELP),
+        resource: z.enum(RESOURCE_KINDS).describe("Resource type of the item"),
+        key: z.string().min(1).describe('The item\'s key, as diff_stores lists it: "size_guide/shirts" (metaobjects), "faq" (pages), "PRODUCT.custom.fabric" (metafield_definitions)...'),
+        format: z.enum(["json", "markdown"]).optional().describe('"markdown" returns a report.'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    guard(async (args: { source: string; target: string; resource: ResourceKind; key: string; format?: "json" | "markdown" }) => {
+      const r = await engine.check(spec(args.source), spec(args.target), args.resource, args.key);
+      if (args.format === "markdown") return text(checkMarkdown(r));
+      return json({
+        ...r,
+        changes: r.changes.map((c) => ({ path: c.path, source: preview(c.source, 2000), target: preview(c.target, 2000) })),
       });
     }),
   );
