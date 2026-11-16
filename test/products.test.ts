@@ -290,7 +290,11 @@ describe("bulk writes", () => {
           handle: `tee-${i}`,
           media: [files[i]!.id],
           variants: [{ id: `gid://shopify/ProductVariant/${i + 1}`, options: { Color: "Sand", Size: "M" }, image: files[i]!.id, metafields: [{ namespace: "custom", key: "fit", type: "single_line_text_field", value: `fit-${i}` }] }],
-          metafields: [{ namespace: "custom", key: "care", type: "single_line_text_field", value: `care-${i}` }],
+          metafields: [
+            { namespace: "custom", key: "care", type: "single_line_text_field", value: `care-${i}` },
+            // A file the bulk product write brings over from the source's URL, then pointed at by a value.
+            { namespace: "custom", key: "chart", type: "file_reference", value: files[i]!.id },
+          ],
         }),
       );
       const dev = new FakeShop(FakeShop.config("dev"), { files, products });
@@ -309,7 +313,10 @@ describe("bulk writes", () => {
       const tee = eu.state.products.find((p) => p.handle === "tee-2")!;
       expect(eu.state.files.find((f) => f.id === tee.media![0])?.url).toContain("tee-2.jpg");
       expect(tee.variants![0]!.image).toBe(tee.media![0]);
-      expect(tee.metafields).toEqual([{ namespace: "custom", key: "care", type: "single_line_text_field", value: "care-2" }]);
+      expect(tee.metafields).toEqual([
+        { namespace: "custom", key: "care", type: "single_line_text_field", value: "care-2" },
+        { namespace: "custom", key: "chart", type: "file_reference", value: tee.media![0] },
+      ]);
       expect(tee.variants![0]!.metafields).toEqual([{ namespace: "custom", key: "fit", type: "single_line_text_field", value: "fit-2" }]);
     } finally {
       delete process.env.SYNC_BULK_THRESHOLD;

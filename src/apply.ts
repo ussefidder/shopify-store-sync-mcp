@@ -263,6 +263,8 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
       return ops.filter((op) => !results.some((r) => r.seq === op.seq));
     } finally {
       resolver.allowUploads = true;
+      // Files looked up without uploading are looked up again by later kinds, which do upload.
+      if (kind === "products") await resolver.forgetMisses(`shopify://File/`);
     }
   };
 
