@@ -162,7 +162,7 @@ export function isShopifyFileUrl(url: string): boolean {
   return host === "cdn.shopify.com" || host.endsWith(".myshopify.com");
 }
 
-type RefNode =
+export type RefNode =
   | { __typename: "Product" | "Collection" | "Page" | "Blog"; id: string; handle: string }
   | { __typename: "Metaobject"; id: string; type: string; handle: string }
   | { __typename: "MetaobjectDefinition"; id: string; type: string }

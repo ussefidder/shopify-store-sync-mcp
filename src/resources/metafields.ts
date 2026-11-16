@@ -1,7 +1,7 @@
 import { assertNoUserErrors, paginate, type AdminClient } from "../shopify/client.js";
 import { bulkMutation, bulkQuery, bulkThreshold, bulkTimeoutMs } from "../shopify/bulk.js";
 import type { FetchOptions, Item, ResourceAdapter } from "./types.js";
-import { variantKey } from "../refs.js";
+import { variantKey, type RefNode } from "../refs.js";
 import { reservedPrefix } from "./util.js";
 
 /*
@@ -209,7 +209,7 @@ export const metafields: ResourceAdapter = {
   description:
     "Metafield values on products, collections, product variants and the shop, keyed by PRODUCT/handle/namespace.key, COLLECTION/handle/..., PRODUCTVARIANT/product-handle/option values/... and SHOP/namespace.key. Matched to the item with the same handle (and option values) in the target. Opt-in (not in the default set).",
 
-  async fetch(client, opts) {
+  async fetch(client, opts, mapper) {
     const items: Item[] = [];
     const skipped: { key: string; reason: string }[] = [];
     const add = (r: { items: Item[]; skipped: typeof skipped }) => {
@@ -228,10 +228,15 @@ export const metafields: ResourceAdapter = {
       wanted("PRODUCTVARIANT") ? readVariants(client, namespace, named?.PRODUCTVARIANT) : Promise.resolve([]),
       wanted("SHOP") ? client.request<{ shop: { id: string; metafields: Metafields } }>(SHOP_QUERY, { namespace }) : Promise.resolve(undefined),
     ]);
+    // The owners are known already: tell the ref mapper, so it doesn't look thousands of them up again.
     OWNERS.forEach((owner, i) => {
-      for (const n of lists[i]!) add(metafieldItems(owner.type, n, opts.namespaces));
+      for (const n of lists[i]!) {
+        mapper?.seed({ __typename: owner.type === "PRODUCT" ? "Product" : "Collection", id: n.id, handle: n.handle } as RefNode);
+        add(metafieldItems(owner.type, n, opts.namespaces));
+      }
     });
     for (const v of variants) {
+      mapper?.seed({ __typename: "ProductVariant", id: v.id, product: { handle: v.product.handle }, selectedOptions: v.selectedOptions });
       const options = variantKey(Object.fromEntries(v.selectedOptions.map((o) => [o.name, o.value])));
       add(itemsOf(`PRODUCTVARIANT/${v.product.handle}/${options}`, v, opts.namespaces));
     }
