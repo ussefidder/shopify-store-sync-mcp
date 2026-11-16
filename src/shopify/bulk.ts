@@ -2,7 +2,10 @@ import { envNumber, ShopifyError, type AdminClient } from "./client.js";
 
 /** Above this many items a read or write goes through a bulk operation instead of single requests. */
 export const bulkThreshold = () => envNumber("SYNC_BULK_THRESHOLD", 250);
-/** How long a bulk operation may run. */
+/**
+ * How long a bulk operation may go without writing anything more before it is given up on. A big
+ * one can run for hours; only one that has stopped moving is abandoned.
+ */
 export const bulkTimeoutMs = () => envNumber("SYNC_BULK_TIMEOUT_MS", 30 * 60_000);
 
 /*
@@ -73,7 +76,9 @@ async function pollAndDownload(client: AdminClient, id: string, opts: BulkOption
   const domain = client.store.domain;
   const wait = opts.wait ?? bulkIO.wait;
   const pollMs = opts.pollMs ?? 2000;
-  const deadline = Date.now() + (opts.timeoutMs ?? 30 * 60_000);
+  const stallMs = opts.timeoutMs ?? 30 * 60_000;
+  let lastCount = -1;
+  let movedAt = Date.now();
   // The operation runs on Shopify's side whatever happens here, so a failed status check or download is
   // tried again a few times instead of giving up on writes that are going through anyway.
   let misses = 0;
@@ -107,7 +112,15 @@ async function pollAndDownload(client: AdminClient, id: string, opts: BulkOption
       throw new ShopifyError(`${domain}: bulk operation ${node.status.toLowerCase()}${node.errorCode ? ` (${node.errorCode})` : ""}`);
     }
     opts.onProgress?.(Number(node.objectCount) || 0);
-    if (Date.now() > deadline) throw new ShopifyError(`${domain}: bulk operation still running after the time limit (SYNC_BULK_TIMEOUT_MS)`);
+    const count = Number(node.objectCount) || 0;
+    if (count !== lastCount) {
+      lastCount = count;
+      movedAt = Date.now();
+    } else if (Date.now() - movedAt > stallMs) {
+      throw new ShopifyError(
+        `${domain}: bulk operation ${id} has written nothing more for ${Math.round(stallMs / 60_000)} minutes (SYNC_BULK_TIMEOUT_MS); it may still finish on Shopify's side, so plan again before re-applying`,
+      );
+    }
   }
 }
 

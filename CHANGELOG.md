@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.3
+
+- **Big bulk writes are no longer cut off after 30 minutes.** A bulk operation is now given up on only when it has written nothing more for 30 minutes (`SYNC_BULK_TIMEOUT_MS`), however long it runs. Shopify writes about 12 new products a minute per operation (5 at once) when each has around a dozen variants with stock and images, so 800 products take over an hour. Before, every product of an operation still running at 30 minutes was reported as failed while Shopify went on creating them, and the metafield values that followed failed for lack of their product
+- Live progress in a terminal: `shopify-store-sync-mcp status --watch` shows a running apply's written, failed and left counts, bulk progress and time left, from a status file the MCP server keeps
+- The apply's phase names the bulk write that is running
+
 ## 0.10.2
 
 - A bulk write no longer stops the whole apply when one status check or result download fails: it tries again a few times, since the operation keeps running on Shopify's side. In the 4,000-product live test on 0.9.2, all products arrived but the apply stopped silently before the metafield values

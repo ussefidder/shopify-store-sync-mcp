@@ -203,6 +203,29 @@ describe("bulk reads", async () => {
     await expect(bulkQuery(dead as any, "{}", { wait: async () => {} })).rejects.toThrow(/checking its status kept failing \(offline\)/);
   });
 
+  it("waits as long as the operation keeps writing, and gives up only once it stops moving", async () => {
+    const sleep = async () => new Promise<void>((r) => setTimeout(r, 3));
+    let polls = 0;
+    const moving = {
+      store,
+      request: async (q: string) =>
+        /RunQuery/.test(q)
+          ? { bulkOperationRunQuery: { bulkOperation: { id: "b" }, userErrors: [] } }
+          : ++polls < 6
+            ? { node: { status: "RUNNING", errorCode: null, objectCount: String(polls * 10), url: null, partialDataUrl: null } }
+            : { node: { status: "COMPLETED", errorCode: null, objectCount: "60", url: "u", partialDataUrl: null } },
+    };
+    await expect(bulkQuery(moving as any, "{}", { wait: sleep, timeoutMs: 1, download: async () => '{"id":"1"}' })).resolves.toEqual([{ id: "1" }]);
+    const stuck = {
+      store,
+      request: async (q: string) =>
+        /RunQuery/.test(q)
+          ? { bulkOperationRunQuery: { bulkOperation: { id: "b" }, userErrors: [] } }
+          : { node: { status: "RUNNING", errorCode: null, objectCount: "7", url: null, partialDataUrl: null } },
+    };
+    await expect(bulkQuery(stuck as any, "{}", { wait: sleep, timeoutMs: 1 })).rejects.toThrow(/has written nothing more/);
+  });
+
   it("says why when Shopify fails the operation", async () => {
     const client = {
       store,
