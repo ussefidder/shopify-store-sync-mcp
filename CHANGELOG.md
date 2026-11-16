@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0
+
+- **Everything on the product page.** Products now also carry each variant's barcode, weight, inventory tracking, shipping setting, customs details (HS code, country of origin) and its image. These are compared and copied like the other fields, so a diff may show them as new differences the first time
+- **Stock, opt-in**: `inventory: true` (`--with-inventory`) copies the available quantity per location into the target's location with the same name. New variants get it on creation; existing ones are set against the target's current quantity, so a sale in between isn't overwritten. Needs `read_inventory`, `read_locations` and `write_inventory`, now part of the scopes `connect` asks for: run `connect` again to use it
+- **Bulk writes for big syncs**: above 250 items (`SYNC_BULK_THRESHOLD`), new products go in one Shopify bulk operation with their images taken straight from the source's URLs, and metafield values 25 per call in another. Thousands of products take minutes instead of hours. If a store won't run bulk writes, the tool falls back to one by one
+- **Faster planning**: files are looked up 25 at a time and products 10 at a time, and metafield values of big catalogs are read in bulk
+- Variant metafields on products the plan creates are no longer reported as conflicts
+
 ## 0.8.1
 
 - **Products on big catalogs, hours down to minutes.** Comparing a small store with a big one (72 products against 4,530) no longer reads the big one in full: both stores are first listed by handle (250 per request), and only the products both have are read in full. The others still show as "only in target"

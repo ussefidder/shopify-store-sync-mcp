@@ -58,7 +58,7 @@ The store setup that usually gets rebuilt by hand, plus the images it uses. Refe
 | `redirects` | `path` | Thousands are fine. |
 | `collections` | `handle` | Title, description, sort order, template, SEO and smart-collection rules (rules on a metafield definition are remapped). Manual collections keep their own product list. A new collection is not published to any sales channel. Manual versus smart is reported as a conflict. |
 | `shop_policies` | `type` | Refund, privacy, terms, shipping and contact policy text. |
-| `products` *(opt-in)* | `handle` | Title, description, vendor, type, category, tags, template, SEO, options, variants (matched by option values; SKU, taxable flag and inventory policy are copied) and images. **New products are created as drafts.** Prices only with `prices: true` (`--with-prices`). On update, the tags, variants, option values and media (images, videos, 3D models) that only the target has are kept, and don't count as differences. Gift cards are skipped. See "What product sync leaves alone" below. |
+| `products` *(opt-in)* | `handle` | Title, description, vendor, type, category, tags, template, SEO, options, images, and variants matched by option values: SKU, barcode, weight, taxable flag, inventory policy, inventory tracking, shipping, customs details (HS code, country of origin) and the variant's image. **New products are created as drafts.** Prices only with `prices: true` (`--with-prices`), stock only with `inventory: true` (`--with-inventory`, available quantity per location, matched to the target's locations by name). On update, the tags, variants, option values and media (images, videos, 3D models) that only the target has are kept, and don't count as differences. Gift cards are skipped. See "What product sync leaves alone" below. |
 | `metafields` *(opt-in)* | `PRODUCT/handle/namespace.key`, `COLLECTION/handle/…`, `PRODUCTVARIANT/handle/Size=M/…`, `SHOP/namespace.key` | Metafield **values** on products, collections, product variants and the shop. A value lands on the item with the same handle in the target; a variant value on the variant with the same option values; a shop value on the target's own shop. Reference values (including references to variants) are remapped. Filter with `namespaces` and `owner_types`. |
 | `discounts` *(opt-in, compared only)* | `automatic/title`, `code/title` | Automatic and code discounts: type, Shopify's summary of what they give, status, dates, combinations, codes (or their count for bulk sets) and usage limits. **Never written**: a plan lists differences as conflicts, since a discount changes what customers pay. Two discounts with the same title are reported instead of matched. |
 | `translations` *(opt-in)* | `locale:Type/handle` | Translations of products, pages, collections, metaobjects, menus and policies. Registered against the target's own text, after the content itself is synced. A translated field only the target has is kept. The plan warns when a language isn't added to the target. |
@@ -67,7 +67,9 @@ The store setup that usually gets rebuilt by hand, plus the images it uses. Refe
 
 **Files and images** referenced by any of the above are matched by file name in the target. When one is missing, the plan says so and `apply_plan` uploads it from the source store.
 
-**What product sync leaves alone.** Never copied: inventory levels, sales-channel publishing, the status of existing products, barcodes, weight and shipping settings, the image assigned to a variant, videos and 3D models (the target keeps its own), and translations of option names and values. Nothing is ever removed from a target product: a tag, variant or image deleted in the source stays in the target until you remove it there.
+**What product sync leaves alone.** Never copied: sales-channel publishing, the status of existing products, unit cost, videos and 3D models (the target keeps its own), and translations of option names and values. Stock is copied only when asked, into locations with the same name; a location the target doesn't have is skipped. Nothing is ever removed from a target product: a tag, variant or image deleted in the source stays in the target until you remove it there.
+
+**Big catalogs.** Above 250 products (`SYNC_BULK_THRESHOLD`), reads and new products go through Shopify bulk operations: the catalog is exported or written in one operation instead of one request per product, and images come straight from the source's URLs. Metafield values are written 25 per call in one bulk operation too. If a store won't run bulk writes, the tool says so and writes one by one.
 
 **Nothing goes live by surprise.** New products are drafts and new collections aren't on any sales channel. Pages and metaobject entries copy the published state of the source unless you pass `as_drafts`; the plan tells you when new ones would be visible right away.
 
@@ -200,6 +202,7 @@ An existing Admin API access token (`shpat_...`) from a custom app that was crea
 | files | `read_files` | `write_files` (to upload missing files) |
 | theme diff | `read_themes` | none, never writes |
 | discounts | `read_discounts` | none, never writes |
+| product stock (`--with-inventory`) | `read_inventory`, `read_locations` | `write_inventory` |
 | ID remapping | `read_products`, `read_content` | none |
 
 Metafield definitions of some owner types (customers, orders, draft orders, companies, locations, markets) need that owner's read scope too, such as `read_customers`. The Shopify CLI sign-in doesn't ask for those, since they open up customer and order data. When a store won't show an owner type, the diff carries on: that owner type is listed as "not compared", on both stores, with the scope Shopify asked for.
@@ -207,7 +210,7 @@ Metafield definitions of some owner types (customers, orders, draft orders, comp
 Everything at once (the set used for the live tests), ready to paste:
 
 ```text
-read_products,write_products,read_metaobjects,write_metaobjects,read_metaobject_definitions,write_metaobject_definitions,read_online_store_pages,write_online_store_pages,read_online_store_navigation,write_online_store_navigation,read_legal_policies,write_legal_policies,read_translations,write_translations,read_locales,read_files,write_files,read_themes,read_content,read_discounts
+read_products,write_products,read_metaobjects,write_metaobjects,read_metaobject_definitions,write_metaobject_definitions,read_online_store_pages,write_online_store_pages,read_online_store_navigation,write_online_store_navigation,read_legal_policies,write_legal_policies,read_translations,write_translations,read_locales,read_files,write_files,read_themes,read_content,read_discounts,read_inventory,write_inventory,read_locations
 ```
 
 Give source stores read-only scopes when you can.
@@ -281,8 +284,8 @@ You can also pass the whole config as JSON in `SHOPIFY_STORES`, or point `SHOPIF
 | `SYNC_CLI_TIMEOUT_MS` | `120000` | How long one Shopify CLI call may take before it is stopped |
 | `SYNC_MAX_ITEMS` | `50000` | Longest list read from a store; a longer one is an error, never a silent cut |
 | `SYNC_WRITE_CONCURRENCY` | `4` | How many independent writes run at once |
-| `SYNC_BULK_THRESHOLD` | `250` | Above this many products, a full product read uses one Shopify bulk operation instead of pages |
-| `SYNC_BULK_TIMEOUT_MS` | `1800000` | How long to wait for a bulk read to finish |
+| `SYNC_BULK_THRESHOLD` | `250` | Above this many products, reads and new products (and metafield values) go through one Shopify bulk operation instead of single requests |
+| `SYNC_BULK_TIMEOUT_MS` | `1800000` | How long to wait for a bulk operation to finish |
 | `SYNC_CLI_CONCURRENCY` | `4` | With the Shopify CLI sign-in, how many `shopify` processes run at once per store (up to 16) |
 | `SYNC_AUDIT_LOG` | `~/.shopify-store-sync/audit.log` | Where every write is logged |
 | `SYNC_STATE_DIR` | `~/.shopify-store-sync` | Where plans and the audit log are kept |
@@ -500,7 +503,7 @@ Two references followed from the source store to the target, as the sample sync 
 ## Tested on real stores
 
 <p align="center">
-  <img src="docs/images/tested.png" alt="130 automated tests, 64 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
+  <img src="docs/images/tested.png" alt="138 automated tests, 79 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
 </p>
 
 <details>
@@ -544,7 +547,8 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 
 *Syncing*
 - [x] Metafield definitions, metaobject definitions and metaobject entries
-- [x] Products: content, category, options, variants matched by option values (SKU, taxable flag, inventory policy), images; new ones as drafts, prices only when asked
+- [x] Products: content, category, options, images, variants matched by option values (SKU, barcode, weight, customs, shipping, variant image); new ones as drafts, prices and stock only when asked
+- [x] Big catalogs: bulk reads, and bulk writes for new products and metafield values
 - [x] Collections with smart-collection rules, pages, menus (3 levels, customer account menus too), redirects, store policies
 - [x] Metafield values on products, collections, product variants and the shop, translations per language, products included (opt-in)
 - [x] Images and files matched by file name, uploaded to the target when missing
@@ -575,7 +579,7 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 - [x] Published on npm, runs with `npx`
 
 *Quality*
-- [x] 130 automated tests against an in-memory Shopify, plus MCP protocol tests
+- [x] 138 automated tests against an in-memory Shopify, plus MCP protocol tests
 - [x] Every GraphQL operation validated against Shopify's schema for 2026-04, 2026-10 and 2027-01
 - [x] Tested live between two stores on Linux and Windows, Shopify CLI 4.9 and 5
 - [x] Parallel reads and writes (metaobject types read and entries written in parallel; the check before writing re-reads only what the plan touches) with throttle-aware retries; clear errors for missing installs, expired sign-ins and auto-managed policies
@@ -583,9 +587,9 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 
 **Next**
 - [ ] Move collection rules to Shopify's new `sources` model. `ruleSet` is deprecated but supported through 2027-01; the new model only exists from 2026-07, so this waits until 2026-04 can be dropped
-- [ ] Batch writes for very large syncs (`urlRedirectImport`, bulk operations): writes run 4 at a time today
-- [ ] Product prices per market and inventory levels, as explicit opt-ins
-- [ ] Barcodes, weight and variant images on products; translations of option names and values
+- [ ] Bulk writes for product updates and redirects (`urlRedirectImport`); new products and metafield values already go in bulk
+- [ ] Product prices per market, as an explicit opt-in
+- [ ] Translations of option names and values
 - [ ] Remap blog articles, so references to them sync too
 - [ ] Metafield values on pages and blogs; metafield definition constraints
 - [ ] Menu item (link) translations

@@ -599,8 +599,8 @@ render("tested", 1280, 288, `
 <div class="wrap">
   <div class="title"><h2>Tested on real stores, not just in theory</h2><span class="muted">two live Shopify stores, on Linux and Windows</span></div>
   <div class="stats">
-    <div class="stat card"><b class="g">130</b><span>automated tests</span></div>
-    <div class="stat card"><b class="b">64</b><span>GraphQL operations validated against Shopify's schema</span></div>
+    <div class="stat card"><b class="g">138</b><span>automated tests</span></div>
+    <div class="stat card"><b class="b">79</b><span>GraphQL operations validated against Shopify's schema</span></div>
     <div class="stat card"><b class="a">11</b><span>item types written to a live store</span></div>
     <div class="stat card"><b style="color:${P}">2</b><span>sign-in methods used live: Shopify CLI and an app</span></div>
   </div>
@@ -621,24 +621,24 @@ const todo = (t) => `<div class="it"><span class="ck muted">○</span>${t}</div>
 const group = (title, cls, items) => `<div class="grp"><div class="gt ${cls}">${title}</div>${items.join("")}</div>`;
 render("roadmap", 1280, 462, `
 <div class="wrap">
-  <div class="title"><h2>Roadmap</h2><span class="muted">shipped in 0.8.0, and what comes next</span></div>
+  <div class="title"><h2>Roadmap</h2><span class="muted">shipped in 0.9.0, and what comes next</span></div>
   <div class="cols">
     <div class="card pane">
       <div class="ph"><span class="badge bg-g">Shipped</span></div>
       <div class="two">
-        ${group("Syncing", "g", [done("11 item types incl. products"), done("ID remapping, incl. variants"), done("Targeted checks, one item"), done("Discounts compared, read-only")])}
+        ${group("Syncing", "g", [done("11 item types incl. products"), done("ID remapping, incl. variants"), done("Barcodes, weight, stock (opt-in)"), done("Bulk writes for big catalogs")])}
         ${group("Safety", "g", [done("Dry-run plans, drift check"), done("Never deletes, inside items too"), done("A person confirms production"), done("Validated input, time limits")])}
         ${group("Ways to use it", "g", [done("MCP server, 10 tools, progress"), done("CLI: drift checks, md reports"), done("Config as code, theme diff"), done("No-app sign-in, on npm")])}
-        ${group("Quality", "g", [done("130 automated tests, linted"), done("Checked on 3 API versions"), done("Live on Linux and Windows"), done("Parallel reads and writes")])}
+        ${group("Quality", "g", [done("138 automated tests, linted"), done("Checked on 3 API versions"), done("Live on Linux and Windows"), done("Parallel reads and writes")])}
       </div>
     </div>
     <div class="card pane">
       <div class="ph"><span class="badge bg-b">Next</span></div>
       ${[
         "Collection rules on Shopify's new sources model",
-        "Batch writes for very large syncs",
-        "Product prices per market, inventory (opt-in)",
-        "Barcodes, weight and variant images",
+        "Bulk product updates and redirects",
+        "Product prices per market (opt-in)",
+        "Translations of option names and values",
         "Remap blog articles",
         "Metafield values on pages and blogs",
         "Menu link translations, markets",
