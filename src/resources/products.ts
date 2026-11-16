@@ -1,7 +1,7 @@
 import { assertNoUserErrors, envNumber, paginate, type AdminClient } from "../shopify/client.js";
 import { bulkMutation, bulkQuery, bulkThreshold, bulkTimeoutMs, type LineResult } from "../shopify/bulk.js";
 import { eachLimited } from "../refs.js";
-import { filenameFromUrl, REF_PREFIX, variantKey, variantRef, type FileSource, type GidToRefMapper } from "../refs.js";
+import { createFiles, filenameFromUrl, REF_PREFIX, variantKey, variantRef, type FileSource, type GidToRefMapper } from "../refs.js";
 import type { FetchOptions, Item, ResourceAdapter } from "./types.js";
 import { compact, PAGE_INFO } from "./util.js";
 
@@ -700,7 +700,27 @@ export const products: ResourceAdapter = {
   // New products only: one productSet per line, images taken straight from the source's URLs.
   async bulkWrite(ctx, items) {
     const locations = items.some((i) => hasStock(i.data)) ? await locationsByName(ctx.client) : undefined;
-    const lines = items.map((i) => ({ input: withSources(productSetInput(i.data, undefined, true, locations), ctx.files) }));
+    const inputs = items.map((i) => productSetInput(i.data, undefined, true, locations));
+    // Files the target doesn't have yet are created first, once each and all at the same time, so no
+    // product write waits on an image download and an image several products share isn't copied per product.
+    const missing = new Map<string, FileSource>();
+    for (const input of inputs) {
+      for (const f of [...((input.files as { id?: string }[]) ?? []), ...((input.variants as { file?: { id?: string } }[]) ?? []).map((v) => v.file)]) {
+        const src = f?.id?.startsWith(REF_PREFIX) ? ctx.files[f.id] : undefined;
+        if (src && f?.id) missing.set(f.id, src);
+      }
+    }
+    if (missing.size) {
+      ctx.onPhase?.(`creating ${missing.size} files in ${ctx.client.store.alias} before the products`);
+      const ids = await createFiles(ctx.client, [...missing].map(([ref, source]) => ({ ref, source })), { onPhase: ctx.onPhase });
+      for (const [ref, id] of ids) ctx.resolver.remember(ref, id);
+      const swap = <F extends { id?: string }>(f: F): F => (f.id && ids.has(f.id) ? { ...f, id: ids.get(f.id) } : f);
+      for (const input of inputs) {
+        input.files = ((input.files as Record<string, unknown>[] & { id?: string }[]) ?? []).map(swap);
+        input.variants = ((input.variants as Record<string, any>[]) ?? []).map((v) => (v.file ? { ...v, file: swap(v.file) } : v));
+      }
+    }
+    const lines = inputs.map((input) => ({ input: withSources(input, ctx.files) }));
     const toResult = (r: LineResult): { id?: string; error?: string } => {
       const ps = r.data?.productSet;
       const errors = [...(r.errors ?? []), ...(ps?.userErrors ?? [])].map((e: { message: string }) => e.message);

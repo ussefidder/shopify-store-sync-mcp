@@ -307,8 +307,9 @@ describe("bulk writes", () => {
 
       const fields = eu.calls.map((c) => c.field);
       expect(fields.filter((f) => f === "bulkOperationRunMutation")).toHaveLength(2);
-      // No image was looked up or uploaded one by one: the bulk write took them from the source's URLs.
-      expect(fields).not.toContain("fileCreate");
+      // Images were created once each, all in one request, before the products: none one by one.
+      expect(fields.filter((f) => f === "fileCreate")).toHaveLength(1);
+      expect(eu.state.files).toHaveLength(4);
       expect(eu.state.products.map((p) => p.handle).sort()).toEqual(["tee-0", "tee-1", "tee-2", "tee-3"]);
       const tee = eu.state.products.find((p) => p.handle === "tee-2")!;
       expect(eu.state.files.find((f) => f.id === tee.media![0])?.url).toContain("tee-2.jpg");
@@ -318,6 +319,30 @@ describe("bulk writes", () => {
         { namespace: "custom", key: "chart", type: "file_reference", value: tee.media![0] },
       ]);
       expect(tee.variants![0]!.metafields).toEqual([{ namespace: "custom", key: "fit", type: "single_line_text_field", value: "fit-2" }]);
+    } finally {
+      delete process.env.SYNC_BULK_THRESHOLD;
+    }
+  });
+
+  it("creates an image several new products share only once", async () => {
+    const { bulkIO } = await import("../src/shopify/bulk.js");
+    const { bulkFiles } = await import("./fakeShop.js");
+    bulkIO.wait = async () => {};
+    bulkIO.upload = async (_url, form) => void bulkFiles.set(String(form.get("key")), await (form.get("file") as Blob).text());
+    bulkIO.download = async (url) => bulkFiles.get(url) ?? "";
+    process.env.SYNC_BULK_THRESHOLD = "2";
+    try {
+      const shared = { id: "gid://shopify/MediaImage/9", url: `${cdn}/size-guide.jpg?v=1`, alt: "Size guide" };
+      const products = Array.from({ length: 3 }, (_, i) => shirt(`gid://shopify/Product/${i + 1}`, { handle: `tee-${i}`, media: [shared.id] }));
+      const dev = new FakeShop(FakeShop.config("dev"), { files: [shared], products });
+      const eu = new FakeShop(FakeShop.config("eu"), {});
+      const engine = engineFor(dev, eu);
+      const plan = await engine.plan("dev", "eu", { resources: ["products"] });
+      const { results } = await engine.apply(plan.id);
+      expect(results.filter((r) => r.outcome !== "created")).toEqual([]);
+      expect(eu.state.files).toHaveLength(1);
+      expect(eu.state.files[0]).toMatchObject({ alt: "Size guide" });
+      expect(new Set(eu.state.products.map((p) => p.media![0]))).toEqual(new Set([eu.state.files[0]!.id]));
     } finally {
       delete process.env.SYNC_BULK_THRESHOLD;
     }

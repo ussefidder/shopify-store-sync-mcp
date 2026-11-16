@@ -181,8 +181,8 @@ export class FakeShop implements AdminClient {
       .filter((f) => f.id === id)
       .map((f) =>
         f.kind === "GenericFile"
-          ? { __typename: "GenericFile", id: f.id, alt: f.alt ?? null, url: f.url ?? null }
-          : { __typename: "MediaImage", id: f.id, alt: f.alt ?? null, image: f.url ? { url: f.url } : null },
+          ? { __typename: "GenericFile", id: f.id, alt: f.alt ?? null, url: f.url ?? null, fileStatus: "READY" }
+          : { __typename: "MediaImage", id: f.id, alt: f.alt ?? null, image: f.url ? { url: f.url } : null, fileStatus: "READY" },
       );
     const defs = s.metafieldDefinitions.filter((d) => d.id === id).map((d) => ({ ...d, __typename: "MetafieldDefinition", definitionKey: d.key }));
     const variants = s.products.flatMap((p) =>
@@ -691,10 +691,9 @@ export class FakeShop implements AdminClient {
         return ok({ translations: v.t.map((t: { key: string }) => ({ key: t.key })) });
       }
       case "fileCreate": {
-        const f = v.files[0];
-        const file = { id: gid("MediaImage"), url: f.originalSource, alt: f.alt };
-        s.files.push(file);
-        return ok({ files: [{ id: file.id }] });
+        const made = (v.files as { originalSource: string; alt?: string }[]).map((f) => ({ id: gid("MediaImage"), url: f.originalSource, alt: f.alt }));
+        s.files.push(...made);
+        return ok({ files: made.map((f) => ({ id: f.id })) });
       }
       case "pageCreate": {
         const p = { id: gid("Page"), templateSuffix: null, isPublished: true, body: "", ...v.page };

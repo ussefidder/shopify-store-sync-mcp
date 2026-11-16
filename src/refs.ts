@@ -518,3 +518,61 @@ export class RefToGidResolver {
     return { value: mapStrings(value, (s) => resolved.get(s) ?? s) as T, missing };
   }
 }
+
+const FILE_CREATE = `mutation FilesCreate($files: [FileCreateInput!]!) { fileCreate(files: $files) { files { id } userErrors { field message code } } }`;
+const FILE_STATUS = `query FilesStatus($ids: [ID!]!) { nodes(ids: $ids) { id ... on File { fileStatus } } }`;
+
+/**
+ * Create files in the target from their source URLs, 250 per request, and wait until Shopify has
+ * processed them. Each file is created once however many products use it, and Shopify fetches them
+ * all at the same time instead of one product at a time. Returns the ref → id of the files that are
+ * ready; the others are left out, for the caller to send by URL as before.
+ */
+export async function createFiles(
+  client: AdminClient,
+  files: { ref: string; source: FileSource }[],
+  opts: { onPhase?: (message: string) => void; wait?: (ms: number) => Promise<void>; timeoutMs?: number; pollMs?: number } = {},
+): Promise<Map<string, string>> {
+  const created = new Map<string, string>();
+  for (let i = 0; i < files.length; i += 250) {
+    const batch = files.slice(i, i + 250);
+    const res = await client.request<{ fileCreate: { files: { id: string }[] | null; userErrors: { message: string }[] } }>(FILE_CREATE, {
+      files: batch.map((f) => ({
+        originalSource: f.source.url,
+        contentType: f.source.contentType,
+        alt: f.source.alt,
+        filename: filenameFromUrl(f.source.url),
+        duplicateResolutionMode: "APPEND_UUID",
+      })),
+    });
+    // One bad file fails the whole batch: those files go by URL with their product, as before.
+    if (res.fileCreate.userErrors?.length) {
+      opts.onPhase?.(`${batch.length} files could not be created ahead (${res.fileCreate.userErrors[0]!.message}); they go with their products`);
+      continue;
+    }
+    (res.fileCreate.files ?? []).forEach((f, k) => f?.id && created.set(batch[k]!.ref, f.id));
+    opts.onPhase?.(`created ${Math.min(i + 250, files.length)} of ${files.length} files, Shopify is fetching them`);
+  }
+
+  const ready = new Map<string, string>();
+  let waiting = [...created];
+  const wait = opts.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const deadline = Date.now() + (opts.timeoutMs ?? 15 * 60_000);
+  while (waiting.length) {
+    const still: [string, string][] = [];
+    for (let i = 0; i < waiting.length; i += 250) {
+      const batch = waiting.slice(i, i + 250);
+      const d = await client.request<{ nodes: ({ id: string; fileStatus?: string } | null)[] }>(FILE_STATUS, { ids: batch.map(([, id]) => id) });
+      d.nodes.forEach((n, k) => {
+        const status = n?.fileStatus;
+        if (status === "READY") ready.set(batch[k]![0], batch[k]![1]);
+        else if (status === "UPLOADED" || status === "PROCESSING") still.push(batch[k]!);
+      });
+    }
+    waiting = still;
+    if (!waiting.length || Date.now() > deadline) break;
+    opts.onPhase?.(`${ready.size} of ${created.size} files ready, waiting for ${waiting.length}`);
+    await wait(opts.pollMs ?? 3000);
+  }
+  return ready;
+}
