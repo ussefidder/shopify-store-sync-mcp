@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2
+
+- Fixed: a store whose sign-in can't read some metafield owner types (customers, orders, locations, markets... need extra permissions) made the whole diff fail with "Access denied for pinnedPosition field". Those owner types are now reported as not compared, on both stores, and everything else is compared as usual
+- `--include` patterns that start with owner types (`"PRODUCT.*,COLLECTION.*"`) now limit which metafield definitions are read, so other owner types aren't queried at all
+- `diff` and `plan` list what could not be compared on stderr
+
 ## 0.5.1
 
 - Listed in the official MCP Registry as `io.github.ussefidder/shopify-store-sync-mcp` (`mcpName` in `package.json`, `server.json` in the repo)

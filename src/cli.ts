@@ -40,6 +40,11 @@ Options
 
 type Flags = Record<string, string | true>;
 
+/** Parts a store couldn't be read for (missing permissions). On stderr, so --json output stays clean. */
+function notCompared(skipped: { kind: string; key: string; reason: string }[]) {
+  for (const x of skipped.filter((x) => x.key.includes("*"))) console.error(`not compared: ${x.kind} ${x.key}: ${x.reason}`);
+}
+
 export function parseArgs(argv: string[]): { positional: string[]; flags: Flags } {
   const positional: string[] = [];
   const flags: Flags = {};
@@ -154,9 +159,10 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.en
       }
       case "diff": {
         need(a, b);
-        const { diffs } = await engine.compare(a!, b!, scopeFromFlags(flags));
+        const { diffs, skipped } = await engine.compare(a!, b!, scopeFromFlags(flags));
         if (asJson) out(diffs.map((d) => summarizeDiff(d, true, 1000)));
         else printDiff(diffs, flags.values === true);
+        notCompared(skipped);
         const changed = diffs.some((d) => d.onlyInSource.length || d.changed.length);
         return flags["exit-code"] && changed ? 2 : 0;
       }
@@ -165,6 +171,7 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.en
         const plan = await engine.plan(a!, b!, scopeFromFlags(flags));
         if (asJson) out(summarizePlan(plan, true));
         else printPlan(plan);
+        notCompared(plan.skipped);
         return 0;
       }
       case "plans": {

@@ -1,4 +1,4 @@
-import { assertNoUserErrors, paginate } from "../shopify/client.js";
+import { accessDenied, assertNoUserErrors, paginate } from "../shopify/client.js";
 import type { Item, ResourceAdapter } from "./types.js";
 import { compact, oneOf, PAGE_INFO, reservedPrefix, sortValidations } from "./util.js";
 
@@ -107,9 +107,20 @@ export const metafieldDefinitions: ResourceAdapter = {
   async fetch(client, opts) {
     const items: Item[] = [];
     const skipped: { key: string; reason: string }[] = [];
-    // One list per owner type; they're independent, so read them in parallel.
+    // One list per owner type; they're independent, so read them in parallel. Some owner types
+    // (customers, orders, locations...) need extra permissions; one the sign-in can't read is
+    // reported and left out of the comparison instead of failing the whole read.
     const lists = await Promise.all(
-      (opts.ownerTypes ?? DEFAULT_OWNER_TYPES).map((ownerType) => paginate<Node>(client, QUERY, { ownerType }, (d) => d.metafieldDefinitions)),
+      (opts.ownerTypes ?? DEFAULT_OWNER_TYPES).map(async (ownerType) => {
+        try {
+          return await paginate<Node>(client, QUERY, { ownerType }, (d) => d.metafieldDefinitions);
+        } catch (e) {
+          const required = accessDenied(e);
+          if (required === undefined) throw e;
+          skipped.push({ key: `${ownerType}.*`, reason: `not readable with this store's permissions${required ? ` (Shopify needs ${required.replace(/`/g, "")})` : ""}, so ${ownerType} definitions are not compared` });
+          return [];
+        }
+      }),
     );
     for (const nodes of lists) {
       for (const n of nodes) {

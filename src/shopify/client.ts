@@ -29,6 +29,19 @@ export type FetchLike = (url: string, init: { method: string; headers: Record<st
   text(): Promise<string>;
 }>;
 
+/**
+ * When an error means the sign-in or token lacks a permission, the access Shopify says is needed
+ * (for example "`read_customers` access scope"), or "" when Shopify doesn't say. Undefined for any other error.
+ */
+export function accessDenied(e: unknown): string | undefined {
+  if (!(e instanceof ShopifyError)) return undefined;
+  const errors = Array.isArray(e.details) ? (e.details as GraphQLError[]) : [];
+  const denied = errors.filter((x) => x?.extensions?.code === "ACCESS_DENIED" || /access denied/i.test(x?.message ?? ""));
+  if (!denied.length && !/access denied/i.test(e.message)) return undefined;
+  const required = denied.map((x) => x.extensions?.requiredAccess).find((r): r is string => typeof r === "string");
+  return required ?? "";
+}
+
 /** Minimal interface the rest of the code depends on, so tests can use a fake. */
 export interface AdminClient {
   readonly store: StoreConfig;

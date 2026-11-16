@@ -56,7 +56,7 @@ export class Engine {
 
   static fetchOptions(scope: Scope): FetchOptions {
     return {
-      ownerTypes: scope.ownerTypes,
+      ownerTypes: scope.ownerTypes ?? Engine.ownerTypes(scope.include),
       metaobjectTypes: scope.metaobjectTypes,
       namespaces: scope.namespaces,
       locales: scope.locales,
@@ -65,6 +65,21 @@ export class Engine {
       productHandles: Engine.productHandles(scope.include),
       metafieldOwners: Engine.metafieldOwners(scope.include),
     };
+  }
+
+  /**
+   * When every include pattern starts with a metafield owner type ("PRODUCT.*", "COLLECTION.custom.*"),
+   * metafield definitions are read for those owner types only.
+   */
+  static ownerTypes(include?: string[]): FetchOptions["ownerTypes"] {
+    if (!include?.length) return undefined;
+    const types: string[] = [];
+    for (const p of include) {
+      const m = /^([A-Z][A-Z_]*)\./.exec(p);
+      if (!m) return undefined;
+      if (!types.includes(m[1]!)) types.push(m[1]!);
+    }
+    return types;
   }
 
   /**
@@ -151,8 +166,18 @@ export class Engine {
       b.resources.translations = t.resources.translations;
       Object.assign(b.files, t.files);
     }
-    const diffs = kinds.map((k) => diffItems(k, a.resources[k]?.items ?? [], b.resources[k]?.items ?? [], Engine.filter(scope)));
-    const skipped = kinds.flatMap((k) => (a.resources[k]?.skipped ?? []).map((x) => ({ kind: k, ...x })));
+    // Something one side couldn't read (a "PRODUCT.*" style key) is left out on both sides:
+    // otherwise everything the target has there would look missing and be planned as new.
+    const unreadable = (k: ResourceKind) => [a, b].flatMap((s) => (s.resources[k]?.skipped ?? []).filter((x) => x.key.endsWith("*")).map((x) => x.key));
+    const diffs = kinds.map((k) => {
+      const filter = Engine.filter(scope);
+      const out = unreadable(k);
+      return diffItems(k, a.resources[k]?.items ?? [], b.resources[k]?.items ?? [], out.length ? { ...filter, exclude: [...(filter.exclude ?? []), ...out] } : filter);
+    });
+    const skipped = kinds.flatMap((k) => [
+      ...(a.resources[k]?.skipped ?? []).map((x) => ({ kind: k, ...x, key: x.key.endsWith("*") ? `${x.key} (in ${a.store})` : x.key })),
+      ...(b.resources[k]?.skipped ?? []).filter((x) => x.key.endsWith("*")).map((x) => ({ kind: k, ...x, key: `${x.key} (in ${b.store})` })),
+    ]);
     return { source: a, target: b, diffs, skipped };
   }
 

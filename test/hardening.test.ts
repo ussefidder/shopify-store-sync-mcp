@@ -8,7 +8,7 @@ import { Engine } from "../src/engine.js";
 import { PLAN_KEEP_MS, PlanStore } from "../src/plan.js";
 import { isShopifyFileUrl, RefToGidResolver } from "../src/refs.js";
 import { alignMenuItems, mergeMenuItems, targetOnlyMenuItems } from "../src/resources/menus.js";
-import { paginate, ShopifyAdminClient, type FetchLike } from "../src/shopify/client.js";
+import { paginate, ShopifyAdminClient, ShopifyError, type FetchLike } from "../src/shopify/client.js";
 import { readSnapshot, SNAPSHOT_FORMAT } from "../src/snapshotFiles.js";
 import { FakeShop, type FakeProduct } from "./fakeShop.js";
 
@@ -457,5 +457,70 @@ describe("command line entry point", () => {
     const version = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf8")).version;
     expect(execFileSync(process.execPath, ["--import", "tsx", entry, "--version"], { encoding: "utf8" }).trim()).toBe(version);
     expect(existsSync(entry)).toBe(true);
+  });
+});
+
+describe("an owner type the sign-in can't read", () => {
+  const def = (id: string, ownerType: string, key: string) => ({
+    id,
+    name: key,
+    namespace: "custom",
+    key,
+    description: null,
+    ownerType,
+    pinnedPosition: null,
+    type: { name: "single_line_text_field" },
+    access: { storefront: "PUBLIC_READ", customerAccount: "NONE" },
+    capabilities: { adminFilterable: { enabled: false }, smartCollectionCondition: { enabled: false }, uniqueValues: { enabled: false } },
+    validations: [],
+  });
+
+  /** Answers like Shopify does when the token lacks read_customers. */
+  class NoCustomers extends FakeShop {
+    override async request<T = any>(query: string, v: Record<string, any> = {}): Promise<T> {
+      if (/metafieldDefinitions\(/.test(query) && v.ownerType === "CUSTOMER") {
+        throw new ShopifyError(`${this.store.domain}: Access denied for pinnedPosition field.; Access denied for access field.`, [
+          { message: "Access denied for pinnedPosition field.", extensions: { code: "ACCESS_DENIED", requiredAccess: "`read_customers` access scope." } },
+          { message: "Access denied for access field.", extensions: { code: "ACCESS_DENIED" } },
+        ]);
+      }
+      return super.request<T>(query, v);
+    }
+  }
+
+  it("is reported and left out on both sides; the rest is still compared", async () => {
+    const dev = new FakeShop(FakeShop.config("dev"), {
+      metafieldDefinitions: [def("gid://shopify/MetafieldDefinition/1", "PRODUCT", "fabric"), def("gid://shopify/MetafieldDefinition/2", "CUSTOMER", "tier")],
+    });
+    const stg = new NoCustomers(FakeShop.config("stg"), { metafieldDefinitions: [def("gid://shopify/MetafieldDefinition/9", "CUSTOMER", "tier")] });
+    const engine = engineFor(dev, stg);
+
+    const { diffs, skipped } = await engine.compare("dev", "stg", { resources: ["metafield_definitions"] });
+    expect(diffs[0]!.onlyInSource.map((i) => i.key)).toEqual(["PRODUCT.custom.fabric"]);
+    expect(skipped).toEqual([expect.objectContaining({ key: "CUSTOMER.* (in stg)", reason: expect.stringContaining("read_customers access scope") })]);
+
+    const plan = await engine.plan("dev", "stg", { resources: ["metafield_definitions"] });
+    expect(plan.ops.map((o) => o.key)).toEqual(["PRODUCT.custom.fabric"]);
+  });
+
+  it("is not read at all when the include patterns name other owner types", async () => {
+    const dev = new NoCustomers(FakeShop.config("dev"), { metafieldDefinitions: [def("gid://shopify/MetafieldDefinition/1", "PRODUCT", "fabric")] });
+    const stg = new NoCustomers(FakeShop.config("stg"));
+    const engine = engineFor(dev, stg);
+    const { diffs, skipped } = await engine.compare("dev", "stg", { resources: ["metafield_definitions"], include: ["PRODUCT.*", "COLLECTION.*"] });
+    expect(diffs[0]!.onlyInSource.map((i) => i.key)).toEqual(["PRODUCT.custom.fabric"]);
+    expect(skipped).toEqual([]);
+    expect(new Set(dev.calls.map((c) => c.variables.ownerType))).toEqual(new Set(["PRODUCT", "COLLECTION"]));
+  });
+
+  it("any other error still stops the read", async () => {
+    class Broken extends FakeShop {
+      override async request<T = any>(query: string, v: Record<string, any> = {}): Promise<T> {
+        if (/metafieldDefinitions\(/.test(query)) throw new ShopifyError(`${this.store.domain}: Internal error`, [{ message: "Internal error", extensions: { code: "INTERNAL_SERVER_ERROR" } }]);
+        return super.request<T>(query, v);
+      }
+    }
+    const engine = engineFor(new Broken(FakeShop.config("dev")), new FakeShop(FakeShop.config("stg")));
+    await expect(engine.compare("dev", "stg", { resources: ["metafield_definitions"] })).rejects.toThrow("Internal error");
   });
 });
