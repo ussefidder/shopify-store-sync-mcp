@@ -61,6 +61,11 @@ export interface FetchOptions {
    */
   productHandles?: { exact: string[]; prefixes: string[] };
   /**
+   * Products known to exist (from a cheap handle listing) that are not read in full, because the
+   * other store has nothing to compare them with. They are reported by handle and title only.
+   */
+  productStubs?: { id: string; handle: string; title: string }[];
+  /**
    * Narrows the read to items whose key is one of `exact` or starts with one of `prefixes`, taken
    * from include patterns (or from the keys a plan touches). Adapters that can look items up
    * directly use it (metaobjects, collections); the others read everything and the filter runs after.

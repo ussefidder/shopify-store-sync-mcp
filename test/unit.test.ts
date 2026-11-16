@@ -158,3 +158,50 @@ describe("ShopifyAdminClient", () => {
     await expect(new ShopifyAdminClient(store, fn).request("query { x }")).rejects.toThrow(/Field 'x' doesn't exist/);
   });
 });
+
+describe("bulk reads", async () => {
+  const { bulkQuery } = await import("../src/shopify/bulk.js");
+  const { nodesFromBulk } = await import("../src/resources/products.js");
+  const store = { alias: "s", domain: "s.myshopify.com" } as any;
+
+  it("starts the operation, polls until done and parses the file", async () => {
+    const statuses = ["RUNNING", "COMPLETED"];
+    const client = {
+      store,
+      request: async (q: string) =>
+        /bulkOperationRunQuery/.test(q)
+          ? { bulkOperationRunQuery: { bulkOperation: { id: "gid://shopify/BulkOperation/1" }, userErrors: [] } }
+          : { node: { status: statuses.shift(), errorCode: null, objectCount: "2", url: "https://files/x.jsonl", partialDataUrl: null } },
+    };
+    const rows = await bulkQuery(client as any, "{ products { edges { node { id } } } }", {
+      wait: async () => {},
+      download: async () => '{"id":"gid://shopify/Product/1"}\n{"id":"gid://shopify/Product/2"}\n',
+    });
+    expect(rows.map((r) => r.id)).toEqual(["gid://shopify/Product/1", "gid://shopify/Product/2"]);
+  });
+
+  it("says why when Shopify fails the operation", async () => {
+    const client = {
+      store,
+      request: async (q: string) =>
+        /bulkOperationRunQuery/.test(q)
+          ? { bulkOperationRunQuery: { bulkOperation: { id: "b" }, userErrors: [] } }
+          : { node: { status: "FAILED", errorCode: "ACCESS_DENIED", objectCount: "0", url: null, partialDataUrl: null } },
+    };
+    await expect(bulkQuery(client as any, "{}", { wait: async () => {} })).rejects.toThrow(/failed \(ACCESS_DENIED\)/);
+  });
+
+  it("puts variants and media back under their product", () => {
+    const nodes = nodesFromBulk([
+      { id: "gid://shopify/Product/1", handle: "a" },
+      { id: "gid://shopify/ProductVariant/11", __parentId: "gid://shopify/Product/1" },
+      { id: "gid://shopify/MediaImage/12", __parentId: "gid://shopify/Product/1" },
+      { id: "gid://shopify/Product/2", handle: "b" },
+      { id: "gid://shopify/ProductVariant/21", __parentId: "gid://shopify/Product/2" },
+    ]);
+    expect(nodes.map((n: any) => [n.handle, n.variants.nodes.length, n.media.nodes.length])).toEqual([
+      ["a", 1, 1],
+      ["b", 1, 0],
+    ]);
+  });
+});

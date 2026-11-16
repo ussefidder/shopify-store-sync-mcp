@@ -227,6 +227,17 @@ function unresolved(gid: string): string {
   return `${UNRESOLVED_PREFIX}${m?.[1] ?? "Unknown"}/${m?.[2] ?? gid}`;
 }
 
+const NODE_BATCHES_AT_ONCE = 4;
+
+/** Run `fn` over `items`, at most `limit` at a time. */
+export async function eachLimited<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) await fn(items[next++]!);
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
 /** Converts GIDs of one store into portable refs. */
 export class GidToRefMapper {
   private readonly cache = new Map<string, string>();
@@ -238,17 +249,16 @@ export class GidToRefMapper {
   async load(gids: Iterable<string>): Promise<void> {
     for (const g of gids) if (GID_RE.exec(g)?.[1] === "Shop") this.cache.set(g, `${REF_PREFIX}Shop`);
     const missing = [...new Set(gids)].filter((g) => !this.cache.has(g));
-    for (let i = 0; i < missing.length; i += 100) {
-      const batch = missing.slice(i, i + 100);
+    const batches: string[][] = [];
+    for (let i = 0; i < missing.length; i += 100) batches.push(missing.slice(i, i + 100));
+    // A few batches at a time: on a big catalog these are hundreds of requests.
+    await eachLimited(batches, NODE_BATCHES_AT_ONCE, async (batch) => {
       const data = await this.client.request<{ nodes: (RefNode | null)[] }>(NODES_QUERY, { ids: batch });
       batch.forEach((gid, idx) => {
         const node = data.nodes[idx];
-        const ref = node && nodeToRef(node);
-        if (ref) this.cache.set(gid, ref);
-        const file = node && nodeToFile(node);
-        if (ref && file) this.files.set(ref, { url: file.url, alt: file.alt, contentType: file.contentType });
+        if (node) this.seed(node, gid);
       });
-    }
+    });
 
     // Fallback for types the nodes query can't return.
     const left = missing.filter((g) => !this.cache.has(g));
@@ -261,6 +271,15 @@ export class GidToRefMapper {
       }
     }
     for (const g of missing) if (!this.cache.has(g)) this.cache.set(g, unresolved(g));
+  }
+
+  /** Record a node read elsewhere (an adapter that already has a file's URL), so it is not looked up again. */
+  seed(node: RefNode, gid = node.id): void {
+    const ref = nodeToRef(node);
+    if (!ref) return;
+    this.cache.set(gid, ref);
+    const file = nodeToFile(node);
+    if (file) this.files.set(ref, { url: file.url, alt: file.alt, contentType: file.contentType });
   }
 
   /** Rewrite all GIDs in a value. Call `load` first with the GIDs it contains. */

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.1
+
+- **Products on big catalogs, hours down to minutes.** Comparing a small store with a big one (72 products against 4,530) no longer reads the big one in full: both stores are first listed by handle (250 per request), and only the products both have are read in full. The others still show as "only in target"
+- **Bulk reads** for a full product read above 250 products (`SYNC_BULK_THRESHOLD`): Shopify exports the catalog on its side and the tool downloads one file, instead of paging through it under the rate limit. Bulk reads only read; `bulkOperationRunQuery` is a mutation by name, so the Shopify CLI sign-in runs it with `--allow-mutations`
+- Product images carry their URL in the product read, so they are no longer looked up again one batch at a time; the lookups that remain run 4 at a time. Products by handle are looked up 5 per request
+
 ## 0.8.0
 
 - **Targeted checks.** `check <source> <target> <resource> <key>` (tool: `compare_item`) compares one item side by side: each field that differs, and whether what it points at exists in the target. It reads only that item where Shopify allows it

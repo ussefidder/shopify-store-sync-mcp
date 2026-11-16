@@ -192,3 +192,32 @@ describe("products", () => {
     expect(results.map((r) => r.outcome)).toEqual(["updated"]);
   });
 });
+
+describe("large catalogs", () => {
+  const tee = (n: number): FakeProduct => ({ id: `gid://shopify/Product/9${n}`, handle: `tee-${n}`, title: `Tee ${n}` });
+
+  it("reads in full only the target products the source also has; the rest is listed by handle", async () => {
+    const dev = new FakeShop(FakeShop.config("dev"), { products: [shirt("gid://shopify/Product/1")] });
+    const stg = new FakeShop(FakeShop.config("stg"), {
+      products: [shirt("gid://shopify/Product/2", { title: "Linen shirt v2" }), ...Array.from({ length: 30 }, (_, i) => tee(i))],
+    });
+    const { diffs } = await engineFor(dev, stg).compare("dev", "stg", { resources: ["products"] });
+
+    const d = diffs[0]!;
+    expect(d.changed.map((c) => c.key)).toEqual(["linen-shirt"]);
+    expect(d.onlyInTarget.length).toBe(30);
+    // The target was listed, then one product looked up; never paged through in full.
+    const full = stg.calls.filter((c) => c.field === "productByIdentifier").map((c) => c.variables.handle);
+    expect(full).toEqual(["linen-shirt"]);
+  });
+
+  it("uses image URLs from the product read instead of looking each image up", async () => {
+    const dev = new FakeShop(FakeShop.config("dev"), {
+      files: [{ id: "gid://shopify/MediaImage/1", url: `${cdn}/linen-shirt.jpg?v=1` }],
+      products: [shirt("gid://shopify/Product/1", { media: ["gid://shopify/MediaImage/1"] })],
+    });
+    const snap = await engineFor(dev).load("dev", { resources: ["products"] });
+    expect(snap.resources.products!.items[0]!.data.images).toEqual([{ file: "shopify://File/linen-shirt.jpg" }]);
+    expect(dev.calls.some((c) => c.field === "nodes")).toBe(false);
+  });
+});

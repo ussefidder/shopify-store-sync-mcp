@@ -4,6 +4,7 @@ import { diffItems, type FieldChange, type KeyFilter, type ResourceDiff } from "
 import { buildPlan, PlanStore, type Plan } from "./plan.js";
 import { collectRefs, REF_PREFIX, RefToGidResolver, UNRESOLVED_PREFIX } from "./refs.js";
 import { DEFAULT_KINDS, type FetchOptions, type ResourceKind } from "./resources/index.js";
+import { listProducts } from "./resources/products.js";
 import { ShopifyAdminClient, type AdminClient } from "./shopify/client.js";
 import { ShopifyCliClient } from "./shopify/cliClient.js";
 import { applyView, takeSnapshot, type ReadProgress, type Snapshot } from "./snapshot.js";
@@ -122,9 +123,9 @@ export class Engine {
   }
 
   /** A store alias, or "dir:<path>" for a snapshot folder. */
-  async load(spec: string, scope: Scope, onRead?: ReadProgress): Promise<Snapshot> {
+  async load(spec: string, scope: Scope, onRead?: ReadProgress, extra: Partial<FetchOptions> = {}): Promise<Snapshot> {
     const kinds = Engine.kinds(scope);
-    const opts = Engine.fetchOptions(scope);
+    const opts = { ...Engine.fetchOptions(scope), ...extra };
     if (isDirSpec(spec)) {
       const snapshot = readSnapshot(spec.slice(DIR_PREFIX.length), kinds);
       // A folder holds whatever was exported; it is looked at the same way a store would be.
@@ -163,9 +164,10 @@ export class Engine {
     // source's languages, so both sides are comparable.
     const laterTranslations = kinds.includes("translations") && !scope.locales?.length;
     const firstKinds = laterTranslations ? kinds.filter((k) => k !== "translations") : kinds;
+    const targetExtra = await this.narrowTargetProducts(source, target, scope, firstKinds);
     const [a, b] = await Promise.all([
       this.load(source, scope, onRead),
-      firstKinds.length ? this.load(target, { ...scope, resources: firstKinds }, onRead) : Promise.resolve(this.emptySnapshot(target)),
+      firstKinds.length ? this.load(target, { ...scope, resources: firstKinds }, onRead, targetExtra) : Promise.resolve(this.emptySnapshot(target)),
     ]);
     if (laterTranslations) {
       const t = await this.load(target, { ...scope, resources: ["translations"], locales: Engine.locales(a) }, onRead);
@@ -185,6 +187,23 @@ export class Engine {
       ...(b.resources[k]?.skipped ?? []).filter((x) => x.key.endsWith("*")).map((x) => ({ kind: k, ...x, key: `${x.key} (in ${b.store})` })),
     ]);
     return { source: a, target: b, diffs, skipped };
+  }
+
+  /**
+   * Products are read in full only where they can be compared: the target's products whose handle
+   * the source also has. The rest of the target is listed by handle (cheap), so it still shows as
+   * "only in target". Without this, a small store compared with a big one reads the big one whole.
+   */
+  private async narrowTargetProducts(source: string, target: string, scope: Scope, kinds: ResourceKind[]): Promise<Partial<FetchOptions>> {
+    if (!kinds.includes("products") || isDirSpec(source) || isDirSpec(target) || Engine.productHandles(scope.include)) return {};
+    this.events.phase?.("listing products in both stores");
+    const [src, tgt] = await Promise.all([listProducts(this.client(source)), listProducts(this.client(target))]);
+    const inSource = new Set(src.map((p) => p.handle));
+    const both = tgt.filter((p) => inSource.has(p.handle) && !p.isGiftCard).map((p) => p.handle);
+    // Reading by handle only pays off when it skips a good part of the target.
+    if (both.length > tgt.length / 2) return {};
+    const stubs = tgt.filter((p) => !inSource.has(p.handle) && !p.isGiftCard).map(({ id, handle, title }) => ({ id, handle, title }));
+    return { productHandles: { exact: both, prefixes: [] }, productStubs: stubs };
   }
 
   /**

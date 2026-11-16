@@ -144,6 +144,15 @@ export class FakeShop implements AdminClient {
     const m = /^\s*(?:query|mutation)[^{]*\{\s*(\w+)/.exec(query);
     if (!m) throw new Error(`fake: can't parse ${query.slice(0, 60)}`);
     const field = m[1]!;
+    // Aliased lookups ("p0: productByIdentifier(...)"), answered one alias at a time.
+    if (/^\s*query ProductsByHandle/.test(query)) {
+      const out: Record<string, unknown> = {};
+      for (const [, alias, name] of query.matchAll(/(\w+): productByIdentifier\(identifier: \{ handle: \$(\w+) \}\)/g)) {
+        this.calls.push({ field: "productByIdentifier", variables: { handle: v[name!] } });
+        out[alias!] = this.handle("productByIdentifier", query, { handle: v[name!] }, this.state);
+      }
+      return out as T;
+    }
     this.calls.push({ field, variables: v });
     const s = this.state;
     return { [field]: this.handle(field, query, v, s) } as T;
@@ -200,7 +209,7 @@ export class FakeShop implements AdminClient {
       media: page(
         (p.media ?? []).map((id) => {
           const f = this.state.files.find((x) => x.id === id);
-          return { mediaContentType: MEDIA_TYPE[f?.kind ?? "MediaImage"] ?? "IMAGE", id, alt: f?.alt ?? null };
+          return { mediaContentType: MEDIA_TYPE[f?.kind ?? "MediaImage"] ?? "IMAGE", id, alt: f?.alt ?? null, image: (f?.kind ?? "MediaImage") === "MediaImage" && f?.url ? { url: f.url } : null };
         }),
         this.state.pageSize,
         after.media,
@@ -286,7 +295,16 @@ export class FakeShop implements AdminClient {
             (d) => d.ownerType === (v.ownerType ?? v.o) && (v.n === undefined || d.namespace === v.n) && (v.k === undefined || d.key === v.k),
           ),
         );
+      case "productsCount":
+        return { count: s.products.length };
       case "products":
+        if (/query ProductIndex/.test(query)) {
+          return page(
+            s.products.map((p) => ({ id: p.id, handle: p.handle, title: p.title ?? p.handle, isGiftCard: p.isGiftCard ?? false })),
+            s.pageSize,
+            v.after,
+          );
+        }
         if (query.includes("variants(")) return conn(s.products.map((p) => this.productView(p)));
         return conn(s.products.map((p) => ({ ...p, metafields: conn(filterNs(p.metafields, v.namespace)) })));
       case "collections":

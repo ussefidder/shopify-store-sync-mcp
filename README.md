@@ -281,6 +281,8 @@ You can also pass the whole config as JSON in `SHOPIFY_STORES`, or point `SHOPIF
 | `SYNC_CLI_TIMEOUT_MS` | `120000` | How long one Shopify CLI call may take before it is stopped |
 | `SYNC_MAX_ITEMS` | `50000` | Longest list read from a store; a longer one is an error, never a silent cut |
 | `SYNC_WRITE_CONCURRENCY` | `4` | How many independent writes run at once |
+| `SYNC_BULK_THRESHOLD` | `250` | Above this many products, a full product read uses one Shopify bulk operation instead of pages |
+| `SYNC_BULK_TIMEOUT_MS` | `1800000` | How long to wait for a bulk read to finish |
 | `SYNC_CLI_CONCURRENCY` | `4` | With the Shopify CLI sign-in, how many `shopify` processes run at once per store (up to 16) |
 | `SYNC_AUDIT_LOG` | `~/.shopify-store-sync/audit.log` | Where every write is logged |
 | `SYNC_STATE_DIR` | `~/.shopify-store-sync` | Where plans and the audit log are kept |
