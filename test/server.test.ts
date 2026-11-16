@@ -68,7 +68,7 @@ describe("MCP server", () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
-      ["apply_plan", "compare_item", "diff_stores", "diff_themes", "export_snapshot", "get_plan", "list_resource_types", "list_stores", "plan_sync", "snapshot_store"].sort(),
+      ["apply_plan", "apply_status", "compare_item", "diff_stores", "diff_themes", "export_snapshot", "get_plan", "list_resource_types", "list_stores", "plan_sync", "snapshot_store"].sort(),
     );
     // export_snapshot writes local files only; apply_plan is the one tool that writes to Shopify.
     for (const t of tools) expect(t.annotations?.readOnlyHint).toBe(!["apply_plan", "export_snapshot"].includes(t.name));
@@ -163,6 +163,27 @@ describe("MCP server", () => {
       const again = await call("apply_plan", { plan_id: plan.json.plan_id });
       expect(again.text).toMatch(/Refused: plan was already applied/);
       expect(asked).toHaveLength(1);
+    });
+
+    it("applies a big plan in the background and reports how far it got", async () => {
+      const { call, prod } = await connect({
+        env: { SYNC_BACKGROUND_STEPS: "1" },
+        answer: () => ({ action: "accept", content: { domain: "prod.myshopify.com" } }),
+      });
+      const plan = await call("plan_sync", SCOPE);
+      const started = await call("apply_plan", { plan_id: plan.json.plan_id });
+      expect(started.json).toMatchObject({ plan_id: plan.json.plan_id, state: "running", steps: 2 });
+      expect(started.json.note).toMatch(/apply_status/);
+      let status = await call("apply_status", { plan_id: plan.json.plan_id });
+      for (let i = 0; i < 50 && status.json.state === "running"; i++) {
+        await new Promise((r) => setTimeout(r, 10));
+        status = await call("apply_status");
+      }
+      expect(status.json).toMatchObject({ state: "done", planStatus: "applied", totals: { created: 2, failed: 0, left: 0 } });
+      expect(status.json.byResource.pages).toMatchObject({ total: 1, created: 1, left: 0 });
+      expect(prod.mutations()).toHaveLength(2);
+      // Waiting is still possible, and a finished plan isn't applied twice.
+      expect((await call("apply_plan", { plan_id: plan.json.plan_id, wait: true })).text).toMatch(/Refused: plan was already applied/);
     });
 
     it("lets unattended setups opt in to a confirmation passed as an argument", async () => {

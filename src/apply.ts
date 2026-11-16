@@ -30,6 +30,10 @@ export interface ApplyOptions {
   onProgress?: (done: number, total: number, message: string) => void;
   /** Called when the apply moves to its next phase (checking the target, second pass...). */
   onPhase?: (message: string) => void;
+  /** Called with every result as it is recorded (a later pass can replace an earlier result for the same step). */
+  onResult?: (result: OpResult) => void;
+  /** During a bulk write: the kind, about how many items Shopify has written, and how many are in it. */
+  onBulkProgress?: (kind: ResourceKind, written: number, total: number) => void;
 }
 
 /** How many independent writes run at once (products, pages, redirects...). */
@@ -213,6 +217,7 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
     const i = results.findIndex((x) => x.seq === r.seq);
     if (i >= 0) results[i] = r;
     else results.push(r);
+    opts.onResult?.(r);
     audit(log, { plan: plan.id, target: plan.target.domain, source: plan.source.domain, ...r });
   };
 
@@ -239,11 +244,10 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
           items.push({ op, data: value });
         }
       }
-      const res = await adapter.bulkWrite!(
-        { client, resolver, files: plan.files ?? {}, onPhase: opts.onPhase },
-        items.map((i) => ({ key: i.op.key, action: i.op.action === "create" ? "create" : "update", data: i.data })),
-      );
-      res.forEach((r, i) => {
+      const reported = new Set<number>();
+      const record = (i: number, r: { id?: string; error?: string }) => {
+        if (reported.has(i)) return;
+        reported.add(i);
         const { op } = items[i]!;
         if (r.error) {
           upsertResult({ seq: op.seq, kind, key: op.key, outcome: "failed", message: r.error });
@@ -253,7 +257,20 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
           upsertResult({ seq: op.seq, kind, key: op.key, outcome: op.action === "create" ? "created" : "updated" });
         }
         opts.onProgress?.(++finished, total, `${kind} ${op.key}`);
-      });
+      };
+      const res = await adapter.bulkWrite!(
+        {
+          client,
+          resolver,
+          files: plan.files ?? {},
+          onPhase: opts.onPhase,
+          onWritten: (n) => opts.onBulkProgress?.(kind, n, items.length),
+          // Results land in the audit log as each part finishes, not only at the end.
+          onDone: record,
+        },
+        items.map((i) => ({ key: i.op.key, action: i.op.action === "create" ? "create" : "update", data: i.data })),
+      );
+      res.forEach((r, i) => record(i, r));
       return [];
     } catch (err) {
       if (!(err instanceof BulkUnavailable)) throw err;

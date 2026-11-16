@@ -281,7 +281,15 @@ export const metafields: ResourceAdapter = {
           return { ownerId: d.owner, namespace: d.namespace, key: d.key, type: d.type, value: d.value };
         }),
       }));
-      const res = await bulkMutation(ctx.client, BULK_SET, lines, { timeoutMs: bulkTimeoutMs() });
+      const first = round === 0;
+      const res = await bulkMutation(ctx.client, BULK_SET, lines, {
+        timeoutMs: bulkTimeoutMs(),
+        onProgress: first ? (n) => ctx.onWritten?.(Math.min(n * 25, items.length)) : undefined,
+        onPart: (part, parts, _start, rows) => {
+          const failed = rows.filter((r) => r.errors?.length || r.data?.metafieldsSet?.userErrors?.length).length;
+          ctx.onPhase?.(`metafields${first ? "" : ` (retry ${round})`}: part ${part} of ${parts} finished${failed ? `, ${failed} batch${failed === 1 ? "" : "es"} of 25 with errors` : ""}`);
+        },
+      });
       const again: number[] = [];
       res.forEach((r, li) => {
         const g = groups[li]!;

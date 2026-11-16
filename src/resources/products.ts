@@ -1,5 +1,5 @@
 import { assertNoUserErrors, envNumber, paginate, type AdminClient } from "../shopify/client.js";
-import { bulkMutation, bulkQuery, bulkThreshold, bulkTimeoutMs } from "../shopify/bulk.js";
+import { bulkMutation, bulkQuery, bulkThreshold, bulkTimeoutMs, type LineResult } from "../shopify/bulk.js";
 import { eachLimited } from "../refs.js";
 import { filenameFromUrl, REF_PREFIX, variantKey, variantRef, type FileSource, type GidToRefMapper } from "../refs.js";
 import type { FetchOptions, Item, ResourceAdapter } from "./types.js";
@@ -701,14 +701,28 @@ export const products: ResourceAdapter = {
   async bulkWrite(ctx, items) {
     const locations = items.some((i) => hasStock(i.data)) ? await locationsByName(ctx.client) : undefined;
     const lines = items.map((i) => ({ input: withSources(productSetInput(i.data, undefined, true, locations), ctx.files) }));
-    const results = await bulkMutation(ctx.client, BULK_SET, lines, { timeoutMs: bulkTimeoutMs() });
-    return results.map((r) => {
+    const toResult = (r: LineResult): { id?: string; error?: string } => {
       const ps = r.data?.productSet;
       const errors = [...(r.errors ?? []), ...(ps?.userErrors ?? [])].map((e: { message: string }) => e.message);
       if (errors.length || !ps?.product?.id) return { error: errors.join("; ") || "no product returned" };
       for (const v of ps.product.variants?.nodes ?? []) ctx.resolver.remember(variantRef(ps.product.handle, v.selectedOptions), v.id);
       return { id: ps.product.id as string };
+    };
+    const done = new Map<number, { id?: string; error?: string }>();
+    const results = await bulkMutation(ctx.client, BULK_SET, lines, {
+      timeoutMs: bulkTimeoutMs(),
+      onProgress: ctx.onWritten,
+      onPart: (part, parts, start, rows) => {
+        rows.forEach((r, k) => {
+          const res = toResult(r);
+          done.set(start + k, res);
+          ctx.onDone?.(start + k, res);
+        });
+        const failed = rows.filter((_, k) => done.get(start + k)?.error).length;
+        ctx.onPhase?.(`products: part ${part} of ${parts} finished, ${rows.length - failed} written${failed ? `, ${failed} failed` : ""}`);
+      },
     });
+    return results.map((r, i) => done.get(i) ?? toResult(r));
   },
 
   create: ({ client }, _key, d) => set(client, d, true),

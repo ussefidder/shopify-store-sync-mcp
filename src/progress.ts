@@ -71,6 +71,11 @@ export function createReporter(opts: { tty?: boolean; write?: (s: string) => voi
         current = message;
         show(`[${elapsed()}] ${message}`, true);
       },
+      bulk: (kind, written, total) => {
+        // Status line only: Shopify reports this every few seconds.
+        current = `Shopify is writing ${kind} in bulk: about ${written} of ${total}`;
+        if (tty) show(status());
+      },
       step: (done, total, message) => {
         if (!writingSince) writingSince = now();
         stepsDone = done;

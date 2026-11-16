@@ -3,15 +3,16 @@ import { isAbsolute, parse as parsePath, relative, resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ElicitResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { ApplyRefused } from "./apply.js";
+import { ApplyRefused, type OpResult } from "./apply.js";
+import { ApplyJobs, jobStatus } from "./jobs.js";
 import type { StoreConfig, StoreRegistry } from "./config.js";
 import { preview, type ResourceDiff } from "./diff.js";
 import { DIR_PREFIX, Engine, isDirSpec, type Scope } from "./engine.js";
 import { PlanStore, type Plan } from "./plan.js";
 import { ADAPTERS, DEFAULT_KINDS, RESOURCE_KINDS, type ResourceKind } from "./resources/index.js";
 import { DEFAULT_OWNER_TYPES } from "./resources/metafieldDefinitions.js";
-import type { AdminClient } from "./shopify/client.js";
-import { checkMarkdown, diffMarkdown, planMarkdown, scopeLine, themesMarkdown } from "./report.js";
+import { envNumber, type AdminClient } from "./shopify/client.js";
+import { byKind, checkMarkdown, diffMarkdown, planMarkdown, scopeLine, themesMarkdown } from "./report.js";
 import { DEFAULT_THEME_FILES, type ThemeDiff } from "./themes.js";
 
 /** Read from package.json, so there is one place to bump. */
@@ -159,6 +160,7 @@ export function summarizePlan(plan: Plan, full = false) {
     target: plan.target,
     expiresAt: plan.expiresAt,
     totals: { create: count("create"), update: count("update"), conflict: count("conflict") },
+    byResource: byKind(plan),
     warnings: plan.warnings,
     filesToUpload: Object.keys(plan.files ?? {}).length || undefined,
     ops: plan.ops.slice(0, limit).map((o) => ({
@@ -216,9 +218,18 @@ function progressOf(extra: ToolExtra | undefined) {
   };
 }
 
+
+function tallies(results: OpResult[]) {
+  const tally = (o: string) => results.filter((r) => r.outcome === o).length;
+  return { created: tally("created"), updated: tally("updated"), skipped: tally("skipped"), failed: tally("failed") };
+}
+
 export function createServer(deps: ServerDeps): McpServer {
   const engine = new Engine(deps.registry, deps.plans ?? new PlanStore(), deps.clientFactory);
   const env = deps.env ?? process.env;
+  const jobs = new ApplyJobs();
+  /** Plans with more steps than this are applied in the background unless the caller asks to wait. */
+  const backgroundSteps = envNumber("SYNC_BACKGROUND_STEPS", 50, env);
   const base = () => snapshotBase(env, deps.cwd);
   /** A store alias is passed through; a "dir:<path>" is pinned inside the snapshot base folder. */
   const spec = (s: string) => (isDirSpec(s) ? `${DIR_PREFIX}${resolveInBase(s.slice(DIR_PREFIX.length), base())}` : s);
@@ -367,7 +378,7 @@ export function createServer(deps: ServerDeps): McpServer {
         target: z.string().describe(SOURCE_HELP),
         ...scopeArgs,
         show_values: z.boolean().optional().describe("Include before/after values for each changed field (default true)."),
-        limit: z.number().int().min(1).max(5000).optional().describe("Max keys listed per section (default 100)."),
+        limit: z.number().int().min(1).max(5000).optional().describe("Max items listed per section (default 100, markdown 50). The counts always cover everything."),
         format: z.enum(["json", "markdown"]).optional().describe('"markdown" returns a report to paste into a ticket or an email.'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
@@ -375,7 +386,7 @@ export function createServer(deps: ServerDeps): McpServer {
     guard(async (args: ScopeArgs & { source: string; target: string; show_values?: boolean; limit?: number; format?: "json" | "markdown" }, extra) => {
       const { diffs, skipped, source, target } = await engine.compare(spec(args.source), spec(args.target), toScope(args), reading(extra));
       if (args.format === "markdown") {
-        return text(diffMarkdown({ alias: args.source, domain: source.domain }, { alias: args.target, domain: target.domain }, diffs, skipped, toScope(args)));
+        return text(diffMarkdown({ alias: args.source, domain: source.domain }, { alias: args.target, domain: target.domain }, diffs, skipped, toScope(args), args.limit ?? 50));
       }
       return json({
         source: args.source,
@@ -455,7 +466,7 @@ export function createServer(deps: ServerDeps): McpServer {
       }
       const plan = engine.plans.get(args.plan_id);
       if (!plan) return fail(`no plan with id ${args.plan_id}`);
-      if (args.format === "markdown") return text(planMarkdown(plan));
+      if (args.format === "markdown") return text(planMarkdown(plan, args.full ? Infinity : 200));
       return json(summarizePlan(plan, args.full));
     }),
   );
@@ -473,30 +484,68 @@ export function createServer(deps: ServerDeps): McpServer {
           .optional()
           .describe("Leave empty. Only read when the server runs with SYNC_ALLOW_AGENT_CONFIRM=true (unattended automation); otherwise a protected store is confirmed by the person, not by this argument."),
         only: z.array(z.number().int().positive()).optional().describe("Apply only these op seq numbers."),
+        wait: z
+          .boolean()
+          .optional()
+          .describe(`Wait for the whole apply before returning. By default a plan of more than 50 steps (SYNC_BACKGROUND_STEPS) runs in the background and this returns at once; follow it with apply_status.`),
       },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     },
-    guard(async (args: { plan_id: string; confirm?: string; only?: number[] }, extra) => {
+    guard(async (args: { plan_id: string; confirm?: string; only?: number[]; wait?: boolean }, extra) => {
       const pending = engine.plans.get(args.plan_id);
       if (!pending) return fail(`no plan with id ${args.plan_id}`);
+      if (jobs.running(args.plan_id)) return json({ ...jobStatus(jobs.get(args.plan_id)!), note: "This plan is already being applied. Follow it with apply_status." });
       const target = deps.registry.get(pending.target.alias);
       // Cheap refusals (writes off, expired, already applied) come before anyone is asked to confirm.
       if (!target.allowWrites) throw new ApplyRefused(`writes are disabled for store "${target.alias}". Set "allowWrites": true in its config to enable them.`);
       if (pending.status !== "pending") throw new ApplyRefused(`plan was already ${pending.status.replace("_", " ")}; create a new plan`);
       if (new Date() > new Date(pending.expiresAt)) throw new ApplyRefused("plan has expired; run plan_sync again so it reflects the current target");
       const confirm = target.protected ? await confirmProtected(pending, target, args.confirm) : undefined;
+      const steps = pending.ops.filter((o) => !args.only?.length || args.only.includes(o.seq)).length;
+      if (!args.wait && steps > backgroundSteps) {
+        const job = jobs.start(pending, { confirm, only: args.only }, (opts) => engine.apply(args.plan_id, opts));
+        return json({
+          plan_id: job.planId,
+          state: "running",
+          steps,
+          note: `Writing ${steps} steps to ${job.target} in the background. Call apply_status with this plan_id to see how many are written, failed and left, and the time remaining. Nothing else needs to stay open; the apply keeps going while this server runs.`,
+        });
+      }
       const report = progressOf(extra);
       const { plan, results } = await engine.apply(args.plan_id, {
         confirm,
         only: args.only,
         onProgress: report ? (done, total, message) => report(message, done, total) : undefined,
       });
-      const tally = (o: string) => results.filter((r) => r.outcome === o).length;
+      return json({ plan_id: plan.id, status: plan.status, totals: tallies(results), results });
+    }),
+  );
+
+  server.registerTool(
+    "apply_status",
+    {
+      title: "Follow an apply",
+      description:
+        "How far an apply has got: steps created, updated, skipped, failed and left per resource type, the current phase, progress inside a Shopify bulk operation, time so far and an estimate of the time left, and the latest failures. With no plan_id, the most recent apply.",
+      inputSchema: {
+        plan_id: z.string().optional(),
+        failures: z.number().int().min(0).max(1000).optional().describe("How many of the latest failures to list (default 20)."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    guard(async (args: { plan_id?: string; failures?: number }) => {
+      const job = args.plan_id ? jobs.get(args.plan_id) : jobs.latest();
+      if (job) return json(jobStatus(job, Date.now(), args.failures ?? 20));
+      if (!args.plan_id) return fail("no apply has run since this server started");
+      const plan = engine.plans.get(args.plan_id);
+      if (!plan) return fail(`no plan with id ${args.plan_id}`);
       return json({
         plan_id: plan.id,
-        status: plan.status,
-        totals: { created: tally("created"), updated: tally("updated"), skipped: tally("skipped"), failed: tally("failed") },
-        results,
+        planStatus: plan.status,
+        note:
+          plan.status === "pending"
+            ? "This plan hasn't been applied (or was being applied by a server that has since stopped). Call apply_plan to apply it."
+            : "This plan was applied before this server started; its results are in the audit log.",
       });
     }),
   );

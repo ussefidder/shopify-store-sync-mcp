@@ -232,4 +232,121 @@ describe("bulk writes in parts", async () => {
     expect(n).toBe(3);
     expect(res.map((r) => r.data?.echo)).toEqual(lines.map((l) => l.x));
   });
+
+  it("starts the next part as soon as one finishes when the store runs fewer at once, and reports each part", async () => {
+    const files = new Map<string, string>();
+    const running = new Set<string>();
+    const polls = new Map<string, number>();
+    let n = 0;
+    let most = 0;
+    let started = 0;
+    let refused = 0;
+    bulkIO.wait = async () => {};
+    bulkIO.upload = async (_u, form) => void files.set(String(form.get("key")), await (form.get("file") as Blob).text());
+    bulkIO.download = async (url) =>
+      files
+        .get(url)!
+        .split("\n")
+        .map((l, i) => JSON.stringify({ data: { echo: JSON.parse(l).x }, __lineNumber: i }))
+        .join("\n");
+    const client = {
+      store: { alias: "s", domain: "s.myshopify.com" } as any,
+      request: async (q: string, v: any) => {
+        if (q.includes("stagedUploadsCreate")) return { stagedUploadsCreate: { stagedTargets: [{ url: "u", parameters: [{ name: "key", value: `k${++n}` }] }], userErrors: [] } };
+        if (q.includes("bulkOperationRunMutation")) {
+          if (running.size >= 2) refused++;
+          if (running.size >= 2) return { bulkOperationRunMutation: { bulkOperation: null, userErrors: [{ message: "A bulk mutation is already in progress, over the limit" }] } };
+          running.add(v.stagedUploadPath);
+          started++;
+          most = Math.max(most, running.size);
+          return { bulkOperationRunMutation: { bulkOperation: { id: v.stagedUploadPath }, userErrors: [] } };
+        }
+        // Operations keep running until the store has refused one for being over its limit.
+        const seen = (polls.get(v.id) ?? 0) + 1;
+        polls.set(v.id, seen);
+        if (seen < 2 || (refused === 0 && started < 5)) return { node: { status: "RUNNING", errorCode: null, objectCount: "40", url: null, partialDataUrl: null } };
+        running.delete(v.id);
+        return { node: { status: "COMPLETED", errorCode: null, objectCount: "100", url: v.id, partialDataUrl: null } };
+      },
+    };
+    const lines = Array.from({ length: 500 }, (_, i) => ({ x: i }));
+    const parts: [number, number, number, number][] = [];
+    const progress: number[] = [];
+    const res = await bulkMutation(client as any, "mutation M($x: Int) { echo }", lines, {
+      onPart: (part, of, start, rows) => parts.push([part, of, start, rows.length]),
+      onProgress: (w) => progress.push(w),
+    });
+    expect(most).toBe(2);
+    expect(refused).toBeGreaterThan(0);
+    expect(res.map((r) => r.data?.echo)).toEqual(lines.map((l) => l.x));
+    expect(parts.map((p) => p[0]).sort()).toEqual([1, 2, 3, 4, 5]);
+    expect(parts.find((p) => p[0] === 3)).toEqual([3, 5, 200, 100]);
+    expect(progress.at(-1)).toBe(500);
+    expect(progress.some((w) => w > 0 && w < 500)).toBe(true);
+  });
+});
+
+describe("apply_status", async () => {
+  const { ApplyJobs, jobStatus } = await import("../src/jobs.js");
+  it("counts each resource type, what's left and the time remaining", async () => {
+    let clock = 0;
+    const plan = {
+      id: "p1",
+      target: { alias: "dst", domain: "dst.myshopify.com" },
+      ops: Array.from({ length: 10 }, (_, i) => ({ seq: i + 1, kind: i < 6 ? "products" : "metafields", key: `k${i}`, action: "create" })),
+    } as any;
+    let finish!: () => void;
+    const jobs = new ApplyJobs();
+    const job = jobs.start(
+      plan,
+      {},
+      (opts) =>
+        new Promise((resolve) => {
+          opts.onPhase?.("writing products");
+          clock = 60_000;
+          for (let i = 1; i <= 4; i++) opts.onResult?.({ seq: i, kind: "products", key: `k${i - 1}`, outcome: i === 2 ? "failed" : "created", message: i === 2 ? "bad" : undefined });
+          clock = 120_000;
+          finish = () => resolve({ plan: { ...plan, status: "partially_applied" }, results: [] });
+        }),
+      () => clock,
+    );
+    const s = jobStatus(job, 120_000);
+    expect(s).toMatchObject({ state: "running", phase: "writing products", totals: { created: 3, failed: 1, left: 6 } });
+    expect(s.byResource.products).toMatchObject({ total: 6, created: 3, failed: 1, left: 2 });
+    expect(s.byResource.metafields).toMatchObject({ total: 4, left: 4 });
+    // 4 written in the minute since the first write: 6 left take about a minute and a half.
+    expect(s.remaining).toBe("2 min");
+    expect(s.failures).toEqual([{ seq: 2, kind: "products", key: "k1", message: "bad" }]);
+    finish();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(jobStatus(job, 200_000)).toMatchObject({ state: "done", planStatus: "partially_applied", remaining: undefined });
+    expect(jobs.running("p1")).toBe(false);
+  });
+});
+
+describe("short reports for big diffs and plans", async () => {
+  const { diffMarkdown, planMarkdown } = await import("../src/report.js");
+  const items = (n: number) => Array.from({ length: n }, (_, i) => ({ key: `p-${i}`, id: `gid://shopify/Product/${i}`, data: {} }));
+  it("lists a limited number of items per section, with how many more there are", () => {
+    const diff = { kind: "products" as const, onlyInSource: items(300), onlyInTarget: items(3), changed: [], identical: 0 };
+    const md = diffMarkdown({ alias: "a", domain: "a.myshopify.com" }, { alias: "b", domain: "b.myshopify.com" }, [diff], [], undefined, 50);
+    expect(md).toContain("**Only in a** (300)");
+    expect(md).toContain("`p-49`");
+    expect(md).not.toContain("`p-50`");
+    expect(md).toContain("… and 250 more");
+    // Without a limit (the command line), everything is listed.
+    expect(diffMarkdown({ alias: "a", domain: "a.myshopify.com" }, { alias: "b", domain: "b.myshopify.com" }, [diff])).toContain("`p-299`");
+  });
+
+  it("counts a plan's steps per resource type", () => {
+    const ops = [
+      ...Array.from({ length: 5 }, (_, i) => ({ seq: i + 1, kind: "products", key: `p${i}`, action: "create", data: {} })),
+      { seq: 6, kind: "metafields", key: "m", action: "update", data: {}, changes: [] },
+    ];
+    const plan = { id: "x", createdAt: "", expiresAt: "", source: { alias: "a", domain: "a" }, target: { alias: "b", domain: "b" }, kinds: [], ops, onlyInTarget: [], skipped: [], warnings: [], files: {}, status: "pending" } as any;
+    const md = planMarkdown(plan, 2);
+    expect(md).toContain("| products | 5 | 0 | 0 |");
+    expect(md).toContain("| metafields | 0 | 1 | 0 |");
+    expect(md).toContain("4 more steps");
+  });
 });

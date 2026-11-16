@@ -55,7 +55,14 @@ function notCompared(skipped: Skipped): string[] {
   return ["", "## Not compared", "", ...unreadable.map((x) => `- ${x.kind} ${code(x.key)}: ${x.reason}`)];
 }
 
-export function diffMarkdown(source: Store, target: Store, diffs: ResourceDiff[], skipped: Skipped = [], scope?: Scope): string {
+/** At most `limit` lines of a list, then how many more there are. */
+function capped<T>(items: T[], limit: number, line: (item: T) => string): string[] {
+  const shown = items.slice(0, limit).map(line);
+  return items.length > limit ? [...shown, `- … and ${items.length - limit} more`] : shown;
+}
+
+/** `limit`: how many items each list shows (the MCP server keeps reports short; the command line shows everything). */
+export function diffMarkdown(source: Store, target: Store, diffs: ResourceDiff[], skipped: Skipped = [], scope?: Scope, limit = Infinity): string {
   const lines = [
     `# Store diff: ${source.alias} → ${target.alias}`,
     "",
@@ -70,20 +77,31 @@ export function diffMarkdown(source: Store, target: Store, diffs: ResourceDiff[]
   for (const d of diffs) {
     if (!d.onlyInSource.length && !d.changed.length && !d.onlyInTarget.length) continue;
     lines.push("", `## ${d.kind}`);
-    if (d.onlyInSource.length) lines.push("", `**Only in ${source.alias}** (${d.onlyInSource.length})`, "", ...d.onlyInSource.map((i) => `- ${code(i.key)}`));
+    if (d.onlyInSource.length) lines.push("", `**Only in ${source.alias}** (${d.onlyInSource.length})`, "", ...capped(d.onlyInSource, limit, (i) => `- ${code(i.key)}`));
     if (d.changed.length) {
       lines.push("", `**Changed** (${d.changed.length})`, "");
-      lines.push(...changesTable(d.changed.flatMap((c) => c.changes.map((change) => ({ item: c.key, change }))), source.alias, target.alias));
+      lines.push(...changesTable(d.changed.slice(0, limit).flatMap((c) => c.changes.map((change) => ({ item: c.key, change }))), source.alias, target.alias));
+      if (d.changed.length > limit) lines.push("", `… and ${d.changed.length - limit} more changed items`);
     }
     if (d.onlyInTarget.length) {
-      lines.push("", `**Only in ${target.alias}** (${d.onlyInTarget.length}, kept: this tool never deletes)`, "", ...d.onlyInTarget.map((i) => `- ${code(i.key)}`));
+      lines.push("", `**Only in ${target.alias}** (${d.onlyInTarget.length}, kept: this tool never deletes)`, "", ...capped(d.onlyInTarget, limit, (i) => `- ${code(i.key)}`));
     }
   }
   lines.push(...notCompared(skipped));
   return lines.join("\n") + "\n";
 }
 
-export function planMarkdown(plan: Plan): string {
+/** Creates, updates and conflicts per resource type. */
+export function byKind(plan: Plan): Record<string, { create: number; update: number; conflict: number }> {
+  const out: Record<string, { create: number; update: number; conflict: number }> = {};
+  for (const o of plan.ops) {
+    const c = (out[o.kind] ??= { create: 0, update: 0, conflict: 0 });
+    c[o.action as "create" | "update" | "conflict"]++;
+  }
+  return out;
+}
+
+export function planMarkdown(plan: Plan, limit = Infinity): string {
   const count = (a: string) => plan.ops.filter((o) => o.action === a).length;
   const lines = [
     `# Sync plan ${code(plan.id)}: ${plan.source.alias} → ${plan.target.alias}`,
@@ -91,14 +109,19 @@ export function planMarkdown(plan: Plan): string {
     `Makes **${plan.target.alias}** (${plan.target.domain}) match **${plan.source.alias}** (${plan.source.domain}). Created ${plan.createdAt.slice(0, 16).replace("T", " ")} UTC. Nothing has been written yet.`,
     "",
     `**${count("create")}** to create · **${count("update")}** to update · **${count("conflict")}** conflict${count("conflict") === 1 ? "" : "s"}`,
+    "",
+    "| Resource | Create | Update | Conflict |",
+    "|---|---:|---:|---:|",
+    ...Object.entries(byKind(plan)).map(([k, c]) => `| ${k} | ${c.create} | ${c.update} | ${c.conflict} |`),
   ];
   if (plan.ops.length) {
     lines.push("", "| # | Action | Resource | Item | Details |", "|---:|---|---|---|---|");
-    for (const o of plan.ops) {
+    for (const o of plan.ops.slice(0, limit)) {
       const details = o.reason ? o.reason : o.changes?.length ? o.changes.map((c) => c.path).join(", ") : "";
       lines.push(`| ${o.seq} | ${o.action} | ${o.kind} | ${code(o.key)} | ${details.replace(/\|/g, "\\|")} |`);
     }
-    const updates = plan.ops.filter((o) => o.action === "update" && o.changes?.length);
+    if (plan.ops.length > limit) lines.push(`| … | | | ${plan.ops.length - limit} more steps | |`);
+    const updates = plan.ops.filter((o) => o.action === "update" && o.changes?.length).slice(0, limit);
     if (updates.length) {
       lines.push("", "## Changes", "");
       lines.push(...changesTable(updates.flatMap((o) => o.changes!.map((change) => ({ item: o.key, change }))), plan.source.alias, plan.target.alias));
@@ -131,7 +154,7 @@ export function themesMarkdown(source: string, target: string, d: ThemeDiff): st
 
 export function checkMarkdown(c: ItemCheck): string {
   const lines = [
-    `# ${c.kind} ${code(c.key)}: ${c.source} → ${c.target}`,
+    `### ${c.kind} ${code(c.key)}: ${c.source} → ${c.target}`,
     "",
     `**${c.status}**${c.changes.length ? ` (${c.changes.length} field${c.changes.length === 1 ? "" : "s"})` : ""}. ${today()}, shopify-store-sync-mcp.`,
   ];

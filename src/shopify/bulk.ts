@@ -133,7 +133,7 @@ export class BulkUnavailable extends Error {}
 /** How many bulk write operations run at once on one store (Shopify allows 5 from API 2026-01). */
 export const bulkParallel = () => envNumber("SYNC_BULK_PARALLEL", 5);
 
-type LineResult = { data?: Record<string, any>; errors?: { message: string }[] };
+export type LineResult = { data?: Record<string, any>; errors?: { message: string }[] };
 
 /** Upload one file of variables and start the bulk operation on it. Returns its id. */
 async function startMutation(client: AdminClient, mutation: string, lines: Record<string, unknown>[], opts: { upload?: Upload }): Promise<string> {
@@ -173,7 +173,11 @@ export async function bulkMutation(
   client: AdminClient,
   mutation: string,
   lines: Record<string, unknown>[],
-  opts: BulkOptions & { upload?: Upload } = {},
+  opts: BulkOptions & {
+    upload?: Upload;
+    /** Called as each part finishes: which part, how many parts, its first line's index, and its results. */
+    onPart?: (part: number, parts: number, start: number, results: LineResult[]) => void;
+  } = {},
 ): Promise<LineResult[]> {
   if (!lines.length) return [];
   // Shopify works through one operation's lines one after the other, so big writes are split.
@@ -181,7 +185,6 @@ export async function bulkMutation(
   const size = Math.ceil(lines.length / parts);
   const chunks = Array.from({ length: parts }, (_, i) => ({ start: i * size, lines: lines.slice(i * size, i * size + size) })).filter((c) => c.lines.length);
 
-  const running: Promise<void>[] = [];
   const out: LineResult[] = lines.map(() => ({ errors: [{ message: "no result for this line" }] }));
   const collect = (start: number, count: number, rows: Record<string, any>[]) => {
     for (const r of rows) {
@@ -189,25 +192,44 @@ export async function bulkMutation(
       if (Number.isInteger(n) && n >= 0 && n < count) out[start + n] = { data: r.data ?? undefined, errors: r.errors ?? undefined };
     }
   };
+  // Lines written so far, per part, summed for onProgress.
+  const written = chunks.map(() => 0);
+  const report = () => opts.onProgress?.(written.reduce((a, b) => a + b, 0));
+  const fail = (c: (typeof chunks)[number], message: string) =>
+    c.lines.forEach((_, k) => (out[c.start + k] = { errors: [{ message: `not written: ${message}` }] }));
+  const running = new Set<Promise<void>>();
   for (const [n, c] of chunks.entries()) {
-    let id: string;
-    try {
-      id = await startMutation(client, mutation, c.lines, opts);
-    } catch (e) {
-      // The store runs fewer at once than asked (an older API version, say): finish the running ones, then go on.
-      if (!(e instanceof BulkUnavailable) || n === 0) throw e;
+    let id: string | undefined;
+    while (!id) {
       try {
-        if (!/limit|in progress|already/i.test(e.message)) throw e;
-        await Promise.all(running.splice(0));
         id = await startMutation(client, mutation, c.lines, opts);
-      } catch (again) {
+      } catch (e) {
+        if (n === 0 || !(e instanceof BulkUnavailable)) throw e;
+        // The store runs fewer at once than asked: wait for one running part to finish, then try again.
+        if (running.size && /limit|in progress|already/i.test(e.message)) {
+          await Promise.race(running);
+          continue;
+        }
         // Earlier parts are already writing, so this part is reported as not written rather than retried one by one.
-        const message = `not written: ${(again as Error).message}`;
-        c.lines.forEach((_, k) => (out[c.start + k] = { errors: [{ message }] }));
-        continue;
+        fail(c, e.message);
+        break;
       }
     }
-    running.push(pollAndDownload(client, id, opts).then((rows) => collect(c.start, c.lines.length, rows)));
+    if (!id) continue;
+    const onProgress = (objects: number) => {
+      written[n] = Math.min(objects, c.lines.length);
+      report();
+    };
+    const part: Promise<void> = pollAndDownload(client, id, { ...opts, onProgress })
+      .then((rows) => collect(c.start, c.lines.length, rows))
+      // One part failing doesn't lose the others: its lines are reported as not written.
+      .catch((e: Error) => fail(c, e.message))
+      .then(() => {
+        onProgress(c.lines.length);
+        opts.onPart?.(n + 1, chunks.length, c.start, out.slice(c.start, c.start + c.lines.length));
+      })
+      .finally(() => running.delete(part));
+    running.add(part);
   }
   await Promise.all(running);
   return out;

@@ -138,4 +138,8 @@ export interface BulkWriteContext extends WriteContext {
   /** Download URLs of source files, by ref, for files the target doesn't have yet. */
   files: Record<string, FileSource>;
   onPhase?: (message: string) => void;
+  /** While Shopify writes: about how many of the items are written so far. */
+  onWritten?: (items: number) => void;
+  /** An item's result as soon as its part of the bulk write finishes (before bulkWrite returns). */
+  onDone?: (index: number, result: { id?: string; error?: string }) => void;
 }

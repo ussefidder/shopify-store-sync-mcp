@@ -62,6 +62,8 @@ export interface EngineEvents {
   phase?: (message: string) => void;
   /** A write step finished. */
   step?: (done: number, total: number, message: string) => void;
+  /** Inside a Shopify bulk write: about how many items are written so far. */
+  bulk?: (kind: ResourceKind, written: number, total: number) => void;
 }
 
 export class Engine {
@@ -311,6 +313,10 @@ export class Engine {
       onProgress: (done, total, m) => {
         opts.onProgress?.(done, total, m);
         this.events.step?.(done, total, m);
+      },
+      onBulkProgress: (kind, written, total) => {
+        opts.onBulkProgress?.(kind, written, total);
+        this.events.bulk?.(kind, written, total);
       },
     });
     this.plans.save(plan);
