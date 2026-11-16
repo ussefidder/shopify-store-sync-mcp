@@ -396,7 +396,7 @@ What `diff_stores` reports, field by field (real output):
 </p>
 
 <details>
-<summary><b>All 11 tools</b></summary>
+<summary><b>All 12 tools</b></summary>
 
 | Tool | Writes? | What it does |
 |---|---|---|
@@ -408,11 +408,12 @@ What `diff_stores` reports, field by field (real output):
 | `plan_sync` | no | Dry-run plan: creates, updates, conflicts, missing references. Returns a `plan_id`. |
 | `get_plan` | no | Show a plan, or list recent ones. `format: "markdown"` returns it as a report to share before applying. |
 | `apply_plan` | **yes** | Execute a plan, with every safety check above. For a protected store your client asks you to confirm. A plan of more than 50 steps runs in the background and this returns at once. |
-| `apply_status` | no | How far an apply has got: written, failed and left per resource type, phase, time so far and time remaining, latest failures. |
+| `apply_status` | no | How far an apply has got: written, failed and left per resource type, phase, time so far and time remaining, failures counted per reason. Also answers after a server restart. |
+| `cancel_apply` | stops writes | Stop a running apply and the Shopify bulk operations it started. What was written stays written. |
 | `export_snapshot` | local files only | Write a store's configuration to a folder for git ([config as code](#config-as-code)). |
 | `diff_themes` | no | Compare theme templates and settings between two stores ([theme settings](#theme-settings-diff)). |
 
-Every tool except `apply_plan` is read-only toward Shopify and annotated as such, so clients can auto-approve them. Long calls report progress (what was read, which step was written) to clients that ask for it.
+Every tool except `apply_plan` and `cancel_apply` is read-only toward Shopify and annotated as such, so clients can auto-approve them. Long calls report progress (what was read, which step was written) to clients that ask for it.
 
 </details>
 
@@ -521,7 +522,7 @@ Two references followed from the source store to the target, as the sample sync 
 ## Tested on real stores
 
 <p align="center">
-  <img src="docs/images/tested.png" alt="152 automated tests, 82 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
+  <img src="docs/images/tested.png" alt="157 automated tests, 83 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
 </p>
 
 <details>
@@ -597,7 +598,7 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 - [x] Published on npm, runs with `npx`
 
 *Quality*
-- [x] 152 automated tests against an in-memory Shopify, plus MCP protocol tests
+- [x] 157 automated tests against an in-memory Shopify, plus MCP protocol tests
 - [x] Every GraphQL operation validated against Shopify's schema for 2026-04, 2026-10 and 2027-01
 - [x] Tested live between two stores on Linux and Windows, Shopify CLI 4.9 and 5
 - [x] Parallel reads and writes (metaobject types read and entries written in parallel; the check before writing re-reads only what the plan touches) with throttle-aware retries; clear errors for missing installs, expired sign-ins and auto-managed policies

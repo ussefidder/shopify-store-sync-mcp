@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -69,10 +69,10 @@ describe("MCP server", () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
-      ["apply_plan", "apply_status", "compare_item", "diff_stores", "diff_themes", "export_snapshot", "get_plan", "list_resource_types", "list_stores", "plan_sync", "snapshot_store"].sort(),
+      ["apply_plan", "apply_status", "cancel_apply", "compare_item", "diff_stores", "diff_themes", "export_snapshot", "get_plan", "list_resource_types", "list_stores", "plan_sync", "snapshot_store"].sort(),
     );
-    // export_snapshot writes local files only; apply_plan is the one tool that writes to Shopify.
-    for (const t of tools) expect(t.annotations?.readOnlyHint).toBe(!["apply_plan", "export_snapshot"].includes(t.name));
+    // export_snapshot writes local files only; apply_plan writes to Shopify and cancel_apply stops its bulk operations.
+    for (const t of tools) expect(t.annotations?.readOnlyHint).toBe(!["apply_plan", "cancel_apply", "export_snapshot"].includes(t.name));
     expect(tools.find((t) => t.name === "export_snapshot")?.annotations?.destructiveHint).toBe(false);
   });
 
@@ -191,6 +191,20 @@ describe("MCP server", () => {
       expect(jobLine(file)).toMatch(/^done: 2 of 2 steps finished \| 2 written, 0 failed, 0 left/);
       // Waiting is still possible, and a finished plan isn't applied twice.
       expect((await call("apply_plan", { plan_id: plan.json.plan_id, wait: true })).text).toMatch(/Refused: plan was already applied/);
+    });
+
+    it("still answers for an apply cut short by a restart, and can stop what it left running on Shopify", async () => {
+      const { call, prod } = await connect();
+      const dir = join(process.env.SYNC_STATE_DIR!, "jobs");
+      mkdirSync(dir, { recursive: true });
+      const left = { plan_id: "old", target: "prod", state: "running", phase: "writing 4000 products", totals: { created: 0, updated: 0, skipped: 0, failed: 0, left: 4000 }, bulkOperations: ["gid://shopify/BulkOperation/7"] };
+      writeFileSync(join(dir, "old.json"), JSON.stringify(left));
+      const status = await call("apply_status", { plan_id: "old" });
+      expect(status.json).toMatchObject({ state: "interrupted", totals: { left: 4000 } });
+      expect(status.json.note).toMatch(/server stopped/);
+      const stopped = await call("cancel_apply", { plan_id: "old" });
+      expect(stopped.json.bulkOperations).toEqual([{ id: "gid://shopify/BulkOperation/7", result: "cancel requested" }]);
+      expect(prod.calls.filter((c) => c.field === "bulkOperationCancel")).toHaveLength(1);
     });
 
     it("lets unattended setups opt in to a confirmation passed as an argument", async () => {

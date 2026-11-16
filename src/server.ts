@@ -4,13 +4,14 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ElicitResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { ApplyRefused, type OpResult } from "./apply.js";
-import { ApplyJobs, jobStatus } from "./jobs.js";
+import { ApplyJobs, jobStatus, readJobFile } from "./jobs.js";
 import type { StoreConfig, StoreRegistry } from "./config.js";
 import { preview, type ResourceDiff } from "./diff.js";
 import { DIR_PREFIX, Engine, isDirSpec, type Scope } from "./engine.js";
 import { PlanStore, stateDir, type Plan } from "./plan.js";
 import { ADAPTERS, DEFAULT_KINDS, RESOURCE_KINDS, type ResourceKind } from "./resources/index.js";
 import { DEFAULT_OWNER_TYPES } from "./resources/metafieldDefinitions.js";
+import { cancelBulkOperations } from "./shopify/bulk.js";
 import { envNumber, type AdminClient } from "./shopify/client.js";
 import { byKind, checkMarkdown, diffMarkdown, planMarkdown, scopeLine, themesMarkdown } from "./report.js";
 import { DEFAULT_THEME_FILES, type ThemeDiff } from "./themes.js";
@@ -227,7 +228,20 @@ function tallies(results: OpResult[]) {
 export function createServer(deps: ServerDeps): McpServer {
   const engine = new Engine(deps.registry, deps.plans ?? new PlanStore(), deps.clientFactory);
   const env = deps.env ?? process.env;
-  const jobs = new ApplyJobs(join(stateDir({ ...process.env, ...env }), "jobs"));
+  const jobsDir = join(stateDir({ ...process.env, ...env }), "jobs");
+  const jobs = new ApplyJobs(jobsDir);
+  /** An apply this server isn't running any more: its last written status, marked interrupted if it never finished. */
+  const pastJob = (planId?: string) => {
+    const file = readJobFile(jobsDir, planId);
+    if (!file) return undefined;
+    if (file.state !== "running") return file;
+    return {
+      ...file,
+      state: "interrupted",
+      remaining: undefined,
+      note: "The server stopped (restart or reconnect) before this apply finished; these are its last known numbers. Bulk operations it had started may still be writing on Shopify's side. Run plan_sync again to see what is left.",
+    };
+  };
   /** Plans with more steps than this are applied in the background unless the caller asks to wait. */
   const backgroundSteps = envNumber("SYNC_BACKGROUND_STEPS", 50, env);
   const base = () => snapshotBase(env, deps.cwd);
@@ -467,7 +481,9 @@ export function createServer(deps: ServerDeps): McpServer {
       const plan = engine.plans.get(args.plan_id);
       if (!plan) return fail(`no plan with id ${args.plan_id}`);
       if (args.format === "markdown") return text(planMarkdown(plan, args.full ? Infinity : 200));
-      return json(summarizePlan(plan, args.full));
+      const live = jobs.get(plan.id);
+      const applied = live ? jobStatus(live, Date.now(), 0) : pastJob(plan.id);
+      return json({ ...summarizePlan(plan, args.full), apply: applied ? { state: applied.state, totals: applied.totals, failureReasons: applied.failureReasons, note: "apply_status has the details." } : undefined });
     }),
   );
 
@@ -526,17 +542,20 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: "Follow an apply",
       description:
-        "How far an apply has got: steps created, updated, skipped, failed and left per resource type, the current phase, progress inside a Shopify bulk operation, time so far and an estimate of the time left, and the latest failures. With no plan_id, the most recent apply.",
+        "How far an apply has got: steps created, updated, skipped, failed and left per resource type, the current phase, progress inside a Shopify bulk operation, time so far and an estimate of the time left, failures counted per resource type and reason, and the latest failures. Also answers for an apply that ended or was interrupted by a server restart. With no plan_id, the most recent apply.",
       inputSchema: {
         plan_id: z.string().optional(),
         failures: z.number().int().min(0).max(1000).optional().describe("How many of the latest failures to list (default 20)."),
+        resource: z.enum(RESOURCE_KINDS as unknown as [string, ...string[]]).optional().describe("List only the failures of this resource type, e.g. products."),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    guard(async (args: { plan_id?: string; failures?: number }) => {
+    guard(async (args: { plan_id?: string; failures?: number; resource?: string }) => {
       const job = args.plan_id ? jobs.get(args.plan_id) : jobs.latest();
-      if (job) return json(jobStatus(job, Date.now(), args.failures ?? 20));
-      if (!args.plan_id) return fail("no apply has run since this server started");
+      if (job) return json(jobStatus(job, Date.now(), args.failures ?? 20, args.resource));
+      const past = pastJob(args.plan_id);
+      if (past) return json(past);
+      if (!args.plan_id) return fail("no apply has been started yet");
       const plan = engine.plans.get(args.plan_id);
       if (!plan) return fail(`no plan with id ${args.plan_id}`);
       return json({
@@ -546,6 +565,35 @@ export function createServer(deps: ServerDeps): McpServer {
           plan.status === "pending"
             ? "This plan hasn't been applied (or was being applied by a server that has since stopped). Call apply_plan to apply it."
             : "This plan was applied before this server started; its results are in the audit log.",
+      });
+    }),
+  );
+
+  server.registerTool(
+    "cancel_apply",
+    {
+      title: "Cancel an apply",
+      description:
+        "Stop an apply that is running in the background: no further step is started and the Shopify bulk operations it started are cancelled. What was already written stays written (nothing is rolled back or deleted). Also stops bulk operations left running by an apply whose server was restarted. Follow with apply_status, then plan_sync to see what is left.",
+      inputSchema: { plan_id: z.string().optional().describe("The plan being applied. Default: the most recent apply.") },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    guard(async (args: { plan_id?: string }) => {
+      const live = args.plan_id ? jobs.get(args.plan_id) : jobs.latest();
+      if (live) {
+        if (!jobs.cancel(live.planId)) return json({ ...jobStatus(live), note: "This apply had already ended; nothing to cancel." });
+        return json({ plan_id: live.planId, state: "cancelling", note: "Asked Shopify to stop. Call apply_status in a minute to see what was written before it stopped." });
+      }
+      // An apply from before a restart: its bulk operations may still be running on Shopify's side.
+      const past = readJobFile(jobsDir, args.plan_id);
+      if (!past) return fail(args.plan_id ? `no apply found for plan ${args.plan_id}` : "no apply has been started yet");
+      if (past.state !== "running" || !past.bulkOperations?.length) return json({ plan_id: past.plan_id, state: past.state, note: "Nothing of this apply is running any more." });
+      const stopped = await cancelBulkOperations(engine.client(past.target), past.bulkOperations);
+      return json({
+        plan_id: past.plan_id,
+        state: "interrupted",
+        bulkOperations: stopped.map((s) => ({ id: s.id, result: s.error ?? "cancel requested" })),
+        note: "The server that ran this apply had stopped; its Shopify bulk operations were asked to stop. What they wrote stays written. Run plan_sync again to see what is left.",
       });
     }),
   );

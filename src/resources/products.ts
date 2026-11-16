@@ -759,17 +759,38 @@ export const products: ResourceAdapter = {
     const results = await bulkMutation(ctx.client, BULK_SET, lines, {
       timeoutMs: bulkTimeoutMs(),
       onProgress: ctx.onWritten,
+      signal: ctx.signal,
+      onStart: ctx.onOperation,
       onPart: (part, parts, start, rows) => {
         rows.forEach((r, j) => {
           const res = toResult(r);
           done.set(sent[start + j]!, res);
-          ctx.onDone?.(sent[start + j]!, res);
+          // A line Shopify gave no result for is checked against the store below before it is reported.
+          if (!r.unknown) ctx.onDone?.(sent[start + j]!, res);
         });
         const failed = rows.filter((_, j) => done.get(sent[start + j]!)?.error).length;
         ctx.onPhase?.(`products: part ${part} of ${parts} finished, ${rows.length - failed} written${failed ? `, ${failed} failed` : ""}`);
       },
     });
     results.forEach((r, j) => done.has(sent[j]!) || done.set(sent[j]!, toResult(r)));
+    // Lines without a result (their operation was abandoned or cancelled) may have been written all
+    // the same: the store says which new products exist now.
+    const unknown = sent.filter((k, j) => results[j]!.unknown && items[k]!.action === "create");
+    if (unknown.length) {
+      ctx.onPhase?.(`checking which of ${unknown.length} products without a result exist in ${ctx.client.store.alias} now`);
+      const refOf = (k: number) => `${REF_PREFIX}Product/${String(items[k]!.data.handle)}`;
+      for (const k of unknown) ctx.resolver.invalidate(refOf(k));
+      await ctx.resolver.prefetch(unknown.map(refOf));
+      let found = 0;
+      for (const k of unknown) {
+        const id = await ctx.resolver.resolve(refOf(k));
+        if (id) {
+          done.set(k, { id });
+          found++;
+        } else ctx.resolver.invalidate(refOf(k));
+      }
+      ctx.onPhase?.(`${found} of them were written, ${unknown.length - found} were not`);
+    }
     // Stock of variants the target already had is set after the product write, against what it has now.
     if (locations) {
       await eachLimited(

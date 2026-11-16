@@ -142,6 +142,10 @@ export interface BulkWriteContext extends WriteContext {
   onPhase?: (message: string) => void;
   /** While Shopify writes: about how many of the items are written so far. */
   onWritten?: (items: number) => void;
+  /** Aborted when the apply is cancelled. */
+  signal?: AbortSignal;
+  /** Called with the id of each Shopify bulk operation the write starts. */
+  onOperation?: (id: string) => void;
   /** An item's result as soon as its part of the bulk write finishes (before bulkWrite returns). */
   onDone?: (index: number, result: { id?: string; error?: string }) => void;
 }

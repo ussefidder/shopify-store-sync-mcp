@@ -53,6 +53,33 @@ export interface BulkOptions {
   wait?: (ms: number) => Promise<void>;
   /** Called while waiting, with the number of objects Shopify has written so far. */
   onProgress?: (objects: number) => void;
+  /** When aborted, running operations are cancelled on Shopify's side and what they had written is returned. */
+  signal?: AbortSignal;
+  /** Called with the id of each operation as it starts. */
+  onStart?: (id: string) => void;
+}
+
+const CANCEL = /* GraphQL */ `
+  mutation BulkCancel($id: ID!) {
+    bulkOperationCancel(id: $id) {
+      bulkOperation { id status }
+      userErrors { field message }
+    }
+  }
+`;
+
+/** Ask Shopify to stop bulk operations. What they already wrote stays written. */
+export async function cancelBulkOperations(client: AdminClient, ids: string[]): Promise<{ id: string; error?: string }[]> {
+  const out: { id: string; error?: string }[] = [];
+  for (const id of ids) {
+    try {
+      const d = await client.request<{ bulkOperationCancel: { userErrors: { message: string }[] } }>(CANCEL, { id });
+      out.push({ id, error: d.bulkOperationCancel.userErrors[0]?.message });
+    } catch (e) {
+      out.push({ id, error: (e as Error).message });
+    }
+  }
+  return out;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -86,8 +113,13 @@ async function pollAndDownload(client: AdminClient, id: string, opts: BulkOption
     if (++misses > 5) throw new ShopifyError(`${domain}: bulk operation ${id}: ${what} kept failing (${e.message}). It may still finish on Shopify's side.`);
     await wait(Math.min(30_000, pollMs * 2 ** misses));
   };
+  let cancelAsked = false;
   for (;;) {
     await wait(pollMs);
+    if (opts.signal?.aborted && !cancelAsked) {
+      cancelAsked = true;
+      await cancelBulkOperations(client, [id]);
+    }
     let node: { status: string; errorCode: string | null; objectCount: string; url: string | null; partialDataUrl: string | null } | null;
     try {
       ({ node } = await client.request<{ node: typeof node }>(POLL, { id }));
@@ -108,6 +140,11 @@ async function pollAndDownload(client: AdminClient, id: string, opts: BulkOption
       return parseJsonl(text);
     }
     misses = 0;
+    // A cancelled operation still hands back the results of the lines it had finished.
+    if (node.status === "CANCELED" && cancelAsked) {
+      if (!node.partialDataUrl) return [];
+      return parseJsonl(await (opts.download ?? bulkIO.download)(node.partialDataUrl).catch(() => ""));
+    }
     if (node.status === "FAILED" || node.status === "CANCELED" || node.status === "EXPIRED") {
       throw new ShopifyError(`${domain}: bulk operation ${node.status.toLowerCase()}${node.errorCode ? ` (${node.errorCode})` : ""}`);
     }
@@ -162,7 +199,8 @@ export class BulkUnavailable extends Error {}
 /** How many bulk write operations run at once on one store (Shopify allows 5 from API 2026-01). */
 export const bulkParallel = () => envNumber("SYNC_BULK_PARALLEL", 5);
 
-export type LineResult = { data?: Record<string, any>; errors?: { message: string }[] };
+/** `unknown`: Shopify gave no result for this line (its operation was abandoned or cancelled), so it may or may not have been written. */
+export type LineResult = { data?: Record<string, any>; errors?: { message: string }[]; unknown?: boolean };
 
 /** Upload one file of variables and start the bulk operation on it. Returns its id. */
 async function startMutation(client: AdminClient, mutation: string, lines: Record<string, unknown>[], opts: { upload?: Upload }): Promise<string> {
@@ -214,7 +252,7 @@ export async function bulkMutation(
   const size = Math.ceil(lines.length / parts);
   const chunks = Array.from({ length: parts }, (_, i) => ({ start: i * size, lines: lines.slice(i * size, i * size + size) })).filter((c) => c.lines.length);
 
-  const out: LineResult[] = lines.map(() => ({ errors: [{ message: "no result for this line" }] }));
+  const out: LineResult[] = lines.map(() => ({ errors: [{ message: "no result for this line" }], unknown: true }));
   const collect = (start: number, count: number, rows: Record<string, any>[]) => {
     for (const r of rows) {
       const n = Number(r.__lineNumber);
@@ -225,11 +263,15 @@ export async function bulkMutation(
   const written = chunks.map(() => 0);
   const report = () => opts.onProgress?.(written.reduce((a, b) => a + b, 0));
   const fail = (c: (typeof chunks)[number], message: string) =>
-    c.lines.forEach((_, k) => (out[c.start + k] = { errors: [{ message: `not written: ${message}` }] }));
+    c.lines.forEach((_, k) => (out[c.start + k] = { errors: [{ message: `not written: ${message}` }], unknown: true }));
   const running = new Set<Promise<void>>();
   for (const [n, c] of chunks.entries()) {
     let id: string | undefined;
     while (!id) {
+      if (opts.signal?.aborted) {
+        c.lines.forEach((_, k) => (out[c.start + k] = { errors: [{ message: "not written: the apply was cancelled" }] }));
+        break;
+      }
       try {
         id = await startMutation(client, mutation, c.lines, opts);
       } catch (e) {
@@ -245,6 +287,7 @@ export async function bulkMutation(
       }
     }
     if (!id) continue;
+    opts.onStart?.(id);
     const onProgress = (objects: number) => {
       written[n] = Math.min(objects, c.lines.length);
       report();
@@ -254,6 +297,11 @@ export async function bulkMutation(
       // One part failing doesn't lose the others: its lines are reported as not written.
       .catch((e: Error) => fail(c, e.message))
       .then(() => {
+        if (opts.signal?.aborted) {
+          for (let k = c.start; k < c.start + c.lines.length; k++) {
+            if (out[k]!.unknown) out[k] = { errors: [{ message: "not written: the apply was cancelled" }], unknown: true };
+          }
+        }
         onProgress(c.lines.length);
         opts.onPart?.(n + 1, chunks.length, c.start, out.slice(c.start, c.start + c.lines.length));
       })

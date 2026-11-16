@@ -576,6 +576,8 @@ export class FakeShop implements AdminClient {
         })());
         return { bulkOperation: { id, status: "CREATED" }, userErrors: [] };
       }
+      case "bulkOperationCancel":
+        return { bulkOperation: { id: v.id, status: "CANCELING" }, userErrors: [] };
       case "node": {
         const run = this.pendingBulk.get(v.id);
         if (!run) return null;

@@ -367,6 +367,97 @@ describe("bulk writes", () => {
     }
   });
 
+  const bulkSetup = async () => {
+    const { bulkIO } = await import("../src/shopify/bulk.js");
+    const { bulkFiles } = await import("./fakeShop.js");
+    bulkIO.wait = async () => {};
+    bulkIO.upload = async (_url, form) => void bulkFiles.set(String(form.get("key")), await (form.get("file") as Blob).text());
+    bulkIO.download = async (url) => bulkFiles.get(url) ?? "";
+  };
+  const tees = (n: number, withFields: boolean, idBase = 0) =>
+    Array.from({ length: n }, (_, i) =>
+      shirt(`gid://shopify/Product/${idBase + i + 1}`, {
+        handle: `tee-${i}`,
+        variants: [
+          {
+            id: `gid://shopify/ProductVariant/${idBase + i + 1}`,
+            options: { Color: "Sand", Size: "M" },
+            metafields: withFields ? [{ namespace: "custom", key: "fit", type: "single_line_text_field", value: `fit-${i}` }] : [],
+          },
+        ],
+        metafields: withFields ? [{ namespace: "custom", key: "care", type: "single_line_text_field", value: `care-${i}` }] : [],
+      }),
+    );
+
+  it("finds the products and variants that many metafield values belong to with one export, not a request each", async () => {
+    await bulkSetup();
+    process.env.SYNC_BULK_THRESHOLD = "2";
+    try {
+      const dev = new FakeShop(FakeShop.config("dev"), { products: tees(6, true) });
+      const eu = new FakeShop(FakeShop.config("eu"), { products: tees(6, false, 100) });
+      const engine = engineFor(dev, eu);
+      const plan = await engine.plan("dev", "eu", { resources: ["metafields"] });
+      expect(plan.ops).toHaveLength(12);
+      expect(plan.warnings).toEqual([]);
+      const { results } = await engine.apply(plan.id);
+      expect(results.filter((r) => r.outcome !== "created")).toEqual([]);
+      expect(eu.state.products[3]!.variants![0]!.metafields).toEqual([{ namespace: "custom", key: "fit", type: "single_line_text_field", value: "fit-3" }]);
+      expect(eu.calls.filter((c) => c.field === "productByIdentifier")).toEqual([]);
+    } finally {
+      delete process.env.SYNC_BULK_THRESHOLD;
+    }
+  });
+
+  it("fails what belongs to a product it couldn't create right away, with that as the reason", async () => {
+    await bulkSetup();
+    process.env.SYNC_BULK_THRESHOLD = "2";
+    try {
+      const dev = new FakeShop(FakeShop.config("dev"), { products: tees(4, true) });
+      const eu = new FakeShop(FakeShop.config("eu"), {});
+      const real = eu.request.bind(eu);
+      eu.request = (async (q: string, v: any) =>
+        /productSet/.test(q) && v?.input?.handle === "tee-1" ? { productSet: { product: null, userErrors: [{ message: "boom" }] } } : real(q, v)) as typeof eu.request;
+      const engine = engineFor(dev, eu);
+      const plan = await engine.plan("dev", "eu", { resources: ["products", "metafields"] });
+      const { results } = await engine.apply(plan.id);
+      const failed = results.filter((r) => r.outcome === "failed").map((r) => `${r.kind} ${r.key}: ${r.message}`);
+      expect(failed).toEqual([
+        "products tee-1: boom",
+        "metafields PRODUCT/tee-1/custom.care: not written: it belongs to Product/tee-1, which this apply could not create",
+        expect.stringMatching(/^metafields PRODUCTVARIANT\/tee-1\/.*: not written: it belongs to ProductVariant\/tee-1\/.*, which this apply could not create$/),
+      ]);
+      expect(results.filter((r) => r.outcome === "created")).toHaveLength(9);
+      // Nothing of the failed product was looked up in the target afterwards.
+      expect(eu.calls.filter((c) => c.field === "productByIdentifier" && c.variables.handle === "tee-1")).toEqual([]);
+    } finally {
+      delete process.env.SYNC_BULK_THRESHOLD;
+    }
+  });
+
+  it("counts products as written when their bulk operation gave no result but the store has them", async () => {
+    await bulkSetup();
+    process.env.SYNC_BULK_THRESHOLD = "2";
+    try {
+      const dev = new FakeShop(FakeShop.config("dev"), { products: tees(4, true) });
+      const eu = new FakeShop(FakeShop.config("eu"), {});
+      const real = eu.request.bind(eu);
+      let lost = 0;
+      // The first bulk write (the products) runs on Shopify's side, but its status never comes back as finished.
+      eu.request = (async (q: string, v: any) => {
+        const d = await real(q, v);
+        return /BulkStatus/.test(q) && lost++ === 0 ? { node: { status: "FAILED", errorCode: "INTERNAL_SERVER_ERROR", objectCount: "0", url: null, partialDataUrl: null } } : d;
+      }) as typeof eu.request;
+      const engine = engineFor(dev, eu);
+      const plan = await engine.plan("dev", "eu", { resources: ["products", "metafields"] });
+      const { results } = await engine.apply(plan.id);
+      expect(results.filter((r) => r.outcome !== "created")).toEqual([]);
+      expect(eu.state.products).toHaveLength(4);
+      expect(eu.state.products[2]!.variants![0]!.metafields).toEqual([{ namespace: "custom", key: "fit", type: "single_line_text_field", value: "fit-2" }]);
+    } finally {
+      delete process.env.SYNC_BULK_THRESHOLD;
+    }
+  });
+
   it("creates an image several new products share only once", async () => {
     const { bulkIO } = await import("../src/shopify/bulk.js");
     const { bulkFiles } = await import("./fakeShop.js");

@@ -285,7 +285,7 @@ export const metafields: ResourceAdapter = {
     const results: { id?: string; error?: string }[] = items.map(() => ({}));
     let pending = items.map((_, i) => i);
     // metafieldsSet writes all values of a call or none: values held back by another one's error go again.
-    for (let round = 0; round < 3 && pending.length; round++) {
+    for (let round = 0; round < 3 && pending.length && !(round > 0 && ctx.signal?.aborted); round++) {
       const groups: number[][] = [];
       for (let i = 0; i < pending.length; i += 25) groups.push(pending.slice(i, i + 25));
       const lines = groups.map((g) => ({
@@ -298,6 +298,8 @@ export const metafields: ResourceAdapter = {
       ctx.onPhase?.(`writing ${pending.length} metafield values in Shopify bulk operations${first ? "" : ` (retry ${round})`}`);
       const res = await bulkMutation(ctx.client, BULK_SET, lines, {
         timeoutMs: bulkTimeoutMs(),
+        signal: ctx.signal,
+        onStart: ctx.onOperation,
         onProgress: first ? (n) => ctx.onWritten?.(Math.min(n * 25, items.length)) : undefined,
         onPart: (part, parts, _start, rows) => {
           const failed = rows.filter((r) => r.errors?.length || r.data?.metafieldsSet?.userErrors?.length).length;

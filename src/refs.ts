@@ -1,3 +1,4 @@
+import { bulkQuery, bulkThreshold, bulkTimeoutMs } from "./shopify/bulk.js";
 import { paginate, type AdminClient } from "./shopify/client.js";
 
 /**
@@ -315,18 +316,71 @@ export class RefToGidResolver {
   allowUploads = true;
 
   /**
-   * Look many refs up with few requests: files by name (25 per request) and products by handle
-   * (10 per request). Everything else is left to resolve(). Results land in the same cache.
+   * Look many refs up with few requests: files by name (25 per request), products by handle (10 per
+   * request) and variants with their product (4 products per request). Many products and variants
+   * come from one bulk export instead. Everything else is left to resolve(). Results, misses
+   * included, land in the same cache.
    */
   async prefetch(refs: Iterable<string>): Promise<void> {
     const files: string[] = [];
-    const products: string[] = [];
+    let products: string[] = [];
+    const variants = new Map<string, string[]>();
+    const P = `${REF_PREFIX}Product/`;
+    const V = `${REF_PREFIX}ProductVariant/`;
     for (const r of new Set(refs)) {
       if (this.cache.has(r) || !r.startsWith(REF_PREFIX) || r.startsWith(UNRESOLVED_PREFIX)) continue;
       if (r.startsWith(`${REF_PREFIX}File/`)) files.push(r);
-      else if (r.startsWith(`${REF_PREFIX}Product/`)) products.push(r);
+      else if (r.startsWith(P)) products.push(r);
+      else if (r.startsWith(V)) {
+        const handle = r.slice(V.length).split("/")[0]!;
+        variants.set(handle, [...(variants.get(handle) ?? []), r]);
+      }
     }
     const chunks = <T>(list: T[], n: number) => Array.from({ length: Math.ceil(list.length / n) }, (_, i) => list.slice(i * n, i * n + n));
+    const miss = (r: string) => void (this.cache.has(r) || this.cache.set(r, Promise.resolve(undefined)));
+
+    // Many products: one export of every product and variant id, instead of a request per product.
+    if (new Set([...products.map((r) => r.slice(P.length)), ...variants.keys()]).size > bulkThreshold()) {
+      try {
+        const rows = await bulkQuery(this.client, PRODUCT_REFS_BULK, { timeoutMs: bulkTimeoutMs() });
+        const handles = new Map<string, string>();
+        for (const row of rows) {
+          if (!row.__parentId) {
+            handles.set(row.id, row.handle);
+            if (!this.cache.has(P + row.handle)) this.remember(P + row.handle, row.id);
+          } else if (row.selectedOptions && handles.has(row.__parentId)) {
+            const ref = variantRef(handles.get(row.__parentId)!, row.selectedOptions);
+            if (!this.cache.has(ref)) this.remember(ref, row.id);
+          }
+        }
+        products.forEach(miss);
+        for (const list of variants.values()) list.forEach(miss);
+        products = [];
+        variants.clear();
+      } catch {
+        // No bulk read on this store: the grouped lookups below do the same, more slowly.
+      }
+    }
+
+    await eachLimited(chunks([...variants], 4), 4, async (group) => {
+      const vars = group.map((_, i) => "$h" + i + ": String!").join(", ");
+      const fields = group
+        .map((_, i) => "p" + i + ": productByIdentifier(identifier: { handle: $h" + i + " }) { id variants(first: 100) { nodes { id selectedOptions { name value } } pageInfo { hasNextPage } } }")
+        .join(" ");
+      type Found = { id: string; variants: { nodes: { id: string; selectedOptions: { name: string; value: string }[] }[]; pageInfo: { hasNextPage: boolean } } } | null;
+      const d = await this.client.request<Record<string, Found>>("query ProductIds(" + vars + ") { " + fields + " }", Object.fromEntries(group.map(([h], i) => [`h${i}`, h])));
+      group.forEach(([handle, asked], i) => {
+        const p = d[`p${i}`];
+        if (p && !this.cache.has(P + handle)) this.remember(P + handle, p.id);
+        for (const v of p?.variants.nodes ?? []) {
+          const ref = variantRef(handle, v.selectedOptions);
+          if (!this.cache.has(ref)) this.remember(ref, v.id);
+        }
+        // More variants than one page holds: what wasn't found is left for resolve() to page through.
+        if (!p?.variants.pageInfo.hasNextPage) asked.forEach(miss);
+      });
+    });
+    products = products.filter((r) => !this.cache.has(r));
 
     await eachLimited(chunks(products, 10), 4, async (group) => {
       const handles = group.map((r) => r.slice(`${REF_PREFIX}Product/`.length));
@@ -576,3 +630,13 @@ export async function createFiles(
   }
   return ready;
 }
+
+/** Every product and variant id of a store, for resolving many product and variant refs at once. */
+const PRODUCT_REFS_BULK = `{
+  products {
+    edges { node {
+      id handle
+      variants { edges { node { id selectedOptions { name value } } } }
+    } }
+  }
+}`;

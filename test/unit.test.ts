@@ -332,6 +332,37 @@ describe("bulk writes in parts", async () => {
   });
 });
 
+describe("cancelling a bulk write", async () => {
+  const { bulkMutation, bulkIO } = await import("../src/shopify/bulk.js");
+  it("stops the operations on Shopify's side and keeps the results of the lines already written", async () => {
+    const abort = new AbortController();
+    const cancelled: string[] = [];
+    let n = 0;
+    bulkIO.wait = async () => {};
+    bulkIO.upload = async () => {};
+    bulkIO.download = async () => [0, 1, 2].map((i) => JSON.stringify({ data: { echo: i }, __lineNumber: i })).join("\n");
+    const client = {
+      store: { alias: "s", domain: "s.myshopify.com" } as any,
+      request: async (q: string, v: any) => {
+        if (q.includes("stagedUploadsCreate")) return { stagedUploadsCreate: { stagedTargets: [{ url: "u", parameters: [{ name: "key", value: `k${++n}` }] }], userErrors: [] } };
+        if (q.includes("bulkOperationRunMutation")) return { bulkOperationRunMutation: { bulkOperation: { id: v.stagedUploadPath }, userErrors: [] } };
+        if (q.includes("bulkOperationCancel")) {
+          cancelled.push(v.id);
+          return { bulkOperationCancel: { bulkOperation: { id: v.id, status: "CANCELING" }, userErrors: [] } };
+        }
+        if (cancelled.includes(v.id)) return { node: { status: "CANCELED", errorCode: null, objectCount: "3", url: null, partialDataUrl: "partial" } };
+        abort.abort();
+        return { node: { status: "RUNNING", errorCode: null, objectCount: "3", url: null, partialDataUrl: null } };
+      },
+    };
+    const started: string[] = [];
+    const res = await bulkMutation(client as any, "mutation M($x: Int) { echo }", Array.from({ length: 10 }, (_, i) => ({ x: i })), { signal: abort.signal, onStart: (id) => started.push(id) });
+    expect(cancelled).toEqual(started);
+    expect(res.slice(0, 3).map((r) => r.data?.echo)).toEqual([0, 1, 2]);
+    expect(res.slice(3).every((r) => r.unknown && r.errors?.[0]?.message === "not written: the apply was cancelled")).toBe(true);
+  });
+});
+
 describe("apply_status", async () => {
   const { ApplyJobs, jobStatus } = await import("../src/jobs.js");
   it("counts each resource type, what's left and the time remaining", async () => {
@@ -363,6 +394,8 @@ describe("apply_status", async () => {
     // 4 written in the minute since the first write: 6 left take about a minute and a half.
     expect(s.remaining).toBe("2 min");
     expect(s.failures).toEqual([{ seq: 2, kind: "products", key: "k1", message: "bad" }]);
+    expect(s.failureReasons).toEqual([{ kind: "products", reason: "bad", count: 1, examples: ["k1"], firstMessage: "bad" }]);
+    expect(jobStatus(job, 120_000, 20, "metafields").failures).toEqual([]);
     finish();
     await new Promise((r) => setTimeout(r, 0));
     expect(jobStatus(job, 200_000)).toMatchObject({ state: "done", planStatus: "partially_applied", remaining: undefined });

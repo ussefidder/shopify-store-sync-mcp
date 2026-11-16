@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.4
+
+Found in the 4,000-product live test:
+
+- **`cancel_apply`**: stops a running apply and the Shopify bulk operations it started, and reports what was written before it stopped. It also stops bulk operations left running by an apply whose server was restarted. Nothing is rolled back or deleted
+- **Products no longer reported as failed when they were written.** When a bulk operation ends without results (abandoned or cancelled), the store is asked which of its products exist now, and those count as created
+- **What belongs to a product that could not be created fails at once**, with that as the reason, instead of each value being looked up in the target one request at a time
+- **Many metafield values on existing products**: the products and variants they belong to are found with one bulk export instead of one request per product, when planning and when applying. On 4,000 products that was about 4,000 requests each time
+- `apply_status` counts failures per resource type and reason, so the first cause is not buried under what failed because of it; `resource` lists one type's failures. It still answers after a server restart, marking the apply as interrupted, and `get_plan` shows how the plan's apply went
+
 ## 0.10.3
 
 - **Big bulk writes are no longer cut off after 30 minutes.** A bulk operation is now given up on only when it has written nothing more for 30 minutes (`SYNC_BULK_TIMEOUT_MS`), however long it runs. Shopify writes about 12 new products a minute per operation (5 at once) when each has around a dozen variants with stock and images, so 800 products take over an hour. Before, every product of an operation still running at 30 minutes was reported as failed while Shopify went on creating them, and the metafield values that followed failed for lack of their product

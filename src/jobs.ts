@@ -33,6 +33,10 @@ export interface ApplyJob {
   bulk?: { kind: string; written: number; total: number; before: number };
   error?: string;
   planStatus?: Plan["status"];
+  /** Shopify bulk operations this apply started, so they can be stopped even after a server restart. */
+  bulkOperations: string[];
+  cancelled?: boolean;
+  abort: AbortController;
 }
 
 const KEEP_FINISHED = 20;
@@ -92,12 +96,20 @@ export class ApplyJobs {
       steps: selected.length,
       byKind,
       results: new Map(),
+      bulkOperations: [],
+      abort: new AbortController(),
     };
     this.jobs.set(plan.id, job);
     this.prune();
 
     const tracked: ApplyOptions = {
       ...opts,
+      signal: job.abort.signal,
+      onBulkOperation: (id) => {
+        job.bulkOperations.push(id);
+        this.persist(job, true);
+        opts.onBulkOperation?.(id);
+      },
       onPhase: (m) => {
         job.phase = m;
         this.persist(job, true);
@@ -137,6 +149,17 @@ export class ApplyJobs {
     return job;
   }
 
+  /** Stop a running apply: nothing more is started and its bulk operations are cancelled on Shopify's side. */
+  cancel(planId: string): ApplyJob | undefined {
+    const job = this.jobs.get(planId);
+    if (!job || job.state !== "running") return undefined;
+    job.cancelled = true;
+    job.phase = "cancelling: stopping the bulk operations on Shopify's side and collecting what was written";
+    job.abort.abort();
+    this.persist(job, true);
+    return job;
+  }
+
   private prune() {
     const done = [...this.jobs.values()].filter((j) => j.state !== "running").sort((a, b) => a.startedAt - b.startedAt);
     for (const j of done.slice(0, Math.max(0, done.length - KEEP_FINISHED))) this.jobs.delete(j.planId);
@@ -149,7 +172,7 @@ const minutes = (ms: number) => {
 };
 
 /** What apply_status returns: counts per resource type, what's left, the time so far and an estimate of what remains. */
-export function jobStatus(job: ApplyJob, now: number = Date.now(), failuresShown = 20) {
+export function jobStatus(job: ApplyJob, now: number = Date.now(), failuresShown = 20, kind?: string) {
   const kinds: Record<string, KindCount & { left: number }> = {};
   for (const [k, c] of Object.entries(job.byKind)) kinds[k] = { ...c, created: 0, updated: 0, skipped: 0, failed: 0, left: c.total };
   for (const r of job.results.values()) {
@@ -172,11 +195,23 @@ export function jobStatus(job: ApplyJob, now: number = Date.now(), failuresShown
     const done = written;
     if (done > 0 && writing > 5_000 && left > 0) remaining = minutes((writing / done) * left);
   }
-  const failures = [...job.results.values()].filter((r) => r.outcome === "failed");
+  const allFailures = [...job.results.values()].filter((r) => r.outcome === "failed");
+  const failures = kind ? allFailures.filter((r) => r.kind === kind) : allFailures;
+  // The same reason usually repeats thousands of times: failures are counted per resource type and
+  // reason, so the first cause (a product, say) isn't buried under what failed because of it.
+  const reasons = new Map<string, { kind: string; reason: string; count: number; examples: string[]; firstMessage?: string }>();
+  for (const r of allFailures) {
+    const reason = (r.message ?? "no reason given").replace(/\S*\/\S*/g, "…").replace(/\d{3,}/g, "#").replace(/(…,? ?)+/g, "… ").trim().slice(0, 200);
+    const g = reasons.get(`${r.kind}|${reason}`) ?? { kind: r.kind, reason, count: 0, examples: [], firstMessage: r.message };
+    g.count++;
+    if (g.examples.length < 3) g.examples.push(r.key);
+    reasons.set(`${r.kind}|${reason}`, g);
+  }
   return {
     plan_id: job.planId,
     target: job.target,
     state: job.state,
+    cancelled: job.cancelled,
     planStatus: job.planStatus,
     phase: job.phase,
     progress: `${finished} of ${job.steps} steps finished${job.state === "running" ? ` (${Math.round((finished / Math.max(1, job.steps)) * 100)}%)` : ""}`,
@@ -185,13 +220,19 @@ export function jobStatus(job: ApplyJob, now: number = Date.now(), failuresShown
     bulk: bulk ? `Shopify has written about ${bulk.written} of ${bulk.total} ${bulk.kind} in its bulk operation` : undefined,
     elapsed: minutes(elapsed),
     remaining,
+    failureReasons: allFailures.length ? [...reasons.values()].sort((a, b) => b.count - a.count).slice(0, 10) : undefined,
     failures: failures.slice(-failuresShown).map((r) => ({ seq: r.seq, kind: r.kind, key: r.key, message: r.message })),
     moreFailures: failures.length > failuresShown ? failures.length - failuresShown : undefined,
     error: job.error,
+    bulkOperations: job.bulkOperations.length ? job.bulkOperations : undefined,
     note:
       job.state === "running"
-        ? "Still writing. Call apply_status again in a minute or two; every result is also in the audit log."
-        : "Finished. Every result is in the audit log.",
+        ? job.cancelled
+          ? "Cancelling. Call apply_status again in a minute to see what was written before it stopped."
+          : "Still writing. Call apply_status again in a minute or two (or run `shopify-store-sync-mcp status --watch` in a terminal); every result is also in the audit log. cancel_apply stops it."
+        : job.cancelled
+          ? "Cancelled. What was written before stays written (this tool never deletes); run plan_sync again to see what is left."
+          : "Finished. Every result is in the audit log.",
   };
 }
 

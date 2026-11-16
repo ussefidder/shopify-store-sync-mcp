@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { hashData } from "./diff.js";
-import { collectRefs, mapStrings, RefToGidResolver } from "./refs.js";
+import { collectRefs, mapStrings, REF_PREFIX, RefToGidResolver } from "./refs.js";
 import { ADAPTERS, orderKinds, type Item, type ResourceKind } from "./resources/index.js";
 import { envNumber, type AdminClient } from "./shopify/client.js";
 import { BulkUnavailable, bulkThreshold } from "./shopify/bulk.js";
@@ -32,6 +32,10 @@ export interface ApplyOptions {
   onPhase?: (message: string) => void;
   /** Called with every result as it is recorded (a later pass can replace an earlier result for the same step). */
   onResult?: (result: OpResult) => void;
+  /** Aborted to cancel: nothing more is started, and running bulk operations are stopped on Shopify's side. */
+  signal?: AbortSignal;
+  /** Called with the id of each Shopify bulk operation the apply starts. */
+  onBulkOperation?: (id: string) => void;
   /** During a bulk write: the kind, about how many items Shopify has written, and how many are in it. */
   onBulkProgress?: (kind: ResourceKind, written: number, total: number) => void;
 }
@@ -170,10 +174,27 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
 
   let finished = 0;
   const total = ready.length;
+  // What this apply was to create and couldn't. Whatever depends on it fails at once, with that as the
+  // reason, instead of being looked up in the target one item at a time.
+  const notWritten = new Set<string>();
+  const opBySeq = new Map(plan.ops.map((o) => [o.seq, o]));
+  const blockedBy = (data: unknown): string | undefined => {
+    if (!notWritten.size) return undefined;
+    for (const r of collectRefs(data)) if (notWritten.has(r)) return r;
+    return undefined;
+  };
+  const blockedMessage = (ref: string) => `not written: it belongs to ${ref.slice(REF_PREFIX.length)}, which this apply could not create`;
+
   const run = async (op: PlanOp, pass: 1 | 2): Promise<void> => {
     const adapter = ADAPTERS[op.kind];
     let data = dropUnmappable(op.data, op.kind);
+    if (opts.signal?.aborted) {
+      if (pass === 1) upsertResult({ seq: op.seq, kind: op.kind, key: op.key, outcome: "skipped", message: "the apply was cancelled" });
+      return;
+    }
     try {
+      const blocked = blockedBy(data);
+      if (blocked) throw new Error(blockedMessage(blocked));
       const { value, missing } = await resolver.rewrite(data);
       data = value;
       const strip = PARTIAL[op.kind];
@@ -217,6 +238,15 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
     const i = results.findIndex((x) => x.seq === r.seq);
     if (i >= 0) results[i] = r;
     else results.push(r);
+    const op = opBySeq.get(r.seq);
+    if (op?.action === "create") {
+      const adapter = ADAPTERS[op.kind];
+      const refs = [adapter.refFor?.(op.key), ...(adapter.createsRefs?.(op.key, op.data) ?? [])].filter((x): x is string => Boolean(x));
+      for (const ref of refs) {
+        if (r.outcome === "failed") notWritten.add(ref);
+        else notWritten.delete(ref);
+      }
+    }
     opts.onResult?.(r);
     audit(log, { plan: plan.id, target: plan.target.domain, source: plan.source.domain, ...r });
   };
@@ -227,14 +257,21 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
    */
   const runBulk = async (kind: ResourceKind, ops: PlanOp[]): Promise<PlanOp[]> => {
     const adapter = ADAPTERS[kind];
+    if (opts.signal?.aborted) return ops;
     opts.onPhase?.(`writing ${ops.length} ${kind} in one Shopify bulk operation`);
     // Files the target lacks are taken from the source's URLs by the bulk write itself (products).
     resolver.allowUploads = kind !== "products";
     const items: { op: PlanOp; data: Record<string, unknown> }[] = [];
     try {
       const dataOf = ops.map((op) => dropUnmappable(op.data, op.kind));
-      await resolver.prefetch(dataOf.flatMap((d) => [...collectRefs(d)]));
+      await resolver.prefetch(dataOf.flatMap((d) => [...collectRefs(d)]).filter((r) => !notWritten.has(r)));
       for (const [i, op] of ops.entries()) {
+        const blocked = blockedBy(dataOf[i]);
+        if (blocked) {
+          upsertResult({ seq: op.seq, kind, key: op.key, outcome: "failed", message: blockedMessage(blocked) });
+          opts.onProgress?.(++finished, total, `${kind} ${op.key}`);
+          continue;
+        }
         const { value, missing } = await resolver.rewrite(dataOf[i]!);
         const notFile = missing.filter((r) => !(kind === "products" && plan.files?.[r]));
         if (notFile.length) {
@@ -247,9 +284,10 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
       // Results come as each part finishes, then all together at the end; a later error (stock not
       // set after the product was written, say) replaces an earlier success.
       const reported = new Map<number, boolean>();
-      const record = (i: number, r: { id?: string; error?: string }) => {
+      const record = (i: number, r: { id?: string; error?: string }, final = false) => {
         const before = reported.get(i);
-        if (before !== undefined && (before || !r.error)) return;
+        // The final result always stands; before that, the first report does, except that an error replaces a success.
+        if (before !== undefined && (final ? before === Boolean(r.error) : before || !r.error)) return;
         reported.set(i, Boolean(r.error));
         const { op } = items[i]!;
         if (r.error) {
@@ -268,12 +306,14 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
           files: plan.files ?? {},
           onPhase: opts.onPhase,
           onWritten: (n) => opts.onBulkProgress?.(kind, n, items.length),
+          signal: opts.signal,
+          onOperation: opts.onBulkOperation,
           // Results land in the audit log as each part finishes, not only at the end.
           onDone: record,
         },
         items.map((i) => ({ key: i.op.key, action: i.op.action === "create" ? "create" : "update", data: i.data })),
       );
-      res.forEach((r, i) => record(i, r));
+      res.forEach((r, i) => record(i, r, true));
       return [];
     } catch (err) {
       if (!(err instanceof BulkUnavailable)) throw err;
