@@ -1,4 +1,5 @@
 import { assertNoUserErrors, paginate, type AdminClient } from "../shopify/client.js";
+import { bulkMutation, bulkQuery, bulkThreshold, bulkTimeoutMs } from "../shopify/bulk.js";
 import type { FetchOptions, Item, ResourceAdapter } from "./types.js";
 import { variantKey } from "../refs.js";
 import { reservedPrefix } from "./util.js";
@@ -117,6 +118,12 @@ function itemsOf(prefix: string, owner: { id: string; metafields: Metafields }, 
   return { items, skipped };
 }
 
+const BULK_SET = /* GraphQL */ `
+  mutation BulkMetafieldsSet($m: [MetafieldsSetInput!]!) {
+    metafieldsSet(metafields: $m) { metafields { id } userErrors { field message code } }
+  }
+`;
+
 async function set({ client }: Parameters<ResourceAdapter["create"]>[0], d: Record<string, unknown>): Promise<string> {
   const res = await client.request(
     `mutation($m: [MetafieldsSetInput!]!) { metafieldsSet(metafields: $m) { metafields { id } userErrors { field message code } } }`,
@@ -126,16 +133,51 @@ async function set({ client }: Parameters<ResourceAdapter["create"]>[0], d: Reco
   return res.metafieldsSet.metafields[0]?.id ?? "";
 }
 
+const nsArg = (namespace: string | undefined) => (namespace ? `(namespace: ${JSON.stringify(namespace)})` : "");
+
+/** Rebuild owners from bulk rows: each metafield row follows with its owner's id in __parentId. */
+function ownersFromBulk<T extends { id: string; metafields: Metafields }>(rows: Record<string, any>[]): T[] {
+  const byId = new Map<string, T>();
+  for (const r of rows) if (!r.__parentId) byId.set(r.id, { ...r, metafields: { nodes: [], pageInfo: { hasNextPage: false } } } as unknown as T);
+  for (const r of rows) {
+    const o = r.__parentId && byId.get(r.__parentId);
+    if (o) o.metafields.nodes.push({ namespace: r.namespace, key: r.key, type: r.type, value: r.value });
+  }
+  return [...byId.values()];
+}
+
+const productCount = async (client: AdminClient) =>
+  (await client.request<{ productsCount: { count: number } | null }>(`query { productsCount(limit: null) { count } }`)).productsCount?.count ?? 0;
+
+/** Every product (or every variant) with its metafields, in one bulk operation: for large catalogs. */
+function bulkProducts(client: AdminClient, namespace: string | undefined): Promise<OwnerNode[]> {
+  const q = `{ products { edges { node { id handle metafields${nsArg(namespace)} { edges { node { namespace key type value } } } } } } }`;
+  return bulkQuery(client, q, { timeoutMs: bulkTimeoutMs() }).then((rows) => ownersFromBulk<OwnerNode>(rows));
+}
+function bulkVariants(client: AdminClient, namespace: string | undefined): Promise<VariantNode[]> {
+  const q = `{ productVariants { edges { node { id selectedOptions { name value } product { handle } metafields${nsArg(namespace)} { edges { node { namespace key type value } } } } } } }`;
+  return bulkQuery(client, q, { timeoutMs: bulkTimeoutMs() }).then((rows) => ownersFromBulk<VariantNode>(rows));
+}
+
 async function readOwners(
   client: AdminClient,
   owner: (typeof OWNERS)[number],
   namespace: string | undefined,
   named: FetchOptions["metafieldOwners"],
 ): Promise<OwnerNode[]> {
-  if (!named) return paginate<OwnerNode>(client, query(owner.field, owner.page), { namespace }, (d) => d[owner.field]);
-  const handles = named[owner.type] ?? [];
+  const handles = named?.[owner.type];
+  // Many named owners (a plan's check before writing, say) read like a full read, then filtered.
+  if (!named || (handles?.length ?? 0) > bulkThreshold()) {
+    const all =
+      owner.type === "PRODUCT" && (await productCount(client)) > bulkThreshold()
+        ? await bulkProducts(client, namespace)
+        : await paginate<OwnerNode>(client, query(owner.field, owner.page), { namespace }, (d) => d[owner.field]);
+    if (!named) return all;
+    const wanted = new Set(handles);
+    return all.filter((o) => wanted.has(o.handle));
+  }
   const found = await Promise.all(
-    handles.map(async (handle) => (await client.request<Record<string, OwnerNode | null>>(byHandle(owner.byHandle), { handle, namespace }))[owner.byHandle]),
+    (handles ?? []).map(async (handle) => (await client.request<Record<string, OwnerNode | null>>(byHandle(owner.byHandle), { handle, namespace }))[owner.byHandle]),
   );
   return found.filter((n): n is OwnerNode => Boolean(n));
 }
@@ -143,7 +185,15 @@ async function readOwners(
 /** Variants with their metafields: every variant, or the variants of the named products. */
 async function readVariants(client: AdminClient, namespace: string | undefined, handles: string[] | undefined): Promise<VariantNode[]> {
   const pick = (d: any) => d.productVariants;
-  if (!handles) return paginate<VariantNode>(client, VARIANTS_QUERY, { namespace }, pick);
+  if (!handles || handles.length > bulkThreshold()) {
+    const all =
+      (await productCount(client)) > bulkThreshold()
+        ? await bulkVariants(client, namespace)
+        : await paginate<VariantNode>(client, VARIANTS_QUERY, { namespace }, pick);
+    if (!handles) return all;
+    const wanted = new Set(handles);
+    return all.filter((v) => wanted.has(v.product.handle));
+  }
   const lists = await Promise.all(
     handles.map(async (handle) => {
       const id = (await client.request<{ productByIdentifier: { id: string } | null }>(PRODUCT_ID, { handle })).productByIdentifier?.id;
@@ -199,6 +249,47 @@ export const metafields: ResourceAdapter = {
   },
 
   ownerRef: (d) => (typeof d.owner === "string" ? d.owner : undefined),
+
+  // Up to 25 values per metafieldsSet, one bulk operation for all of them.
+  async bulkWrite(ctx, items) {
+    const results: { id?: string; error?: string }[] = items.map(() => ({}));
+    let pending = items.map((_, i) => i);
+    // metafieldsSet writes all values of a call or none: values held back by another one's error go again.
+    for (let round = 0; round < 3 && pending.length; round++) {
+      const groups: number[][] = [];
+      for (let i = 0; i < pending.length; i += 25) groups.push(pending.slice(i, i + 25));
+      const lines = groups.map((g) => ({
+        m: g.map((i) => {
+          const d = items[i]!.data;
+          return { ownerId: d.owner, namespace: d.namespace, key: d.key, type: d.type, value: d.value };
+        }),
+      }));
+      const res = await bulkMutation(ctx.client, BULK_SET, lines, { timeoutMs: bulkTimeoutMs() });
+      const again: number[] = [];
+      res.forEach((r, li) => {
+        const g = groups[li]!;
+        const errs = [...(r.errors ?? []).map((e) => ({ message: e.message, field: undefined as string[] | undefined })), ...((r.data?.metafieldsSet?.userErrors as { message: string; field?: string[] }[]) ?? [])];
+        if (!errs.length) {
+          g.forEach((i, k) => (results[i] = { id: r.data?.metafieldsSet?.metafields?.[k]?.id ?? "" }));
+          return;
+        }
+        const byIndex = new Map<number, string>();
+        for (const e of errs) {
+          const idx = Number(e.field?.[1]);
+          if (Number.isInteger(idx)) byIndex.set(idx, e.message);
+        }
+        g.forEach((i, k) => {
+          const own = byIndex.get(k);
+          if (own) results[i] = { error: own };
+          else if (byIndex.size) again.push(i);
+          else results[i] = { error: errs.map((e) => e.message).join("; ") };
+        });
+      });
+      pending = again;
+    }
+    for (const i of pending) results[i] = { error: "not written: other values in the same batch kept failing" };
+    return results;
+  },
 
   create: (ctx, _key, d) => set(ctx, d),
   async update(ctx, _target, d) {

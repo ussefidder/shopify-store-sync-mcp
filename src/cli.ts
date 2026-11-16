@@ -37,6 +37,7 @@ Options
   --owner-types a,b      metafield owners, e.g. SHOP,PRODUCTVARIANT (definitions and values)
   --include-reserved     also compare Shopify-reserved (category) metafield definitions; never written
   --with-prices          products: also copy variant prices
+  --with-inventory       products: also copy stock per location (matched by location name)
   --as-drafts            new pages are created hidden, new metaobject entries as drafts
   --writes               connect: also request write scopes (default: what the store config allows)
   --scopes a,b           connect: extra read scopes, e.g. read_customers,read_orders (to compare
@@ -67,7 +68,7 @@ export function parseArgs(argv: string[]): { positional: string[]; flags: Flags 
       const [name, inline] = a.slice(2).split("=", 2) as [string, string | undefined];
       const next = argv[i + 1];
       if (inline !== undefined) flags[name] = inline;
-      else if (next !== undefined && !next.startsWith("--") && !["json", "exit-code", "values", "writes", "with-prices", "as-drafts", "include-reserved", "quiet"].includes(name)) flags[name] = argv[++i]!;
+      else if (next !== undefined && !next.startsWith("--") && !["json", "exit-code", "values", "writes", "with-prices", "with-inventory", "as-drafts", "include-reserved", "quiet"].includes(name)) flags[name] = argv[++i]!;
       else flags[name] = true;
     } else positional.push(a);
   }
@@ -88,6 +89,7 @@ export function scopeFromFlags(flags: Flags): Scope {
     namespaces: list(flags.namespaces),
     locales: list(flags.locales),
     prices: flags["with-prices"] === true,
+    inventory: flags["with-inventory"] === true,
     drafts: flags["as-drafts"] === true,
     metaobjectTypes: list(flags["metaobject-types"]),
     ownerTypes: list(flags["owner-types"]),

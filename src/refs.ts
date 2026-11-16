@@ -34,7 +34,7 @@ export function variantKey(options: Record<string, string>): string {
     .join(" / ");
 }
 
-const variantRef = (handle: string, selectedOptions: { name: string; value: string }[]) =>
+export const variantRef = (handle: string, selectedOptions: { name: string; value: string }[]) =>
   `${REF_PREFIX}ProductVariant/${handle}/${encodeURIComponent(variantKey(Object.fromEntries(selectedOptions.map((o) => [o.name, o.value]))))}`;
 
 export function isGid(v: unknown): v is string {
@@ -311,6 +311,70 @@ export class RefToGidResolver {
   /** Files uploaded by this resolver, for the report. */
   readonly uploaded: string[] = [];
 
+  /** When false, a missing file is reported as missing instead of uploaded (bulk writes upload files their own way). */
+  allowUploads = true;
+
+  /**
+   * Look many refs up with few requests: files by name (25 per request) and products by handle
+   * (10 per request). Everything else is left to resolve(). Results land in the same cache.
+   */
+  async prefetch(refs: Iterable<string>): Promise<void> {
+    const files: string[] = [];
+    const products: string[] = [];
+    for (const r of new Set(refs)) {
+      if (this.cache.has(r) || !r.startsWith(REF_PREFIX) || r.startsWith(UNRESOLVED_PREFIX)) continue;
+      if (r.startsWith(`${REF_PREFIX}File/`)) files.push(r);
+      else if (r.startsWith(`${REF_PREFIX}Product/`)) products.push(r);
+    }
+    const chunks = <T>(list: T[], n: number) => Array.from({ length: Math.ceil(list.length / n) }, (_, i) => list.slice(i * n, i * n + n));
+
+    await eachLimited(chunks(products, 10), 4, async (group) => {
+      const handles = group.map((r) => r.slice(`${REF_PREFIX}Product/`.length));
+      const vars = handles.map((_, i) => "$h" + i + ": String!").join(", ");
+      const fields = handles.map((_, i) => "p" + i + ": productByIdentifier(identifier: { handle: $h" + i + " }) { id }").join(" ");
+      const query = "query ProductIds(" + vars + ") { " + fields + " }";
+      const d = await this.client.request<Record<string, { id: string } | null>>(query, Object.fromEntries(handles.map((h, i) => [`h${i}`, h])));
+      group.forEach((r, i) => this.cache.set(r, Promise.resolve(d[`p${i}`]?.id)));
+    });
+
+    await eachLimited(chunks(files, 25), 4, async (group) => {
+      const names = group.map((r) => r.slice(`${REF_PREFIX}File/`.length));
+      const q = names.map((n) => `filename:'${n.replace(/'/g, "\\'")}'`).join(" OR ");
+      const d = await this.client.request(
+        `query($q: String!) { files(first: 250, query: $q) { nodes { __typename id ... on MediaImage { alt image { url } } ... on GenericFile { alt url } ... on Video { alt filename originalSource { url } } } } }`,
+        { q },
+      );
+      const nodes = d.files.nodes as RefNode[];
+      const byName = new Map<string, string>();
+      for (const n of nodes) {
+        const f = nodeToFile(n);
+        if (f && !byName.has(f.filename)) byName.set(f.filename, n.id);
+      }
+      // A full page may have cut some matches off: those are left for resolve() to look up one by one.
+      const complete = nodes.length < 250;
+      group.forEach((r, i) => {
+        const id = byName.get(names[i]!);
+        if (id) this.cache.set(r, Promise.resolve(id));
+        else if (complete && !this.uploads?.has(r)) this.cache.set(r, Promise.resolve(undefined));
+      });
+    });
+  }
+
+  /** Forget every cached miss whose ref starts with `prefix`, so it is looked up again. */
+  async forgetMisses(prefix: string): Promise<void> {
+    const entries = [...this.cache].filter(([ref]) => ref.startsWith(prefix));
+    await Promise.all(
+      entries.map(([ref, hit]) =>
+        hit.then(
+          (v) => {
+            if (v === undefined && this.cache.get(ref) === hit) this.cache.delete(ref);
+          },
+          () => undefined,
+        ),
+      ),
+    );
+  }
+
   /** Forget a cached miss, e.g. after the plan created the missing resource. */
   invalidate(ref: string): void {
     this.cache.delete(ref);
@@ -422,7 +486,7 @@ export class RefToGidResolver {
     const found = (d.files.nodes as RefNode[]).find((n) => nodeToFile(n)?.filename === filename);
     if (found) return found.id;
 
-    const source = this.uploads?.get(ref);
+    const source = this.allowUploads ? this.uploads?.get(ref) : undefined;
     if (!source) return undefined;
     if (!isShopifyFileUrl(source.url)) {
       throw new Error(`file ${filename} can't be uploaded: its source URL is not on a Shopify file host (${source.url.slice(0, 80)})`);

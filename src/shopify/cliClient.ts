@@ -30,6 +30,8 @@ export const READ_SCOPES = [
   "read_themes",
   "read_content",
   "read_discounts",
+  "read_inventory",
+  "read_locations",
 ];
 export const WRITE_SCOPES = [
   "write_products",
@@ -40,6 +42,7 @@ export const WRITE_SCOPES = [
   "write_legal_policies",
   "write_translations",
   "write_files",
+  "write_inventory",
 ];
 
 /**

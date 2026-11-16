@@ -66,6 +66,10 @@ const scopeArgs = {
   namespaces: z.array(z.string()).optional().describe("Limit metafield values (metafields) to these namespaces."),
   locales: z.array(z.string()).optional().describe("Limit translations to these locales, e.g. [\"fr\", \"de\"]. Default: every non-primary locale."),
   prices: z.boolean().optional().describe("products: also copy variant prices and compare-at prices. Off by default, since prices usually differ per store."),
+  inventory: z
+    .boolean()
+    .optional()
+    .describe("products: also copy stock, the available quantity per location, into the target's location with the same name. Off by default. Needs read_inventory and read_locations (and write_inventory to write): run connect again if the sign-in is older."),
   as_drafts: z
     .boolean()
     .optional()
@@ -88,6 +92,7 @@ type ScopeArgs = {
   namespaces?: string[];
   locales?: string[];
   prices?: boolean;
+  inventory?: boolean;
   as_drafts?: boolean;
   include?: string[];
   exclude?: string[];
@@ -101,6 +106,7 @@ const toScope = (a: ScopeArgs): Scope => ({
   namespaces: a.namespaces,
   locales: a.locales,
   prices: a.prices,
+  inventory: a.inventory,
   drafts: a.as_drafts,
   includeReserved: a.include_reserved,
   include: a.include,

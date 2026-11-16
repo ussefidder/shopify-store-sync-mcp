@@ -21,6 +21,16 @@ export type FakeVariant = {
   compareAtPrice?: string | null;
   taxable?: boolean;
   inventoryPolicy?: string;
+  barcode?: string;
+  /** File id of the variant's image (one of the product's media). */
+  image?: string;
+  tracked?: boolean;
+  requiresShipping?: boolean;
+  weight?: { value: number; unit: string };
+  harmonizedSystemCode?: string;
+  countryCodeOfOrigin?: string;
+  /** Available quantity by location name. */
+  stock?: Record<string, number>;
 };
 export interface FakeProduct {
   id: string;
@@ -78,11 +88,16 @@ export interface FakeState {
   shopId: string;
   shopMetafields: FakeMetafield[];
   discounts: { id: string; discount: Record<string, unknown> }[];
+  locations: { id: string; name: string }[];
 }
+
+/** Files uploaded for bulk writes, by staged path (tests route uploads and downloads here). */
+export const bulkFiles = new Map<string, string>();
 
 export function emptyState(): FakeState {
   return {
     shopId: gid("Shop"),
+    locations: [],
     discounts: [],
     shopMetafields: [],
     products: [],
@@ -115,6 +130,7 @@ const ok = (extra: Record<string, unknown>) => ({ ...extra, userErrors: [] });
 
 export class FakeShop implements AdminClient {
   readonly calls: { field: string; variables: Record<string, any> }[] = [];
+  private readonly pendingBulk = new Map<string, Promise<void>>();
   readonly state: FakeState;
 
   constructor(
@@ -145,7 +161,7 @@ export class FakeShop implements AdminClient {
     if (!m) throw new Error(`fake: can't parse ${query.slice(0, 60)}`);
     const field = m[1]!;
     // Aliased lookups ("p0: productByIdentifier(...)"), answered one alias at a time.
-    if (/^\s*query ProductsByHandle/.test(query)) {
+    if (/^\s*query (ProductsByHandle|ProductIds)\b/.test(query)) {
       const out: Record<string, unknown> = {};
       for (const [, alias, name] of query.matchAll(/(\w+): productByIdentifier\(identifier: \{ handle: \$(\w+) \}\)/g)) {
         this.calls.push({ field: "productByIdentifier", variables: { handle: v[name!] } });
@@ -155,7 +171,7 @@ export class FakeShop implements AdminClient {
     }
     this.calls.push({ field, variables: v });
     const s = this.state;
-    return { [field]: this.handle(field, query, v, s) } as T;
+    return { [field]: await this.handle(field, query, v, s) } as T;
   }
 
   private findNode(id: string): any {
@@ -223,6 +239,15 @@ export class FakeShop implements AdminClient {
           taxable: x.taxable ?? true,
           inventoryPolicy: x.inventoryPolicy ?? "DENY",
           selectedOptions: Object.entries(x.options).map(([name, value]) => ({ name, value })),
+          barcode: x.barcode ?? null,
+          image: x.image ? { url: this.state.files.find((f) => f.id === x.image)?.url ?? null } : null,
+          inventoryItem: {
+            tracked: x.tracked ?? true,
+            requiresShipping: x.requiresShipping ?? true,
+            harmonizedSystemCode: x.harmonizedSystemCode ?? null,
+            countryCodeOfOrigin: x.countryCodeOfOrigin ?? null,
+            measurement: { weight: x.weight ?? { value: 0, unit: "KILOGRAMS" } },
+          },
         })),
         this.state.pageSize,
         after.variants,
@@ -243,6 +268,22 @@ export class FakeShop implements AdminClient {
       case "product": {
         const p = s.products.find((x) => x.id === v.id);
         if (!p) return null;
+        if (query.includes("inventoryLevels(")) {
+          const levels = (x: FakeVariant) => ({
+            id: `${x.id}-item`,
+            inventoryLevels: conn(
+              Object.entries(x.stock ?? {}).map(([name, quantity]) => {
+                const loc = s.locations.find((l) => l.name === name);
+                return { location: { id: loc?.id, name }, quantities: [{ quantity }] };
+              }),
+            ),
+          });
+          return {
+            variants: conn(
+              (p.variants ?? []).map((x) => ({ id: x.id, selectedOptions: Object.entries(x.options).map(([name, value]) => ({ name, value })), inventoryItem: levels(x) })),
+            ),
+          };
+        }
         const view = this.productView(p, query.includes("media(") ? { media: v.after } : { variants: v.after });
         return query.includes("media(") ? { media: view.media } : { variants: view.variants };
       }
@@ -335,10 +376,10 @@ export class FakeShop implements AdminClient {
       case "translatableResource":
         return s.translatableContent[v.id] ? { translatableContent: s.translatableContent[v.id] } : null;
       case "files": {
-        const name = /filename:'(.*)'/.exec(v.q)?.[1];
+        const names = [...String(v.q).matchAll(/filename:'([^']*)'/g)].map((m) => m[1]);
         return conn(
           s.files
-            .filter((f) => f.url && f.url.split("?")[0]!.endsWith(`/${name}`))
+            .filter((f) => f.url && names.some((name) => f.url!.split("?")[0]!.endsWith(`/${name}`)))
             .map((f) => ({ __typename: "MediaImage", id: f.id, alt: f.alt ?? null, image: { url: f.url } })),
         );
       }
@@ -462,6 +503,82 @@ export class FakeShop implements AdminClient {
         Object.assign(c, v.input, { ruleSet: v.input.ruleSet ?? c.ruleSet ?? null });
         return ok({ collection: { id: c.id } });
       }
+      case "locations":
+        return conn(s.locations);
+      case "inventorySetQuantities": {
+        for (const q of v.input.quantities) {
+          const variant = s.products.flatMap((x) => x.variants ?? []).find((x) => `${x.id}-item` === q.inventoryItemId);
+          const loc = s.locations.find((l) => l.id === q.locationId);
+          if (!variant || !loc) return { userErrors: [{ field: ["input"], message: "not found" }] };
+          if ((variant.stock?.[loc.name] ?? null) !== q.changeFromQuantity) return { userErrors: [{ field: ["input"], message: "changeFromQuantity doesn't match" }] };
+          variant.stock = { ...(variant.stock ?? {}), [loc.name]: q.quantity };
+        }
+        return { userErrors: [] };
+      }
+      case "inventoryActivate": {
+        const variant = s.products.flatMap((x) => x.variants ?? []).find((x) => `${x.id}-item` === v.i);
+        const loc = s.locations.find((l) => l.id === v.l);
+        if (variant && loc) variant.stock = { ...(variant.stock ?? {}), [loc.name]: v.q ?? 0 };
+        return { userErrors: [] };
+      }
+      case "stagedUploadsCreate": {
+        const key = `tmp/bulk/${nextId++}/vars`;
+        return { stagedTargets: [{ url: "https://upload.test/", parameters: [{ name: "key", value: key }] }], userErrors: [] };
+      }
+      case "bulkOperationRunQuery": {
+        // Rows as Shopify writes them: each parent, then its children with __parentId.
+        const q = String(v.query);
+        const rows: Record<string, unknown>[] = [];
+        const opts = (x: FakeVariant) => Object.entries(x.options).map(([name, value]) => ({ name, value }));
+        if (/^\{\s*products/.test(q) && q.includes("variants {")) {
+          for (const p of s.products) {
+            const { media, variants, ...rest } = this.productView(p);
+            rows.push(rest);
+            for (const m of media.nodes as any[]) rows.push({ ...m, image: m.mediaContentType === "IMAGE" ? { url: s.files.find((f) => f.id === m.id)?.url } : undefined, __parentId: p.id });
+            for (const x of variants.nodes as any[]) rows.push({ ...x, __parentId: p.id });
+          }
+        } else if (/^\{\s*products/.test(q)) {
+          for (const p of s.products) {
+            rows.push({ id: p.id, handle: p.handle });
+            for (const m of p.metafields ?? []) rows.push({ ...m, __parentId: p.id });
+          }
+        } else if (q.includes("inventoryLevels")) {
+          for (const x of s.products.flatMap((p) => p.variants ?? [])) {
+            rows.push({ id: x.id, inventoryItem: {} });
+            for (const [name, quantity] of Object.entries(x.stock ?? {})) rows.push({ id: `${x.id}-${name}`, location: { name }, quantities: [{ quantity }], __parentId: x.id });
+          }
+        } else {
+          for (const p of s.products) {
+            for (const x of p.variants ?? []) {
+              rows.push({ id: x.id, selectedOptions: opts(x), product: { handle: p.handle } });
+              for (const m of x.metafields ?? []) rows.push({ ...m, __parentId: x.id });
+            }
+          }
+        }
+        const id = gid("BulkOperation");
+        bulkFiles.set(`https://download.test/${id}`, rows.map((r) => JSON.stringify(r)).join("\n"));
+        this.pendingBulk.set(id, Promise.resolve());
+        return { bulkOperation: { id, status: "CREATED" }, userErrors: [] };
+      }
+      case "bulkOperationRunMutation": {
+        const lines = (bulkFiles.get(v.stagedUploadPath) ?? "").split("\n").filter(Boolean);
+        const id = gid("BulkOperation");
+        // Each line runs as its own call; results are kept as the file the operation would produce.
+        this.pendingBulk.set(id, (async () => {
+          const out: string[] = [];
+          for (const [i, line] of lines.entries()) {
+            const data = await this.request(v.mutation, JSON.parse(line));
+            out.push(JSON.stringify({ data, __lineNumber: i }));
+          }
+          bulkFiles.set(`https://download.test/${id}`, out.join("\n"));
+        })());
+        return { bulkOperation: { id, status: "CREATED" }, userErrors: [] };
+      }
+      case "node": {
+        const run = this.pendingBulk.get(v.id);
+        if (!run) return null;
+        return run.then(() => ({ status: "COMPLETED", errorCode: null, objectCount: "0", url: `https://download.test/${v.id}`, partialDataUrl: null }));
+      }
       case "productSet": {
         const input = v.input;
         let p = v.identifier?.handle ? s.products.find((x) => x.handle === v.identifier.handle) : undefined;
@@ -477,14 +594,46 @@ export class FakeShop implements AdminClient {
         }
         if (input.category) p.category = String(input.category).replace("gid://shopify/TaxonomyCategory/", "");
         if (input.productOptions) p.options = input.productOptions.map((o: any) => ({ name: o.name, values: o.values.map((x: any) => x.name) }));
+        if (input.files) {
+          // A file given by URL is created, as the live API does.
+          const ids: string[] = [];
+          for (const f of input.files) {
+            if (f.originalSource) {
+              const created = { id: gid("MediaImage"), url: f.originalSource, alt: f.alt };
+              s.files.push(created);
+              ids.push(created.id);
+              continue;
+            }
+            if (!s.files.some((x) => x.id === f.id)) return { product: null, userErrors: [{ field: ["files"], message: `File ${f.id} not found` }] };
+            ids.push(f.id);
+          }
+          p.media = ids;
+        }
         if (input.variants) {
           const old = p.variants ?? [];
           p.variants = input.variants.map((iv: any) => {
             const existing = iv.id ? old.find((x) => x.id === iv.id) : undefined;
             const options = Object.fromEntries(iv.optionValues.map((o: any) => [o.optionName, o.name]));
+            const fileOf = (f: any) => {
+              if (!f) return undefined;
+              if (f.id) return f.id;
+              return s.files.find((x) => x.url === f.originalSource)?.id;
+            };
+            const stock = Object.fromEntries(
+              (iv.inventoryQuantities ?? []).map((q: any) => [s.locations.find((l) => l.id === q.locationId)?.name ?? q.locationId, q.quantity]),
+            );
+            const item = iv.inventoryItem ?? {};
             return {
               id: existing?.id ?? gid("ProductVariant"),
               options,
+              barcode: iv.barcode ?? existing?.barcode,
+              image: fileOf(iv.file) ?? existing?.image,
+              tracked: item.tracked ?? existing?.tracked,
+              requiresShipping: item.requiresShipping ?? existing?.requiresShipping,
+              weight: item.measurement?.weight ?? existing?.weight,
+              harmonizedSystemCode: item.harmonizedSystemCode ?? existing?.harmonizedSystemCode,
+              countryCodeOfOrigin: item.countryCodeOfOrigin ?? existing?.countryCodeOfOrigin,
+              stock: existing ? existing.stock : Object.keys(stock).length ? stock : undefined,
               sku: iv.sku ?? existing?.sku,
               price: iv.price ?? existing?.price ?? "0.00",
               compareAtPrice: iv.compareAtPrice ?? existing?.compareAtPrice ?? null,
@@ -493,13 +642,14 @@ export class FakeShop implements AdminClient {
             };
           });
         }
-        if (input.files) {
-          for (const f of input.files) {
-            if (!s.files.some((x) => x.id === f.id)) return { product: null, userErrors: [{ field: ["files"], message: `File ${f.id} not found` }] };
-          }
-          p.media = input.files.map((f: any) => f.id);
-        }
-        return ok({ product: { id: p.id } });
+        const product = p;
+        return ok({
+          product: {
+            id: product.id,
+            handle: product.handle,
+            variants: conn((product.variants ?? []).map((x) => ({ id: x.id, selectedOptions: Object.entries(x.options).map(([name, value]) => ({ name, value })) }))),
+          },
+        });
       }
       case "shopPolicyUpdate": {
         let p = s.shopPolicies.find((x) => x.type === v.p.type);

@@ -99,7 +99,7 @@ export async function buildPlan(input: BuildPlanInput): Promise<Plan> {
   const willCreate = new Set(
     ops
       .filter((o) => o.action === "create")
-      .map((o) => ADAPTERS[o.kind].refFor?.(o.key))
+      .flatMap((o) => [ADAPTERS[o.kind].refFor?.(o.key), ...(ADAPTERS[o.kind].createsRefs?.(o.key, o.data) ?? [])])
       .filter((r): r is string => Boolean(r)),
   );
 
@@ -116,9 +116,10 @@ export async function buildPlan(input: BuildPlanInput): Promise<Plan> {
     if (owner) lookups.add(owner);
     for (const ref of collectRefs(op.data)) lookups.add(ref);
   }
-  await Promise.all(
-    [...lookups].filter((r) => !r.startsWith(UNRESOLVED_PREFIX) && !willCreate.has(r)).map((r) => input.resolver.resolve(r)),
-  );
+  const toLook = [...lookups].filter((r) => !r.startsWith(UNRESOLVED_PREFIX) && !willCreate.has(r));
+  // Files and products in batches first; on a big catalog that is thousands of lookups.
+  await input.resolver.prefetch(toLook);
+  await Promise.all(toLook.map((r) => input.resolver.resolve(r)));
   for (const op of ops) {
     if (op.action === "conflict") continue;
     const owner = ADAPTERS[op.kind].ownerRef?.(op.data);

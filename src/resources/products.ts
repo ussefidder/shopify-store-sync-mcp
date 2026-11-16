@@ -1,7 +1,7 @@
 import { assertNoUserErrors, envNumber, paginate, type AdminClient } from "../shopify/client.js";
-import { bulkQuery } from "../shopify/bulk.js";
+import { bulkMutation, bulkQuery, bulkThreshold, bulkTimeoutMs } from "../shopify/bulk.js";
 import { eachLimited } from "../refs.js";
-import { REF_PREFIX, variantKey, type GidToRefMapper } from "../refs.js";
+import { filenameFromUrl, REF_PREFIX, variantKey, variantRef, type FileSource, type GidToRefMapper } from "../refs.js";
 import type { FetchOptions, Item, ResourceAdapter } from "./types.js";
 import { compact, PAGE_INFO } from "./util.js";
 
@@ -20,9 +20,12 @@ import { compact, PAGE_INFO } from "./util.js";
  * are sent back alongside the source's.
  */
 
-const VARIANTS_PAGE = 50;
-const MEDIA_PAGE = 50;
-const VARIANT_FIELDS = "id sku price compareAtPrice taxable inventoryPolicy selectedOptions { name value }";
+// Small pages: every variant now carries its inventory item, so a page of products costs more.
+const PRODUCTS_PAGE = 4;
+const VARIANTS_PAGE = 25;
+const MEDIA_PAGE = 25;
+const INVENTORY_ITEM = "inventoryItem { tracked requiresShipping harmonizedSystemCode countryCodeOfOrigin measurement { weight { value unit } } }";
+const VARIANT_FIELDS = `id sku barcode price compareAtPrice taxable inventoryPolicy selectedOptions { name value } image { url } ${INVENTORY_ITEM}`;
 const MEDIA_FIELDS = "id mediaContentType alt ... on MediaImage { image { url } }";
 const CATEGORY_GID = "gid://shopify/TaxonomyCategory/";
 
@@ -51,7 +54,7 @@ const NODE_FIELDS = /* GraphQL */ `
 
 const QUERY = /* GraphQL */ `
   query Products($after: String) {
-    products(first: 10, after: $after) {
+    products(first: ${PRODUCTS_PAGE}, after: $after) {
       nodes { ${NODE_FIELDS} }
       ${PAGE_INFO}
     }
@@ -89,11 +92,20 @@ const BY_HANDLE = /* GraphQL */ `
 interface VariantNode {
   id: string;
   sku: string | null;
+  barcode?: string | null;
   price: string;
   compareAtPrice: string | null;
   taxable?: boolean | null;
   inventoryPolicy?: string | null;
   selectedOptions: { name: string; value: string }[];
+  image?: { url: string } | null;
+  inventoryItem?: {
+    tracked?: boolean | null;
+    requiresShipping?: boolean | null;
+    harmonizedSystemCode?: string | null;
+    countryCodeOfOrigin?: string | null;
+    measurement?: { weight?: { value: number; unit: string } | null } | null;
+  } | null;
 }
 
 interface MediaNode {
@@ -124,18 +136,36 @@ interface Node {
 
 export { variantKey } from "../refs.js";
 
-export function normalizeProduct(n: Node, opts: Pick<FetchOptions, "prices"> = {}): Item {
+const bareUrl = (u: string) => u.split("?")[0]!;
+
+/** Stock per variant id: available quantity by location name. */
+export type Stock = Map<string, Record<string, number>>;
+
+export function normalizeProduct(n: Node, opts: Pick<FetchOptions, "prices" | "inventory"> = {}, stock?: Stock): Item {
   const options = [...n.options].sort((a, b) => a.position - b.position);
+  // A variant's image is one of the product's media; it is kept as that media's id, so it maps to the same file.
+  const mediaByUrl = new Map(n.media.nodes.filter((m) => m.image?.url).map((m) => [bareUrl(m.image!.url), m.id]));
   const variants = n.variants.nodes.map((v) => {
     const byName = Object.fromEntries(v.selectedOptions.map((o) => [o.name, o.value]));
     const ordered = Object.fromEntries(options.map((o) => [o.name, byName[o.name] ?? ""]));
+    const item = v.inventoryItem ?? {};
+    const weight = item.measurement?.weight;
+    const imageUrl = v.image?.url ? bareUrl(v.image.url) : undefined;
     return compact({
       options: ordered,
       sku: v.sku || undefined,
+      barcode: v.barcode || undefined,
       taxable: v.taxable ?? undefined,
       inventoryPolicy: v.inventoryPolicy || undefined,
+      tracked: item.tracked ?? undefined,
+      requiresShipping: item.requiresShipping ?? undefined,
+      weight: weight && weight.value > 0 ? { value: weight.value, unit: weight.unit } : undefined,
+      harmonizedSystemCode: item.harmonizedSystemCode || undefined,
+      countryCodeOfOrigin: item.countryCodeOfOrigin || undefined,
+      image: imageUrl ? (mediaByUrl.get(imageUrl) ?? `${REF_PREFIX}File/${filenameFromUrl(imageUrl)}`) : undefined,
       price: opts.prices ? v.price : undefined,
       compareAtPrice: opts.prices ? v.compareAtPrice || undefined : undefined,
+      inventory: opts.inventory ? (stock?.get(v.id) ?? {}) : undefined,
     });
   });
   return {
@@ -178,7 +208,22 @@ async function complete(client: AdminClient, n: Node): Promise<Node> {
   return out;
 }
 
-type Variant = { options: Record<string, string>; sku?: string; taxable?: boolean; inventoryPolicy?: string; price?: string; compareAtPrice?: string };
+type Variant = {
+  options: Record<string, string>;
+  sku?: string;
+  barcode?: string;
+  taxable?: boolean;
+  inventoryPolicy?: string;
+  tracked?: boolean;
+  requiresShipping?: boolean;
+  weight?: { value: number; unit: string };
+  harmonizedSystemCode?: string;
+  countryCodeOfOrigin?: string;
+  image?: string;
+  price?: string;
+  compareAtPrice?: string;
+  inventory?: Record<string, number>;
+};
 type Image = { file: string; alt?: string };
 
 function optionValuesInput(options: Record<string, string>) {
@@ -186,7 +231,45 @@ function optionValuesInput(options: Record<string, string>) {
 }
 
 /** productSet input for the source data, merged with what the target already has so nothing is removed. */
-export function productSetInput(d: Record<string, unknown>, target: Node | undefined, create: boolean) {
+/** Location ids of a store by name, to place stock in the same-named location. */
+export type Locations = Map<string, string>;
+
+const LOCATIONS = /* GraphQL */ `
+  query Locations {
+    locations(first: 250, includeInactive: false) { nodes { id name } }
+  }
+`;
+const locationCache = new WeakMap<AdminClient, Promise<Locations>>();
+export function locationsByName(client: AdminClient): Promise<Locations> {
+  let hit = locationCache.get(client);
+  if (!hit) {
+    hit = client.request<{ locations: { nodes: { id: string; name: string }[] } }>(LOCATIONS).then((d) => new Map(d.locations.nodes.map((l) => [l.name, l.id])));
+    locationCache.set(client, hit);
+  }
+  return hit;
+}
+
+function inventoryItemInput(v: Variant) {
+  const out = compact({
+    tracked: v.tracked,
+    requiresShipping: v.requiresShipping,
+    harmonizedSystemCode: v.harmonizedSystemCode,
+    countryCodeOfOrigin: v.countryCodeOfOrigin,
+    measurement: v.weight ? { weight: { value: v.weight.value, unit: v.weight.unit } } : undefined,
+  });
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Stock for a variant the target doesn't have yet, in the target's locations with the same name. */
+function inventoryQuantities(v: Variant, locations?: Locations) {
+  if (!v.inventory || !locations) return undefined;
+  const q = Object.entries(v.inventory)
+    .filter(([name]) => locations.has(name))
+    .map(([name, quantity]) => ({ locationId: locations.get(name)!, name: "available", quantity }));
+  return q.length ? q : undefined;
+}
+
+export function productSetInput(d: Record<string, unknown>, target: Node | undefined, create: boolean, locations?: Locations) {
   const options = (d.options as { name: string; values: string[] }[]) ?? [];
   const variants = (d.variants as Variant[]) ?? [];
   const images = (d.images as Image[]) ?? [];
@@ -209,10 +292,15 @@ export function productSetInput(d: Record<string, unknown>, target: Node | undef
       id: existing?.id,
       optionValues: optionValuesInput(v.options),
       sku: v.sku,
+      barcode: v.barcode,
       taxable: v.taxable,
       inventoryPolicy: v.inventoryPolicy,
+      inventoryItem: inventoryItemInput(v),
+      file: v.image ? { id: v.image } : undefined,
       price: v.price,
       compareAtPrice: v.compareAtPrice,
+      // Stock can only be given to a new variant here; existing ones are set afterwards.
+      inventoryQuantities: existing ? undefined : inventoryQuantities(v, locations),
     });
   });
   for (const v of targetVariants.values()) {
@@ -248,16 +336,15 @@ export function productSetInput(d: Record<string, unknown>, target: Node | undef
 
 const SEARCH = /* GraphQL */ `
   query ProductSearch($query: String!, $after: String) {
-    products(first: 10, after: $after, query: $query) {
+    products(first: ${PRODUCTS_PAGE}, after: $after, query: $query) {
       nodes { ${NODE_FIELDS} }
       ${PAGE_INFO}
     }
   }
 `;
 
-/** Above this many products a full read goes through a bulk operation instead of pages. */
-export const bulkThreshold = () => envNumber("SYNC_BULK_THRESHOLD", 250);
-const LOOKUPS_PER_REQUEST = 5;
+export { bulkThreshold };
+const LOOKUPS_PER_REQUEST = PRODUCTS_PAGE;
 
 const COUNT = /* GraphQL */ `
   query ProductCount {
@@ -369,6 +456,50 @@ async function readProducts(client: AdminClient, opts: FetchOptions): Promise<No
   return [...exact, ...searched].filter((n) => !seen.has(n.id) && Boolean(seen.add(n.id)));
 }
 
+const STOCK_QUERY = /* GraphQL */ `
+  query VariantStock($id: ID!, $after: String) {
+    product(id: $id) {
+      variants(first: 25, after: $after) {
+        nodes { id inventoryItem { inventoryLevels(first: 10) { nodes { location { name } quantities(names: ["available"]) { quantity } } } } }
+        ${PAGE_INFO}
+      }
+    }
+  }
+`;
+
+const STOCK_BULK = `{
+  productVariants {
+    edges { node {
+      id
+      inventoryItem { inventoryLevels { edges { node { id location { name } quantities(names: ["available"]) { quantity } } } } }
+    } }
+  }
+}`;
+
+type Level = { location: { name: string }; quantities: { quantity: number }[] };
+
+/** Available stock per variant and location name, for the products read. */
+async function readStock(client: AdminClient, nodes: Node[]): Promise<Stock> {
+  const stock: Stock = new Map();
+  const add = (variantId: string, l: Level) => {
+    const q = l.quantities[0]?.quantity;
+    if (q === undefined) return;
+    stock.set(variantId, { ...(stock.get(variantId) ?? {}), [l.location.name]: q });
+  };
+  if (nodes.length > bulkThreshold()) {
+    const wanted = new Set(nodes.flatMap((n) => n.variants.nodes.map((v) => v.id)));
+    for (const r of await bulkQuery(client, STOCK_BULK, { timeoutMs: bulkTimeoutMs() })) {
+      if (r.__parentId && wanted.has(r.__parentId)) add(r.__parentId, r as unknown as Level);
+    }
+    return stock;
+  }
+  await eachLimited(nodes, 4, async (n) => {
+    const variants = await paginate<{ id: string; inventoryItem: { inventoryLevels: { nodes: Level[] } } }>(client, STOCK_QUERY, { id: n.id }, (d) => d.product.variants);
+    for (const v of variants) for (const l of v.inventoryItem.inventoryLevels.nodes) add(v.id, l);
+  });
+  return stock;
+}
+
 /** Product images already carry their URL, so the ref mapper doesn't look each one up again. */
 function seedImages(mapper: GidToRefMapper | undefined, n: Node) {
   for (const m of n.media.nodes) {
@@ -381,16 +512,95 @@ async function readTarget(client: AdminClient, handle: string): Promise<Node | u
   return res.productByIdentifier ? complete(client, res.productByIdentifier) : undefined;
 }
 
+const hasStock = (d: Record<string, unknown>) => ((d.variants as Variant[]) ?? []).some((v) => v.inventory && Object.keys(v.inventory).length);
+
+const STOCK_NOW = /* GraphQL */ `
+  query StockNow($id: ID!, $after: String) {
+    product(id: $id) {
+      variants(first: 25, after: $after) {
+        nodes { selectedOptions { name value } inventoryItem { id inventoryLevels(first: 10) { nodes { location { id } quantities(names: ["available"]) { quantity } } } } }
+        ${PAGE_INFO}
+      }
+    }
+  }
+`;
+
+/**
+ * Stock of variants that already existed: set to the source's quantity in each same-named location,
+ * compared against what the target has right now so a sale in between isn't overwritten.
+ */
+async function setExistingStock(client: AdminClient, productId: string, d: Record<string, unknown>, locations: Locations, existing: Set<string>) {
+  type V = { selectedOptions: { name: string; value: string }[]; inventoryItem: { id: string; inventoryLevels: { nodes: { location: { id: string }; quantities: { quantity: number }[] }[] } } };
+  const now = await paginate<V>(client, STOCK_NOW, { id: productId }, (x) => x.product.variants);
+  const byKey = new Map(now.map((v) => [variantKey(Object.fromEntries(v.selectedOptions.map((o) => [o.name, o.value]))), v]));
+  const quantities: Record<string, unknown>[] = [];
+  for (const v of (d.variants as Variant[]) ?? []) {
+    const key = variantKey(v.options);
+    const t = byKey.get(key);
+    if (!t || !existing.has(key) || !v.inventory) continue;
+    for (const [name, quantity] of Object.entries(v.inventory)) {
+      const locationId = locations.get(name);
+      if (!locationId) continue;
+      const level = t.inventoryItem.inventoryLevels.nodes.find((l) => l.location.id === locationId);
+      const current = level?.quantities[0]?.quantity;
+      if (!level) {
+        const r = await client.request(
+          `mutation($i: ID!, $l: ID!, $q: Int) { inventoryActivate(inventoryItemId: $i, locationId: $l, available: $q) { userErrors { field message } } }`,
+          { i: t.inventoryItem.id, l: locationId, q: quantity },
+        );
+        assertNoUserErrors(r.inventoryActivate, `inventoryActivate ${String(d.handle)}`);
+      } else if (current !== quantity) {
+        quantities.push({ inventoryItemId: t.inventoryItem.id, locationId, quantity, changeFromQuantity: current ?? null });
+      }
+    }
+  }
+  if (!quantities.length) return;
+  const r = await client.request(
+    `mutation($input: InventorySetQuantitiesInput!) { inventorySetQuantities(input: $input) { userErrors { field message code } } }`,
+    { input: { name: "available", reason: "correction", quantities } },
+  );
+  assertNoUserErrors(r.inventorySetQuantities, `inventorySetQuantities ${String(d.handle)}`);
+}
+
 async function set(client: AdminClient, d: Record<string, unknown>, create: boolean): Promise<string> {
   const target = create ? undefined : await readTarget(client, String(d.handle));
+  const locations = hasStock(d) ? await locationsByName(client) : undefined;
   const res = await client.request(
     `mutation($identifier: ProductSetIdentifiers, $input: ProductSetInput!) {
       productSet(identifier: $identifier, input: $input, synchronous: true) { product { id } userErrors { field message code } }
     }`,
-    { identifier: create ? undefined : { handle: d.handle }, input: productSetInput(d, target, create) },
+    { identifier: create ? undefined : { handle: d.handle }, input: productSetInput(d, target, create, locations) },
   );
   assertNoUserErrors(res.productSet, `productSet ${String(d.handle)}`);
-  return res.productSet.product.id;
+  const id = res.productSet.product.id as string;
+  if (target && locations) {
+    const existing = new Set(target.variants.nodes.map((v) => variantKey(Object.fromEntries(v.selectedOptions.map((o) => [o.name, o.value])))));
+    await setExistingStock(client, id, d, locations, existing);
+  }
+  return id;
+}
+
+const BULK_SET = /* GraphQL */ `
+  mutation BulkProductSet($input: ProductSetInput!) {
+    productSet(input: $input, synchronous: true) {
+      product { id handle variants(first: 250) { nodes { id selectedOptions { name value } } } }
+      userErrors { field message code }
+    }
+  }
+`;
+
+/** File inputs that still hold a portable ref (a file the target doesn't have) get the source's URL instead. */
+function withSources(input: Record<string, any>, files: Record<string, FileSource>): Record<string, any> {
+  const fix = (f: { id?: string; alt?: string } | undefined) => {
+    if (!f?.id || !f.id.startsWith(REF_PREFIX)) return f;
+    const src = files[f.id];
+    return src ? compact({ originalSource: src.url, contentType: src.contentType, alt: f.alt ?? src.alt }) : undefined;
+  };
+  return {
+    ...input,
+    files: ((input.files as { id?: string; alt?: string }[]) ?? []).map(fix).filter(Boolean),
+    variants: ((input.variants as Record<string, any>[]) ?? []).map((v) => compact({ ...v, file: fix(v.file) })),
+  };
 }
 
 /** True when `list` begins with every item of `prefix`, in order. */
@@ -440,13 +650,14 @@ export const products: ResourceAdapter = {
     const items: Item[] = [];
     const skipped: { key: string; reason: string }[] = [];
     const full = await Promise.all(nodes.map((n) => (n.isGiftCard ? Promise.resolve(n) : complete(client, n))));
+    const stock = opts.inventory ? await readStock(client, full.filter((n) => !n.isGiftCard)) : undefined;
     for (const n of full) {
       if (n.isGiftCard) {
         skipped.push({ key: n.handle, reason: "gift card" });
         continue;
       }
       seedImages(mapper, n);
-      items.push(normalizeProduct(n, opts));
+      items.push(normalizeProduct(n, opts, stock));
     }
     // Known by handle only: present in this store, nothing in the other store to compare with.
     const read = new Set(nodes.map((n) => n.handle));
@@ -473,6 +684,24 @@ export const products: ResourceAdapter = {
   },
 
   parallel: true,
+
+  createsRefs(key, d) {
+    return ((d.variants as Variant[]) ?? []).map((v) => variantRef(key, Object.entries(v.options).map(([name, value]) => ({ name, value }))));
+  },
+
+  // New products only: one productSet per line, images taken straight from the source's URLs.
+  async bulkWrite(ctx, items) {
+    const locations = items.some((i) => hasStock(i.data)) ? await locationsByName(ctx.client) : undefined;
+    const lines = items.map((i) => ({ input: withSources(productSetInput(i.data, undefined, true, locations), ctx.files) }));
+    const results = await bulkMutation(ctx.client, BULK_SET, lines, { timeoutMs: bulkTimeoutMs() });
+    return results.map((r) => {
+      const ps = r.data?.productSet;
+      const errors = [...(r.errors ?? []), ...(ps?.userErrors ?? [])].map((e: { message: string }) => e.message);
+      if (errors.length || !ps?.product?.id) return { error: errors.join("; ") || "no product returned" };
+      for (const v of ps.product.variants?.nodes ?? []) ctx.resolver.remember(variantRef(ps.product.handle, v.selectedOptions), v.id);
+      return { id: ps.product.id as string };
+    });
+  },
 
   create: ({ client }, _key, d) => set(client, d, true),
   async update({ client }, _target, d) {

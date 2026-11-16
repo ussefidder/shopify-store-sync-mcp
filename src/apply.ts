@@ -4,6 +4,7 @@ import { hashData } from "./diff.js";
 import { collectRefs, mapStrings, RefToGidResolver } from "./refs.js";
 import { ADAPTERS, orderKinds, type Item, type ResourceKind } from "./resources/index.js";
 import { envNumber, type AdminClient } from "./shopify/client.js";
+import { BulkUnavailable, bulkThreshold } from "./shopify/bulk.js";
 import { forKeys } from "./narrow.js";
 import { takeSnapshot } from "./snapshot.js";
 import { stateDir, type Plan, type PlanOp } from "./plan.js";
@@ -215,12 +216,70 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
     audit(log, { plan: plan.id, target: plan.target.domain, source: plan.source.domain, ...r });
   };
 
+  /**
+   * Many items of one kind go in one Shopify bulk operation instead of one request each. Returns the
+   * ops it didn't write (none, or all of them when the store won't run bulk writes).
+   */
+  const runBulk = async (kind: ResourceKind, ops: PlanOp[]): Promise<PlanOp[]> => {
+    const adapter = ADAPTERS[kind];
+    opts.onPhase?.(`writing ${ops.length} ${kind} in one Shopify bulk operation`);
+    // Files the target lacks are taken from the source's URLs by the bulk write itself (products).
+    resolver.allowUploads = kind !== "products";
+    const items: { op: PlanOp; data: Record<string, unknown> }[] = [];
+    try {
+      const dataOf = ops.map((op) => dropUnmappable(op.data, op.kind));
+      await resolver.prefetch(dataOf.flatMap((d) => [...collectRefs(d)]));
+      for (const [i, op] of ops.entries()) {
+        const { value, missing } = await resolver.rewrite(dataOf[i]!);
+        const notFile = missing.filter((r) => !(kind === "products" && plan.files?.[r]));
+        if (notFile.length) {
+          upsertResult({ seq: op.seq, kind, key: op.key, outcome: "failed", message: `references not found in target: ${notFile.join(", ")}` });
+          opts.onProgress?.(++finished, total, `${kind} ${op.key}`);
+        } else {
+          items.push({ op, data: value });
+        }
+      }
+      const res = await adapter.bulkWrite!(
+        { client, resolver, files: plan.files ?? {}, onPhase: opts.onPhase },
+        items.map((i) => ({ key: i.op.key, action: i.op.action === "create" ? "create" : "update", data: i.data })),
+      );
+      res.forEach((r, i) => {
+        const { op } = items[i]!;
+        if (r.error) {
+          upsertResult({ seq: op.seq, kind, key: op.key, outcome: "failed", message: r.error });
+        } else {
+          const ref = adapter.refFor?.(op.key);
+          if (ref && r.id && op.action === "create") resolver.remember(ref, r.id);
+          upsertResult({ seq: op.seq, kind, key: op.key, outcome: op.action === "create" ? "created" : "updated" });
+        }
+        opts.onProgress?.(++finished, total, `${kind} ${op.key}`);
+      });
+      return [];
+    } catch (err) {
+      if (!(err instanceof BulkUnavailable)) throw err;
+      opts.onPhase?.(`${err.message}; writing them one by one instead`);
+      // Files looked up without uploading are looked up again, this time uploading what's missing.
+      await resolver.forgetMisses(`shopify://File/`);
+      return ops.filter((op) => !results.some((r) => r.seq === op.seq));
+    } finally {
+      resolver.allowUploads = true;
+    }
+  };
+
   if (ready.length) opts.onPhase?.(`writing ${ready.length} step${ready.length === 1 ? "" : "s"} to ${plan.target.alias}`);
   // Kinds go in dependency order. Inside a kind whose items don't depend on each other, a few are
   // written at a time; items that share a lane (the same product, say) still go one after the other.
   for (const kind of orderKinds([...new Set(ready.map((o) => o.kind))])) {
-    const ops = ready.filter((o) => o.kind === kind);
+    let ops = ready.filter((o) => o.kind === kind);
     const adapter = ADAPTERS[kind];
+    if (adapter.bulkWrite) {
+      // Products: only new ones go in bulk (an update has to merge with what the target has).
+      const bulk = ops.filter((o) => kind !== "products" || o.action === "create");
+      if (bulk.length > bulkThreshold()) {
+        const left = await runBulk(kind, bulk);
+        ops = ops.filter((o) => !bulk.includes(o) || left.includes(o));
+      }
+    }
     if (!adapter.parallel || ops.length < 2) {
       for (const op of ops) await run(op, 1);
       continue;

@@ -1,5 +1,5 @@
 import type { AdminClient } from "../shopify/client.js";
-import type { GidToRefMapper, RefToGidResolver } from "../refs.js";
+import type { FileSource, GidToRefMapper, RefToGidResolver } from "../refs.js";
 
 /** In apply order: things that are referenced come before the things that reference them. */
 export const RESOURCE_KINDS = [
@@ -45,6 +45,8 @@ export interface FetchOptions {
   locales?: string[];
   /** Include variant prices and compare-at prices (products kind). Off by default: prices usually differ per store. */
   prices?: boolean;
+  /** Include stock: available quantities per location, matched to the target's locations by name (products kind). */
+  inventory?: boolean;
   /**
    * Leave the published state out (pages, metaobjects), so new items arrive hidden or as drafts
    * and existing ones keep the state they have in the target.
@@ -122,4 +124,18 @@ export interface ResourceAdapter {
   targetOnly?(source: Record<string, unknown>, target: Record<string, unknown>): string[];
   /** Ops of this kind don't depend on each other, so they can be written a few at a time. */
   parallel?: boolean;
+  /** Refs that creating this item also creates (a product's variants), besides refFor. */
+  createsRefs?(key: string, data: Record<string, unknown>): string[];
+  /**
+   * Optional: write many items in one Shopify bulk operation. `data` already has its refs rewritten,
+   * except file refs that don't exist in the target yet. Returns, per item, the new id or an error.
+   * Throws BulkUnavailable when the store won't run a bulk write, so items are written one by one.
+   */
+  bulkWrite?(ctx: BulkWriteContext, items: { key: string; action: "create" | "update"; data: Record<string, unknown> }[]): Promise<{ id?: string; error?: string }[]>;
+}
+
+export interface BulkWriteContext extends WriteContext {
+  /** Download URLs of source files, by ref, for files the target doesn't have yet. */
+  files: Record<string, FileSource>;
+  onPhase?: (message: string) => void;
 }

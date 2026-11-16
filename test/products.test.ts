@@ -221,3 +221,98 @@ describe("large catalogs", () => {
     expect(dev.calls.some((c) => c.field === "nodes")).toBe(false);
   });
 });
+
+describe("product page details", () => {
+  const files = [
+    { id: "gid://shopify/MediaImage/1", url: `${cdn}/sand.jpg?v=1` },
+    { id: "gid://shopify/MediaImage/2", url: `${cdn}/navy.jpg?v=1` },
+  ];
+  const detailed = (id: string) =>
+    shirt(id, {
+      media: ["gid://shopify/MediaImage/1", "gid://shopify/MediaImage/2"],
+      variants: [
+        { id: `${id}-1`, options: { Color: "Sand", Size: "M" }, sku: "LS-SAND-M", barcode: "3600000000017", image: "gid://shopify/MediaImage/1", weight: { value: 0.3, unit: "KILOGRAMS" }, harmonizedSystemCode: "620520", countryCodeOfOrigin: "PT", stock: { Paris: 7 } },
+        { id: `${id}-2`, options: { Color: "Navy", Size: "M" }, sku: "LS-NAVY-M", barcode: "3600000000024", image: "gid://shopify/MediaImage/2", requiresShipping: true, stock: { Paris: 2, Lyon: 4 } },
+      ],
+    });
+
+  it("copies barcodes, weight, customs details and variant images; stock only when asked", async () => {
+    const dev = new FakeShop(FakeShop.config("dev"), { files: [...files], products: [detailed("gid://shopify/Product/1")] });
+    const eu = new FakeShop(FakeShop.config("eu"), { locations: [{ id: "gid://shopify/Location/9", name: "Paris" }] });
+    const engine = engineFor(dev, eu);
+    const plan = await engine.plan("dev", "eu", { resources: ["products"] });
+    const v = (plan.ops[0]!.data.variants as any[])[0];
+    expect(v).toMatchObject({ barcode: "3600000000017", weight: { value: 0.3, unit: "KILOGRAMS" }, harmonizedSystemCode: "620520", countryCodeOfOrigin: "PT", image: "shopify://File/sand.jpg" });
+    expect(v.inventory).toBeUndefined();
+    await engine.apply(plan.id);
+    const p = eu.state.products[0]!;
+    const sand = p.variants!.find((x) => x.options.Color === "Sand")!;
+    expect(sand.barcode).toBe("3600000000017");
+    expect(sand.weight).toEqual({ value: 0.3, unit: "KILOGRAMS" });
+    expect(eu.state.files.find((f) => f.id === sand.image)?.url).toContain("sand.jpg");
+    expect(sand.stock).toBeUndefined();
+  });
+
+  it("with inventory: stock lands in the target's location with the same name", async () => {
+    const dev = new FakeShop(FakeShop.config("dev"), { files: [...files], products: [detailed("gid://shopify/Product/1")] });
+    const eu = new FakeShop(FakeShop.config("eu"), { locations: [{ id: "gid://shopify/Location/9", name: "Paris" }] });
+    const engine = engineFor(dev, eu);
+    const plan = await engine.plan("dev", "eu", { resources: ["products"], inventory: true });
+    expect((plan.ops[0]!.data.variants as any[])[1].inventory).toEqual({ Paris: 2, Lyon: 4 });
+    await engine.apply(plan.id);
+    const navy = eu.state.products[0]!.variants!.find((x) => x.options.Color === "Navy")!;
+    // Lyon doesn't exist in the target, so only Paris is set.
+    expect(navy.stock).toEqual({ Paris: 2 });
+
+    // Later the source sells some: an update sets the existing variant's stock, checked against what the target has now.
+    dev.state.products[0]!.variants![1]!.stock = { Paris: 1, Lyon: 4 };
+    const again = await engine.plan("dev", "eu", { resources: ["products"], inventory: true });
+    expect(again.ops.map((o) => o.action)).toEqual(["update"]);
+    await engine.apply(again.id);
+    expect(eu.state.products[0]!.variants!.find((x) => x.options.Color === "Navy")!.stock).toEqual({ Paris: 1 });
+  });
+});
+
+describe("bulk writes", () => {
+  it("creates many products, their variants' metafields and images in bulk operations", async () => {
+    const { bulkIO } = await import("../src/shopify/bulk.js");
+    const { bulkFiles } = await import("./fakeShop.js");
+    bulkIO.wait = async () => {};
+    bulkIO.upload = async (_url, form) => {
+      bulkFiles.set(String(form.get("key")), await (form.get("file") as Blob).text());
+    };
+    bulkIO.download = async (url) => bulkFiles.get(url) ?? "";
+    process.env.SYNC_BULK_THRESHOLD = "2";
+    try {
+      const files = Array.from({ length: 4 }, (_, i) => ({ id: `gid://shopify/MediaImage/${i + 1}`, url: `${cdn}/tee-${i}.jpg?v=1` }));
+      const products = Array.from({ length: 4 }, (_, i) =>
+        shirt(`gid://shopify/Product/${i + 1}`, {
+          handle: `tee-${i}`,
+          media: [files[i]!.id],
+          variants: [{ id: `gid://shopify/ProductVariant/${i + 1}`, options: { Color: "Sand", Size: "M" }, image: files[i]!.id, metafields: [{ namespace: "custom", key: "fit", type: "single_line_text_field", value: `fit-${i}` }] }],
+          metafields: [{ namespace: "custom", key: "care", type: "single_line_text_field", value: `care-${i}` }],
+        }),
+      );
+      const dev = new FakeShop(FakeShop.config("dev"), { files, products });
+      const eu = new FakeShop(FakeShop.config("eu"), {});
+      const engine = engineFor(dev, eu);
+      const plan = await engine.plan("dev", "eu", { resources: ["products", "metafields"] });
+      expect(plan.ops.filter((o) => o.action === "conflict")).toEqual([]);
+      const { results } = await engine.apply(plan.id);
+      expect(results.filter((r) => r.outcome !== "created")).toEqual([]);
+
+      const fields = eu.calls.map((c) => c.field);
+      expect(fields.filter((f) => f === "bulkOperationRunMutation")).toHaveLength(2);
+      // No image was looked up or uploaded one by one: the bulk write took them from the source's URLs.
+      expect(fields).not.toContain("fileCreate");
+      expect(eu.state.products.map((p) => p.handle).sort()).toEqual(["tee-0", "tee-1", "tee-2", "tee-3"]);
+      const tee = eu.state.products.find((p) => p.handle === "tee-2")!;
+      expect(eu.state.files.find((f) => f.id === tee.media![0])?.url).toContain("tee-2.jpg");
+      expect(tee.variants![0]!.image).toBe(tee.media![0]);
+      expect(tee.metafields).toEqual([{ namespace: "custom", key: "care", type: "single_line_text_field", value: "care-2" }]);
+      expect(tee.variants![0]!.metafields).toEqual([{ namespace: "custom", key: "fit", type: "single_line_text_field", value: "fit-2" }]);
+    } finally {
+      delete process.env.SYNC_BULK_THRESHOLD;
+    }
+  });
+});

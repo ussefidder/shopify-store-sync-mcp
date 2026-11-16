@@ -22,6 +22,8 @@ export interface Scope {
   locales?: string[];
   /** Copy variant prices too (products). */
   prices?: boolean;
+  /** Copy stock too: available quantity per location, matched by location name (products). */
+  inventory?: boolean;
   /** Leave the published state alone: new pages arrive hidden, new metaobject entries as drafts. */
   drafts?: boolean;
   include?: string[];
@@ -102,6 +104,7 @@ export class Engine {
       namespaces: scope.namespaces,
       locales: scope.locales,
       prices: scope.prices,
+      inventory: scope.inventory || undefined,
       drafts: scope.drafts || undefined,
       productHandles: Engine.productHandles(scope.include),
       metafieldOwners: Engine.metafieldOwners(scope.include),
