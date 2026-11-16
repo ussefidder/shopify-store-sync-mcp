@@ -448,6 +448,14 @@ async function readByHandles(client: AdminClient, handles: string[]): Promise<No
 async function readProducts(client: AdminClient, opts: FetchOptions): Promise<Node[]> {
   const h = opts.productHandles;
   if (!h) return readAll(client);
+  if (h.prefixes.length) {
+    // A prefix on a big catalog is read like a full read (one bulk export), then filtered.
+    const { productsCount } = await client.request<{ productsCount: { count: number } | null }>(COUNT);
+    if ((productsCount?.count ?? 0) > bulkThreshold()) {
+      const exactSet = new Set(h.exact);
+      return (await readAllBulk(client)).filter((n) => exactSet.has(n.handle) || h.prefixes.some((p) => n.handle.startsWith(p)));
+    }
+  }
   const exact = await readByHandles(client, h.exact);
   const searched = h.prefixes.length
     ? await paginate<Node>(client, SEARCH, { query: h.prefixes.map((p) => `handle:${p}*`).join(" OR ") }, (d) => d.products)
