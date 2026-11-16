@@ -4,15 +4,16 @@ import { eachLimited } from "../refs.js";
 import { createFiles, filenameFromUrl, REF_PREFIX, variantKey, variantRef, type FileSource, type GidToRefMapper } from "../refs.js";
 import type { FetchOptions, Item, ResourceAdapter } from "./types.js";
 import { compact, PAGE_INFO } from "./util.js";
+import { canonicalDecimal } from "./values.js";
 
 /*
  * Products, keyed by handle. Opt-in (not in the default set).
  *
  * What is copied: title, description, vendor, product type, category, tags, template, SEO, options,
- * variants (matched by option values, with SKU, taxable flag and inventory policy) and images.
- * Prices only with `prices: true`.
- * Never copied: inventory, sales channel publishing, status of existing products, barcodes, weight,
- * the image assigned to a variant, videos and 3D models.
+ * variants (matched by option values, with SKU, barcode, taxable flag, inventory policy, tracking,
+ * shipping, weight, customs codes and the variant's image) and images.
+ * Prices only with `prices: true`, stock levels only with `inventory: true`.
+ * Never copied: sales channel publishing, status of existing products, videos and 3D models.
  * New products are created as drafts, so nothing appears on a storefront until someone publishes it.
  *
  * Updates go through productSet, which replaces lists. To keep the "never deletes" promise the
@@ -651,7 +652,7 @@ export function alignProduct(source: Record<string, unknown>, target: Record<str
 export const products: ResourceAdapter = {
   kind: "products",
   description:
-    "Products, keyed by handle: title, description, vendor, type, category, tags, template, SEO, options, variants (matched by option values, with SKU, taxable flag and inventory policy) and images. Prices only with prices: true; inventory and sales channels are never copied. Tags, variants and media that only the target has are kept. New products are created as drafts. Opt-in (not in the default set).",
+    "Products, keyed by handle: title, description, vendor, type, category, tags, template, SEO, options, variants (matched by option values, with SKU, barcode, weight, customs codes, shipping and the variant's image) and images. Prices only with prices: true, stock only with inventory: true; sales channels are never copied. Tags, variants and media that only the target has are kept. New products are created as drafts. Opt-in (not in the default set).",
 
   async fetch(client, opts, mapper) {
     const nodes = await readProducts(client, opts);
@@ -689,6 +690,12 @@ export const products: ResourceAdapter = {
 
   alignTarget(source, target) {
     return alignProduct(source, target);
+  },
+
+  canonical(d) {
+    if (!Array.isArray(d.variants)) return d;
+    const variants = (d.variants as Record<string, unknown>[]).map((v) => ({ ...v, price: canonicalDecimal(v.price), compareAtPrice: canonicalDecimal(v.compareAtPrice) }));
+    return { ...d, variants };
   },
 
   parallel: true,

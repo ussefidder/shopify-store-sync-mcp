@@ -350,3 +350,14 @@ describe("short reports for big diffs and plans", async () => {
     expect(md).toContain("4 more steps");
   });
 });
+
+describe("decimals written two ways", async () => {
+  const { diffItems } = await import("../src/diff.js");
+  const mf = (value: string, type = "number_decimal") => [{ key: "PRODUCT/tee/custom.w", id: "x", data: { owner: "x", namespace: "custom", key: "w", type, value } }];
+  it("treats 0.40 and 0.4 as the same decimal metafield value, but not as the same text", () => {
+    expect(diffItems("metafields", mf("0.40"), mf("0.4")).identical).toBe(1);
+    expect(diffItems("metafields", mf("[\"1.50\",\"2\"]", "list.number_decimal"), mf("[\"1.5\",\"2.0\"]", "list.number_decimal")).identical).toBe(1);
+    expect(diffItems("metafields", mf("0.5"), mf("0.4")).changed).toHaveLength(1);
+    expect(diffItems("metafields", mf("0.40", "single_line_text_field"), mf("0.4", "single_line_text_field")).changed).toHaveLength(1);
+  });
+});

@@ -3,6 +3,7 @@ import { bulkMutation, bulkQuery, bulkThreshold, bulkTimeoutMs } from "../shopif
 import type { FetchOptions, Item, ResourceAdapter } from "./types.js";
 import { variantKey, type RefNode } from "../refs.js";
 import { reservedPrefix } from "./util.js";
+import { canonicalDecimal } from "./values.js";
 
 /*
  * Metafield values, keyed by where they live:
@@ -263,6 +264,18 @@ export const metafields: ResourceAdapter = {
       return `type differs (${String(target.data.type)} in target, ${String(source.data.type)} in source)`;
     }
     return undefined;
+  },
+
+  canonical(d) {
+    if (d.type === "number_decimal") return { ...d, value: canonicalDecimal(d.value) };
+    if (d.type === "list.number_decimal" && typeof d.value === "string") {
+      try {
+        return { ...d, value: JSON.stringify((JSON.parse(d.value) as unknown[]).map(canonicalDecimal)) };
+      } catch {
+        return d;
+      }
+    }
+    return d;
   },
 
   ownerRef: (d) => (typeof d.owner === "string" ? d.owner : undefined),

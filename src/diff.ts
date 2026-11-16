@@ -156,7 +156,8 @@ export function diffItems(kind: ResourceKind, source: Item[], target: Item[], fi
     }
     // Content kept on purpose in the target (this tool never deletes) is set aside before comparing.
     const align = ADAPTERS[kind]?.alignTarget;
-    const changes = diffValues(s.data, align ? align(s.data, t.data) : t.data);
+    const canon = ADAPTERS[kind]?.canonical ?? ((d: Record<string, unknown>) => d);
+    const changes = diffValues(canon(s.data), canon(align ? align(s.data, t.data) : t.data));
     if (changes.length) result.changed.push({ key, source: s, target: t, changes });
     else result.identical++;
   }

@@ -296,11 +296,11 @@ export function createServer(deps: ServerDeps): McpServer {
     "list_stores",
     {
       title: "List configured stores",
-      description: "List the Shopify stores this server can reach, with their write permissions. Secrets are never returned.",
+      description: "List the Shopify stores this server can reach, with their write permissions. Also gives this server's version. Secrets are never returned.",
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    guard(async () => json({ stores: deps.registry.list().map(describeStore) })),
+    guard(async () => json({ server: `shopify-store-sync-mcp ${VERSION}`, stores: deps.registry.list().map(describeStore) })),
   );
 
   server.registerTool(

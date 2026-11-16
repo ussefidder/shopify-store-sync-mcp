@@ -117,6 +117,8 @@ export interface ResourceAdapter {
    * deleted) set aside, so an item already in line with the source compares as identical.
    */
   alignTarget?(source: Record<string, unknown>, target: Record<string, unknown>): Record<string, unknown>;
+  /** Optional: the same value written the way Shopify writes it (0.40 and 0.4), applied to both sides before comparing. */
+  canonical?(data: Record<string, unknown>): Record<string, unknown>;
   /**
    * Optional: short labels of what only the target has inside this item (menu links, say) and an
    * update will keep. Listed in the plan so nobody is surprised that they are still there.

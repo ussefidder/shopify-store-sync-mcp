@@ -98,6 +98,7 @@ describe("MCP server", () => {
     const res = await call("list_stores");
     expect(res.text).not.toContain("shpat_secret_dev");
     expect(res.json.stores[0]).toMatchObject({ alias: "dev", auth: "access_token", allowWrites: true });
+    expect(res.json.server).toMatch(/^shopify-store-sync-mcp \d+\.\d+\.\d+/);
   });
 
   it("diffs, plans and applies end to end once the person confirms the protected store", async () => {
