@@ -89,6 +89,13 @@ const PRODUCT_ID = /* GraphQL */ `
   }
 `;
 
+/**
+ * Metafields Shopify keeps in step with a built-in field: the SEO title and description of
+ * products and collections, and a variant's HS code. They are copied with the item itself, so
+ * copying them again as values would only double the writes.
+ */
+export const MIRRORS = new Set(["global.title_tag", "global.description_tag", "global.harmonized_system_code"]);
+
 /** Namespaces that belong to apps or to Shopify's standard product taxonomy. */
 function skipNamespace(ns: string): string | undefined {
   return reservedPrefix(ns) ?? (ns === "shopify" ? "Shopify standard (category) metafield" : undefined);
@@ -103,6 +110,8 @@ function itemsOf(prefix: string, owner: { id: string; metafields: Metafields }, 
   const items: Item[] = [];
   const skipped: { key: string; reason: string }[] = [];
   for (const m of owner.metafields.nodes) {
+    // Shopify's own copies of built-in fields; the item itself carries them already.
+    if (MIRRORS.has(`${m.namespace}.${m.key}`)) continue;
     const key = `${prefix}/${m.namespace}.${m.key}`;
     if (namespaces?.length && !namespaces.includes(m.namespace)) continue;
     const reason = skipNamespace(m.namespace);

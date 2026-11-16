@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.2
+
+- Metafield values leave out Shopify's own copies of built-in fields: the SEO title and description (`global.title_tag`, `global.description_tag`) and a variant's HS code (`global.harmonized_system_code`). They travel with the product or collection itself; on a 4,000-product catalog they were 54,000 of 144,000 planned writes
+
 ## 0.9.1
 
 - Tested live with 4,000 products and 46,000 variants: written with images, stock and 86,000 metafield values in about 10 minutes

@@ -827,3 +827,25 @@ describe("progress on the command line", () => {
     ]);
   });
 });
+
+describe("metafield values that mirror built-in fields", () => {
+  it("leaves out the SEO title and description and the HS code; the item itself carries them", async () => {
+    const { metafieldItems } = await import("../src/resources/metafields.js");
+    const owner = {
+      id: "gid://shopify/Product/1",
+      handle: "linen-shirt",
+      metafields: {
+        nodes: [
+          { namespace: "global", key: "title_tag", type: "string", value: "Linen shirt" },
+          { namespace: "global", key: "description_tag", type: "string", value: "Light" },
+          { namespace: "global", key: "harmonized_system_code", type: "string", value: "620520" },
+          { namespace: "custom", key: "fabric", type: "single_line_text_field", value: "Linen" },
+        ],
+        pageInfo: { hasNextPage: false },
+      },
+    };
+    const { items, skipped } = metafieldItems("PRODUCT", owner as any);
+    expect(items.map((i) => i.key)).toEqual(["PRODUCT/linen-shirt/custom.fabric"]);
+    expect(skipped).toEqual([]);
+  });
+});

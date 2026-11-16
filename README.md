@@ -60,7 +60,7 @@ The store setup that usually gets rebuilt by hand, plus the images it uses. Refe
 | `collections` | `handle` | Title, description, sort order, template, SEO and smart-collection rules (rules on a metafield definition are remapped). Manual collections keep their own product list. A new collection is not published to any sales channel. Manual versus smart is reported as a conflict. |
 | `shop_policies` | `type` | Refund, privacy, terms, shipping and contact policy text. |
 | `products` *(opt-in)* | `handle` | Title, description, vendor, type, category, tags, template, SEO, options, images, and variants matched by option values: SKU, barcode, weight, taxable flag, inventory policy, inventory tracking, shipping, customs details (HS code, country of origin) and the variant's image. **New products are created as drafts.** Prices only with `prices: true` (`--with-prices`), stock only with `inventory: true` (`--with-inventory`, available quantity per location, matched to the target's locations by name). On update, the tags, variants, option values and media (images, videos, 3D models) that only the target has are kept, and don't count as differences. Gift cards are skipped. See "What product sync leaves alone" below. |
-| `metafields` *(opt-in)* | `PRODUCT/handle/namespace.key`, `COLLECTION/handle/…`, `PRODUCTVARIANT/handle/Size=M/…`, `SHOP/namespace.key` | Metafield **values** on products, collections, product variants and the shop. A value lands on the item with the same handle in the target; a variant value on the variant with the same option values; a shop value on the target's own shop. Reference values (including references to variants) are remapped. Filter with `namespaces` and `owner_types`. |
+| `metafields` *(opt-in)* | `PRODUCT/handle/namespace.key`, `COLLECTION/handle/…`, `PRODUCTVARIANT/handle/Size=M/…`, `SHOP/namespace.key` | Metafield **values** on products, collections, product variants and the shop. A value lands on the item with the same handle in the target; a variant value on the variant with the same option values; a shop value on the target's own shop. Reference values (including references to variants) are remapped. Filter with `namespaces` and `owner_types`. Shopify's own copies of built-in fields (`global.title_tag`, `global.description_tag`, `global.harmonized_system_code`) are left out: they travel with the item itself. |
 | `discounts` *(opt-in, compared only)* | `automatic/title`, `code/title` | Automatic and code discounts: type, Shopify's summary of what they give, status, dates, combinations, codes (or their count for bulk sets) and usage limits. **Never written**: a plan lists differences as conflicts, since a discount changes what customers pay. Two discounts with the same title are reported instead of matched. |
 | `translations` *(opt-in)* | `locale:Type/handle` | Translations of products, pages, collections, metaobjects, menus and policies. Registered against the target's own text, after the content itself is synced. A translated field only the target has is kept. The plan warns when a language isn't added to the target. |
 
@@ -518,7 +518,7 @@ Two references followed from the source store to the target, as the sample sync 
 ## Tested on real stores
 
 <p align="center">
-  <img src="docs/images/tested.png" alt="139 automated tests, 79 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
+  <img src="docs/images/tested.png" alt="140 automated tests, 79 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
 </p>
 
 <details>
@@ -594,7 +594,7 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 - [x] Published on npm, runs with `npx`
 
 *Quality*
-- [x] 139 automated tests against an in-memory Shopify, plus MCP protocol tests
+- [x] 140 automated tests against an in-memory Shopify, plus MCP protocol tests
 - [x] Every GraphQL operation validated against Shopify's schema for 2026-04, 2026-10 and 2027-01
 - [x] Tested live between two stores on Linux and Windows, Shopify CLI 4.9 and 5
 - [x] Parallel reads and writes (metaobject types read and entries written in parallel; the check before writing re-reads only what the plan touches) with throttle-aware retries; clear errors for missing installs, expired sign-ins and auto-managed policies
