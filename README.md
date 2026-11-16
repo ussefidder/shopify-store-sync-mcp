@@ -42,7 +42,7 @@ https://github.com/user-attachments/assets/66a2dfd0-5770-4403-992c-cfe133ea0e9c
 The store setup that usually gets rebuilt by hand, plus the images it uses. References between items (a size guide pointing at a product, a menu linking to a page) are carried across by handle, so they land on the right item instead of a broken ID.
 
 <p align="center">
-  <img src="docs/images/what-it-syncs.png" alt="Metafield definitions, metaobject definitions and entries, collections, pages, menus, redirects, store policies, files and images, and opt-in products (variants matched by option values), metafield values and translations" width="100%">
+  <img src="docs/images/what-it-syncs.png" alt="Metafield definitions, metaobject definitions and entries, collections, pages, menus, redirects, store policies, files and images, and opt-in products (variants with SKU, barcode, weight and variant image; prices and stock when asked), metafield values and translations" width="100%">
 </p>
 
 <details>
@@ -418,6 +418,7 @@ npx shopify-store-sync-mcp stores
 npx shopify-store-sync-mcp diff dev eu --resources pages,menus
 npx shopify-store-sync-mcp check dev eu metaobjects size_guide/shirts
 npx shopify-store-sync-mcp plan dev eu --as-drafts
+npx shopify-store-sync-mcp plan stg dev --resources products,metafields --with-prices --with-inventory
 npx shopify-store-sync-mcp apply <plan-id> --confirm my-brand-eu.myshopify.com
 npx shopify-store-sync-mcp export eu ./store-config
 npx shopify-store-sync-mcp themes dev eu --ignore-settings "current.sections.header.*"

@@ -548,7 +548,7 @@ render("quickstart", 1280, 330, `
 `);
 
 // ---------------------------------------------------------------- what it syncs
-render("what-it-syncs", 1280, 600, `
+render("what-it-syncs", 1280, 625, `
 <div class="wrap">
   <div class="title"><h2>What it syncs</h2><span class="muted">with the images they use, and every reference remapped</span></div>
   <div class="grid" style="grid-template-columns: repeat(4, 1fr)">
@@ -560,7 +560,7 @@ render("what-it-syncs", 1280, 600, `
     ${tile("NV", A, "Menus", "Full 3-level trees, customer account menus included. The target's own links are kept.")}
     ${tile("RD", T, "Redirects", "Thousands of URL redirects, no CSV.")}
     ${tile("PL", T, "Store policies", "Refund, privacy, terms, shipping and contact text.")}
-    ${tile("PR", R, "Products", "Content, options, variants matched by option values, images. New ones as drafts; prices only if asked.", "opt-in")}
+    ${tile("PR", R, "Products", "Content, images, variants with SKU, barcode, weight and variant image. New ones as drafts; prices and stock only if asked.", "opt-in")}
     ${tile("MV", P, "Metafield values", "On products, collections, variants and the shop, matched by handle and option values.", "opt-in")}
     ${tile("TR", P, "Translations", "Products, pages, collections, metaobjects, menus and policies, per language.", "opt-in")}
     ${tile("IMG", "#8b98a8", "Files and images", "Matched by file name; missing ones uploaded to the target.")}
