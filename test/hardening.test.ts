@@ -589,7 +589,7 @@ describe("shop and variant metafields", () => {
     dev.calls.length = 0;
     const variantsOnly = await engine.snapshot("dev", { resources: ["metafields"], ownerTypes: ["PRODUCTVARIANT"] });
     expect(variantsOnly.snapshot.resources.metafields!.items.map((i) => i.key)).toEqual(["PRODUCTVARIANT/linen-shirt/Size=S/custom.fit"]);
-    expect(dev.calls.map((c) => c.field).filter((f) => f !== "nodes" && f !== "productsCount")).toEqual(["productVariants"]);
+    expect(dev.calls.map((c) => c.field).filter((f) => f !== "nodes" && f !== "productsCount" && f !== "productVariantsCount")).toEqual(["productVariants"]);
 
     dev.calls.length = 0;
     const oneProduct = await engine.snapshot("dev", { resources: ["metafields"], include: ["PRODUCTVARIANT/linen-shirt/*"] });

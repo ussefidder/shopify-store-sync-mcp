@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.1
+
+- Tested live with 4,000 products and 46,000 variants: written with images, stock and 86,000 metafield values in about 10 minutes
+- Metafield values pointing at an image that the bulk product write had just brought over are written too (they failed as "not found" before)
+- Metafield values of big catalogs: the products and variants they belong to are no longer looked up again one batch at a time
+- A handle prefix (`--include "summer-*"`) on a big catalog is read with one bulk export instead of 4 products per request
+- Variant metafields use a bulk read when the store has many variants, even with few products
+
 ## 0.9.0
 
 - **Everything on the product page.** Products now also carry each variant's barcode, weight, inventory tracking, shipping setting, customs details (HS code, country of origin) and its image. These are compared and copied like the other fields, so a diff may show them as new differences the first time

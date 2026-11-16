@@ -149,6 +149,9 @@ function ownersFromBulk<T extends { id: string; metafields: Metafields }>(rows: 
 const productCount = async (client: AdminClient) =>
   (await client.request<{ productsCount: { count: number } | null }>(`query { productsCount(limit: null) { count } }`)).productsCount?.count ?? 0;
 
+const variantCount = async (client: AdminClient) =>
+  (await client.request<{ productVariantsCount: { count: number } | null }>(`query { productVariantsCount(limit: null) { count } }`)).productVariantsCount?.count ?? 0;
+
 /** Every product (or every variant) with its metafields, in one bulk operation: for large catalogs. */
 function bulkProducts(client: AdminClient, namespace: string | undefined): Promise<OwnerNode[]> {
   const q = `{ products { edges { node { id handle metafields${nsArg(namespace)} { edges { node { namespace key type value } } } } } } }`;
@@ -187,7 +190,7 @@ async function readVariants(client: AdminClient, namespace: string | undefined, 
   const pick = (d: any) => d.productVariants;
   if (!handles || handles.length > bulkThreshold()) {
     const all =
-      (await productCount(client)) > bulkThreshold()
+      (await variantCount(client)) > bulkThreshold()
         ? await bulkVariants(client, namespace)
         : await paginate<VariantNode>(client, VARIANTS_QUERY, { namespace }, pick);
     if (!handles) return all;

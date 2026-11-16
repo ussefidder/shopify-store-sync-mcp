@@ -338,6 +338,8 @@ export class FakeShop implements AdminClient {
         );
       case "productsCount":
         return { count: s.products.length };
+      case "productVariantsCount":
+        return { count: s.products.reduce((n, p) => n + (p.variants?.length ?? 1), 0) };
       case "products":
         if (/query ProductIndex/.test(query)) {
           return page(
