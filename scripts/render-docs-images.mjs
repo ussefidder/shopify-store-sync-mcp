@@ -502,6 +502,37 @@ $ shopify store execute --store prod.myshopify.com --allow-mutations \\
   pre { padding: 16px; font-size: 13px; line-height: 1.65; color: #c9d4df; white-space: pre-wrap; }
 `);
 
+// ---------------------------------------------------------------- compared with store-copy apps (from each app's own pages)
+const CMP_ROWS = ["How it works", "What it copies", "Diff or plan first", "Price"];
+const cmpCol = (name, cells, ours = false) =>
+  `<div class="cc card${ours ? " ours" : ""}"><div class="cn">${name}</div>${cells.map((c) => `<div class="cv">${c}</div>`).join("")}</div>`;
+render("vs-copy-apps", 1280, 400, `
+<div class="wrap">
+  <div class="title"><h2>Compared with store-copy apps</h2><span class="muted">as each app states on its own pages, November 2026</span></div>
+  <div class="tbl">
+    <div class="rl">${CMP_ROWS.map((r) => `<div class="cv">${r}</div>`).join("")}</div>
+    ${cmpCol("Matrixify", ["Export a spreadsheet, then import it", "Many types, as spreadsheet rows", '<span class="a">Dry run checks the file only</span>', "Free for 10 products per file, then $20 to $200 / 30 days"])}
+    ${cmpCol("Rewind Staging", ["Staging copy, optional continuous sync", "Products, collections, metaobjects. No menus, no customers", '<span class="muted">Not stated</span>', "$99 / month, + $29 per extra store"])}
+    ${cmpCol("Simple Sync", ["Manual or daily scheduled syncs", "Products, collections, metaobjects, pages, files, themes", '<span class="muted">Not stated</span>', "$129 to $499 / month"])}
+    ${cmpCol("shopify-store-sync-mcp", ["Ask your AI client, or use the CLI", "Definitions, entries, menus, pages, products, metafields, translations", '<span class="g">Field-level diff, then a plan you review</span>', '<span class="g">Free, open source (MIT)</span>'], true)}
+  </div>
+</div>`, `
+  .wrap { width: 1280px; padding: 26px 32px; }
+  .title { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 16px; }
+  .title h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.2px; }
+  .title span { font-size: 14px; }
+  .tbl { display: grid; grid-template-columns: 150px repeat(4, 1fr); gap: 12px; }
+  .rl { padding-top: 46px; }
+  .rl .cv { color: #8b98a8; font-size: 12px; text-transform: uppercase; letter-spacing: .8px; font-weight: 600; }
+  .cc { overflow: hidden; }
+  .cn { padding: 12px 16px; font-weight: 700; font-size: 15px; border-bottom: 1px solid #1c2530; background: #0e1319; height: 46px; }
+  .cv { padding: 10px 16px; font-size: 13.5px; line-height: 1.45; color: #c9d4df; height: 66px; display: flex; align-items: center; }
+  .cc .cv + .cv { border-top: 1px solid #1a222c; }
+  .ours { border-color: #2f6b40; background: #0f1a14; }
+  .ours .cn { background: #10211a; color: #57c26e; border-bottom-color: #1f3a2a; }
+  .ours .cv + .cv { border-top-color: #1f3a2a; }
+`);
+
 // ---------------------------------------------------------------- shared card styles for the overview images
 const CARD_CSS = `
   .wrap { width: 1280px; padding: 26px 32px; }

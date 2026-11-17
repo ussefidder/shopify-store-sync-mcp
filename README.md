@@ -131,6 +131,13 @@ Plenty of Shopify MCP servers read and write *one* store. This one is built for 
 
 Matrixify, Rewind Staging and Simple Sync also move data from one store to another. Here is what each one states on its own pages (checked November 2026), next to this tool:
 
+<p align="center">
+  <img src="docs/images/vs-copy-apps.png" alt="Matrixify, Rewind Staging, Simple Sync and shopify-store-sync-mcp compared on how each works, what it copies, whether it shows a diff or plan first, and price" width="100%">
+</p>
+
+<details>
+<summary><b>Details and sources</b></summary>
+
 | | [Matrixify](https://apps.shopify.com/excel-export-import) | [Rewind Staging](https://apps.shopify.com/store-copy) | [Simple Sync](https://apps.shopify.com/simple-sync) | shopify-store-sync-mcp |
 |---|---|---|---|---|
 | How it works | Export a spreadsheet from one store, import it into the other | App that copies a store and can keep syncing it | App with manual or daily scheduled syncs | MCP server or CLI on your machine, signed in through Shopify CLI |
@@ -139,6 +146,8 @@ Matrixify, Rewind Staging and Simple Sync also move data from one store to anoth
 | Price | Free demo (10 products per file), then [$20, $50 or $200 per 30 days](https://matrixify.app/pricing/) | $99 a month, plus $29 per extra store | $129 to $499 a month, by number of target stores | Free, MIT licensed |
 
 "Not stated" means the app's own pages don't describe it, not that it's missing. We haven't timed these apps, so there is no speed claim against them here; our own measured run is in [Built for big catalogs](#built-for-big-catalogs). If you've used one of them on a catalog of a similar size, open an issue and your result will be added.
+
+</details>
 
 ## Safe on production
 
