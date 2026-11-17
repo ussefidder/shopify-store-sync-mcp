@@ -7,6 +7,16 @@
   },
   "scenes": [
     {
+      "id": "hook",
+      "hold": 0.5,
+      "lines": [
+        {
+          "say": "Every Shopify team knows this ritual.",
+          "caption": "Every Shopify team knows this ritual."
+        }
+      ]
+    },
+    {
       "id": "problem",
       "lines": [
         {
@@ -76,6 +86,16 @@
         {
           "say": "Then add the server to Claude, Cursor, or any M C P client.",
           "caption": "Then add the server to Claude, Cursor or any MCP client."
+        }
+      ]
+    },
+    {
+      "id": "works",
+      "hold": 0.6,
+      "lines": [
+        {
+          "say": "It works with Claude, ChatGPT, GitHub Copilot, VS Code, Cursor and Antigravity. Or any MCP client.",
+          "caption": "It works with Claude, ChatGPT, GitHub Copilot, VS Code, Cursor and Antigravity. Or any MCP client."
         }
       ]
     },
