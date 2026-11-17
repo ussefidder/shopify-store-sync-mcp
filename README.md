@@ -127,6 +127,19 @@ Plenty of Shopify MCP servers read and write *one* store. This one is built for 
   <img src="docs/images/vs-shopify-cli.png" alt="Left: raw shopify store execute commands per store with manual comparison and ID rewriting. Right: diff_stores, plan_sync and apply_plan doing it with remapping, ordering, uploads and drift checks" width="100%">
 </p>
 
+### Compared with store-copy apps
+
+Matrixify, Rewind Staging and Simple Sync also move data from one store to another. Here is what each one states on its own pages (checked November 2026), next to this tool:
+
+| | [Matrixify](https://matrixify.app/pricing/) | [Rewind Staging](https://apps.shopify.com/store-copy) | [Simple Sync](https://apps.shopify.com/simple-sync) | shopify-store-sync-mcp |
+|---|---|---|---|---|
+| How it works | Export a spreadsheet from one store, import it into the other | App that copies a store and can keep syncing it | App with manual or daily scheduled syncs | MCP server or CLI on your machine: diff, review the plan, then apply |
+| Price | Free demo (10 products per file), then $20, $50 or $200 per 30 days | $99 a month, plus $29 per extra store | $129 to $499 a month, by number of target stores | Free, MIT licensed |
+| Speed | Parallel threads per job depend on the plan: 1 on Demo and Basic, 5 on Big, 10+ on Enterprise. No published timings | No published timings | No published timings | Measured: 4,000 products, 46,000 variants and 85,972 metafield values in 51 min ([details](#built-for-big-catalogs)) |
+| Stated limits | Item limits per file, e.g. 5,000 products on Basic | [Doesn't copy](https://help.rewind.com/hc/en-us/articles/27237967418267) categories, customers, menus, or metafields on pages and collections; with continuous copy, a change to metafields alone isn't picked up | Up to 15 target stores on the top plan | Never deletes; discounts are compared, not written |
+
+We haven't timed these apps ourselves, so there is no speed claim against them here. If you've timed one on a catalog of a similar size, open an issue and the result will be added. Shopify's own limits, such as its daily cap on new variants for very large catalogs, apply to every tool, this one included.
+
 ## Safe on production
 
 <p align="center">

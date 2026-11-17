@@ -107,8 +107,13 @@
     },
     {
       "id": "scale",
-      "hold": 7.2,
-      "lines": []
+      "hold": 0.6,
+      "lines": [
+        {
+          "say": "Tested on real stores: four thousand products, forty-six thousand variants, eighty-six thousand metafields. Done in fifty-one minutes.",
+          "caption": "Tested on real stores: 4,000 products, 46,000 variants, 86,000 metafields. Done in 51 minutes."
+        }
+      ]
     },
     {
       "id": "safety",
