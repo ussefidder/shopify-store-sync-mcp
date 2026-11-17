@@ -326,34 +326,42 @@ render("remapping", 1280, 300, `
 render("social-preview", 1280, 640, `
 <div class="wrap">
   <div class="glow"></div>
-  <div class="eyebrow mono">OPEN SOURCE · MCP SERVER</div>
+  <div class="eyebrow mono">MCP SERVER · CLI · FREE, OPEN SOURCE</div>
   <h1>shopify-store-sync-mcp</h1>
-  <p class="tag">Diff and sync configuration between Shopify stores from Claude, Cursor or any MCP client.</p>
+  <p class="tag">Diff and sync Shopify stores from Claude, Cursor or any MCP client: definitions, metaobjects, menus, pages, products, metafields and translations.</p>
   <div class="row">
-    <div class="pill"><span class="dot bg-g"></span>Products · Collections</div>
-    <div class="pill"><span class="dot bg-g"></span>Metafields &amp; metaobjects</div>
-    <div class="pill"><span class="dot bg-g"></span>Pages · Menus · Redirects · Translations</div>
-  </div>
-  <div class="row">
-    <div class="pill"><span class="dot bg-b"></span>Field-level diffs</div>
-    <div class="pill"><span class="dot bg-a"></span>Dry-run plans</div>
-    <div class="pill"><span class="dot bg-b"></span>ID remapping by handle</div>
+    <div class="pill"><span class="dot bg-g"></span>Field-level diff</div>
+    <div class="pill"><span class="dot bg-g"></span>Dry-run plans</div>
+    <div class="pill"><span class="dot bg-b"></span>Cross-store ID remapping</div>
+    <div class="pill"><span class="dot bg-b"></span>Drift-checked writes</div>
     <div class="pill"><span class="dot bg-r"></span>Never deletes</div>
-    <div class="pill"><span class="dot bg-a"></span>A person confirms production</div>
   </div>
-  <div class="foot mono muted">github.com/ussefidder/shopify-store-sync-mcp · MIT</div>
+  <div class="row">
+    <div class="pill"><span class="dot bg-r"></span>Production guardrails</div>
+    <div class="pill"><span class="dot bg-a"></span>4,000 products in 51 min</div>
+    <div class="pill"><span class="dot bg-a"></span>Live status and cancel</div>
+    <div class="pill"><span class="dot bg-p"></span>Prices and stock</div>
+  </div>
+  <div class="row">
+    <div class="pill"><span class="dot bg-p"></span>Translations</div>
+    <div class="pill"><span class="dot bg-t"></span>Theme settings diff</div>
+    <div class="pill"><span class="dot bg-t"></span>Config as code</div>
+    <div class="pill"><span class="dot bg-t"></span>CLI drift checks</div>
+  </div>
+  <div class="foot mono muted">github.com/ussefidder/shopify-store-sync-mcp · 12 MCP tools · MIT</div>
 </div>`, `
-  .wrap { position: relative; width: 1280px; height: 640px; padding: 88px 96px; overflow: hidden;
+  .wrap { position: relative; width: 1280px; height: 640px; padding: 72px 96px; overflow: hidden;
           background: radial-gradient(1000px 500px at 0% 0%, #13202a 0%, #0b0f14 60%); }
   .glow { position: absolute; right: -160px; bottom: -200px; width: 700px; height: 700px; border-radius: 50%;
           background: radial-gradient(circle, rgba(87,194,110,.16), transparent 65%); }
-  .eyebrow { font-size: 16px; letter-spacing: .14em; color: #57c26e; margin-bottom: 18px; }
-  h1 { font-size: 76px; font-weight: 800; letter-spacing: -0.025em; }
-  .tag { margin-top: 18px; font-size: 28px; color: #b5c2cf; max-width: 960px; line-height: 1.35; }
-  .row { margin-top: 22px; display: flex; gap: 12px; flex-wrap: wrap; }
-  .row + .row { margin-top: 12px; }
-  .pill { font-size: 18px; padding: 9px 16px; }
-  .foot { position: absolute; bottom: 52px; left: 96px; font-size: 16px; }
+  .eyebrow { font-size: 16px; letter-spacing: .14em; color: #57c26e; margin-bottom: 16px; }
+  h1 { font-size: 72px; font-weight: 800; letter-spacing: -0.025em; }
+  .tag { margin-top: 14px; font-size: 25px; color: #b5c2cf; max-width: 1060px; line-height: 1.38; }
+  .row { margin-top: 24px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .row + .row { margin-top: 10px; }
+  .pill { font-size: 17px; padding: 8px 15px; }
+  .bg-p { background: #a371f7; } .bg-t { background: #39c5cf; }
+  .foot { position: absolute; bottom: 44px; left: 96px; font-size: 16px; }
 `);
 
 // ---------------------------------------------------------------- CLI (real output of scripts/demo-cli.ts)
