@@ -53,7 +53,7 @@ function render(name, width, height, body, css = "") {
 }
 
 // ---------------------------------------------------------------- hero
-render("hero", 1280, 420, `
+render("banner", 1280, 420, `
 <div class="wrap">
   <div class="glow"></div>
   <div class="left">

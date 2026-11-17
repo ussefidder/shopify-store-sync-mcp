@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/hero.png?v=2" alt="shopify-store-sync-mcp: diff and sync configuration between Shopify stores from your AI assistant" width="100%">
+  <img src="docs/images/banner.png" alt="shopify-store-sync-mcp: diff and sync configuration between Shopify stores from your AI assistant" width="100%">
 </p>
 
 <p align="center">
