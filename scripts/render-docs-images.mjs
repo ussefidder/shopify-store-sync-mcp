@@ -599,6 +599,36 @@ render("what-it-syncs", 1280, 625, `
   </div>
 </div>`, CARD_CSS);
 
+// ---------------------------------------------------------------- everything it does, at a glance (first screen of the README)
+const feat = (abbr, color, title, text, tools = "") =>
+  `<div class="tile card"><div class="th"><div class="ico" style="background:${color}">${abbr}</div><h3>${title}</h3></div><p>${text}</p>${tools ? `<div class="tl mono">${tools}</div>` : ""}</div>`;
+render("at-a-glance", 1280, 560, `
+<div class="wrap">
+  <div class="title"><h2>Everything it does</h2><span class="muted">12 MCP tools and a CLI · Claude, Cursor or any MCP client · free, MIT</span></div>
+  <div class="grid" style="grid-template-columns: repeat(4, 1fr)">
+    ${feat("DF", G, "Field-level diff", "Every difference between two stores, field by field, even inside JSON values.", "diff_stores · compare_item")}
+    ${feat("PL", G, "Dry-run plans", "Creates, updates, conflicts and missing references, reviewed before anything is written.", "plan_sync · get_plan")}
+    ${feat("AP", B, "Safe apply", "Re-reads the target first and skips what drifted. Never deletes. Every write logged.", "apply_plan")}
+    ${feat("PR", R, "Production guardrails", "Writes off by default. Protected stores are confirmed by a person, not the assistant.")}
+    ${feat("ID", B, "Cross-store ID remapping", "References to products, pages, collections and entries land on the right item by handle.")}
+    ${feat("BC", A, "Built for big catalogs", "4,000 products, 46,000 variants and 86,000 metafield values copied in 51 minutes.")}
+    ${feat("ST", A, "Live status and cancel", "Big applies run in the background, with progress and time left per resource type.", "apply_status · cancel_apply")}
+    ${feat("SK", R, "Products, prices and stock", "Variants, images, prices and stock per location. New products land as drafts.", "opt-in")}
+    ${feat("TR", P, "Metafields and translations", "Values on products, variants, collections and the shop. Translations per language.", "opt-in")}
+    ${feat("TH", P, "Theme settings diff", "Compare theme templates and settings between two stores.", "diff_themes")}
+    ${feat("GIT", T, "Config as code", "Write a store's setup to a folder and keep it in git.", "export_snapshot")}
+    ${feat("CLI", T, "CLI and drift checks", 'The same engine from the terminal. <span class="nw">--exit-code</span> turns diff into a scheduled drift check.', "npx shopify-store-sync-mcp")}
+  </div>
+</div>`, CARD_CSS + `
+  .tile { padding: 14px 16px; }
+  .th { display: flex; align-items: center; gap: 10px; }
+  .th h3 { margin: 0; font-size: 15.5px; }
+  .ico { width: 34px; height: 34px; flex: none; font-size: 12px; }
+  .tile p { margin-top: 8px; font-size: 13px; }
+  .tl { margin-top: 8px; font-size: 11.5px; color: #57c26e; }
+  .nw { white-space: nowrap; font-family: "DejaVu Sans Mono", ui-monospace, monospace; font-size: 12px; color: #c9d4df; }
+`);
+
 // ---------------------------------------------------------------- big catalogs
 const big = (title, beforeVal, beforeNote, afterVal, afterNote) => `
   <div class="cmp card">

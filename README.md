@@ -25,6 +25,12 @@
 </p>
 
 <p align="center">
+  <img src="docs/images/at-a-glance.png" alt="Everything it does: field-level diff, dry-run plans, safe apply, production guardrails, cross-store ID remapping, big catalogs (4,000 products in 51 minutes), live status and cancel, products with prices and stock, metafields and translations, theme settings diff, config as code, CLI and drift checks" width="100%">
+</p>
+
+<p align="center"><b>Open to recommendations.</b> Missing a resource, a workflow or a check you need? <a href="https://github.com/ussefidder/shopify-store-sync-mcp/issues/new">Open an issue</a> and tell us.</p>
+
+<p align="center">
   <img src="docs/images/quickstart.png" alt="Three steps: connect your stores with npx shopify-store-sync-mcp connect, add the server to your AI client, ask in plain language" width="100%">
 </p>
 
@@ -656,7 +662,7 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 
 </details>
 
-Ideas and PRs are welcome. Issues tagged `good first issue` are a good place to start.
+We're open to recommendations: ideas, feature requests and PRs are all welcome, through an [issue](https://github.com/ussefidder/shopify-store-sync-mcp/issues/new). Issues tagged `good first issue` are a good place to start.
 
 <details>
 <summary><b>Development</b></summary>
