@@ -169,6 +169,18 @@ export class FakeShop implements AdminClient {
       }
       return out as T;
     }
+    // Several writes in one request ("w0: productSet(input: $input0, ...)"), answered one alias at a time.
+    if (/^\s*mutation Batch\b/.test(query)) {
+      const out: Record<string, unknown> = {};
+      this.calls.push({ field: "Batch", variables: v });
+      for (const [, alias, name, args] of query.matchAll(/(w\d+): (\w+)\(([^)]*)\)/g)) {
+        // Handlers read variables by the name a single write gives them ($m, $input): the number is dropped.
+        const vars = Object.fromEntries([...args!.matchAll(/(\w+): \$(\w+)/g)].map(([, , variable]) => [variable!.replace(/\d+$/, ""), v[variable!]]));
+        this.calls.push({ field: name!, variables: vars });
+        out[alias!] = await this.handle(name!, query, vars, this.state);
+      }
+      return out as T;
+    }
     this.calls.push({ field, variables: v });
     const s = this.state;
     return { [field]: await this.handle(field, query, v, s) } as T;

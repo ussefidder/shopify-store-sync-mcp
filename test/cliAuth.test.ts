@@ -113,8 +113,8 @@ describe("Shopify CLI sign-in", () => {
       return { code: 0, stdout: JSON.stringify({ data: { ok: true } }), stderr: "" };
     };
     const client = new ShopifyCliClient(cliStore("dev"), run, "shopify");
-    await Promise.all(Array.from({ length: 12 }, () => client.request("query { shop { name } }")));
-    expect(peak).toBe(4);
+    await Promise.all(Array.from({ length: 30 }, () => client.request("query { shop { name } }")));
+    expect(peak).toBe(12);
   });
 
   it("retries throttled requests", async () => {

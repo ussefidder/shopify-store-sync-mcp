@@ -273,7 +273,7 @@ describe("product page details", () => {
   });
 });
 
-describe("bulk writes", () => {
+describe("large writes", () => {
   it("creates many products, their variants' metafields and images in bulk operations", async () => {
     const { bulkIO } = await import("../src/shopify/bulk.js");
     const { bulkFiles } = await import("./fakeShop.js");
@@ -283,6 +283,7 @@ describe("bulk writes", () => {
     };
     bulkIO.download = async (url) => bulkFiles.get(url) ?? "";
     process.env.SYNC_BULK_THRESHOLD = "2";
+    process.env.SYNC_BULK_WRITES = "true";
     try {
       const files = Array.from({ length: 4 }, (_, i) => ({ id: `gid://shopify/MediaImage/${i + 1}`, url: `${cdn}/tee-${i}.jpg?v=1` }));
       const products = Array.from({ length: 4 }, (_, i) =>
@@ -321,6 +322,7 @@ describe("bulk writes", () => {
       expect(tee.variants![0]!.metafields).toEqual([{ namespace: "custom", key: "fit", type: "single_line_text_field", value: "fit-2" }]);
     } finally {
       delete process.env.SYNC_BULK_THRESHOLD;
+      delete process.env.SYNC_BULK_WRITES;
     }
   });
 
@@ -331,6 +333,7 @@ describe("bulk writes", () => {
     bulkIO.upload = async (_url, form) => void bulkFiles.set(String(form.get("key")), await (form.get("file") as Blob).text());
     bulkIO.download = async (url) => bulkFiles.get(url) ?? "";
     process.env.SYNC_BULK_THRESHOLD = "2";
+    process.env.SYNC_BULK_WRITES = "true";
     try {
       const src = Array.from({ length: 3 }, (_, i) => shirt(`gid://shopify/Product/${i + 1}`, { handle: `tee-${i}`, title: `Tee ${i} v2` }));
       const tgt = Array.from({ length: 3 }, (_, i) =>
@@ -364,6 +367,7 @@ describe("bulk writes", () => {
       expect(tee.variants!.map((v) => v.sku)).toContain("EU-RED-M");
     } finally {
       delete process.env.SYNC_BULK_THRESHOLD;
+      delete process.env.SYNC_BULK_WRITES;
     }
   });
 
@@ -411,6 +415,7 @@ describe("bulk writes", () => {
   it("fails what belongs to a product it couldn't create right away, with that as the reason", async () => {
     await bulkSetup();
     process.env.SYNC_BULK_THRESHOLD = "2";
+    process.env.SYNC_BULK_WRITES = "true";
     try {
       const dev = new FakeShop(FakeShop.config("dev"), { products: tees(4, true) });
       const eu = new FakeShop(FakeShop.config("eu"), {});
@@ -431,12 +436,14 @@ describe("bulk writes", () => {
       expect(eu.calls.filter((c) => c.field === "productByIdentifier" && c.variables.handle === "tee-1")).toEqual([]);
     } finally {
       delete process.env.SYNC_BULK_THRESHOLD;
+      delete process.env.SYNC_BULK_WRITES;
     }
   });
 
   it("counts products as written when their bulk operation gave no result but the store has them", async () => {
     await bulkSetup();
     process.env.SYNC_BULK_THRESHOLD = "2";
+    process.env.SYNC_BULK_WRITES = "true";
     try {
       const dev = new FakeShop(FakeShop.config("dev"), { products: tees(4, true) });
       const eu = new FakeShop(FakeShop.config("eu"), {});
@@ -453,6 +460,54 @@ describe("bulk writes", () => {
       expect(results.filter((r) => r.outcome !== "created")).toEqual([]);
       expect(eu.state.products).toHaveLength(4);
       expect(eu.state.products[2]!.variants![0]!.metafields).toEqual([{ namespace: "custom", key: "fit", type: "single_line_text_field", value: "fit-2" }]);
+    } finally {
+      delete process.env.SYNC_BULK_THRESHOLD;
+      delete process.env.SYNC_BULK_WRITES;
+    }
+  });
+
+  it("writes many products and metafield values a few per request, several requests at once", async () => {
+    await bulkSetup();
+    process.env.SYNC_BULK_THRESHOLD = "2";
+    try {
+      const dev = new FakeShop(FakeShop.config("dev"), { products: tees(12, true) });
+      const eu = new FakeShop(FakeShop.config("eu"), {});
+      const engine = engineFor(dev, eu);
+      const plan = await engine.plan("dev", "eu", { resources: ["products", "metafields"] });
+      const { results } = await engine.apply(plan.id);
+      expect(results.filter((r) => r.outcome !== "created")).toEqual([]);
+      const fields = eu.calls.map((c) => c.field);
+      expect(fields).not.toContain("bulkOperationRunMutation");
+      // 12 products, 5 per request; 24 values, 25 per call.
+      expect(fields.filter((f) => f === "Batch")).toHaveLength(4);
+      expect(eu.state.products).toHaveLength(12);
+      const tee = eu.state.products.find((p) => p.handle === "tee-7")!;
+      expect(tee.metafields).toEqual([{ namespace: "custom", key: "care", type: "single_line_text_field", value: "care-7" }]);
+      expect(tee.variants![0]!.metafields).toEqual([{ namespace: "custom", key: "fit", type: "single_line_text_field", value: "fit-7" }]);
+    } finally {
+      delete process.env.SYNC_BULK_THRESHOLD;
+    }
+  });
+
+  it("checks the store for products of a request that failed after it may have been saved", async () => {
+    await bulkSetup();
+    process.env.SYNC_BULK_THRESHOLD = "2";
+    try {
+      const dev = new FakeShop(FakeShop.config("dev"), { products: tees(4, false) });
+      const eu = new FakeShop(FakeShop.config("eu"), {});
+      const real = eu.request.bind(eu);
+      let lost = 0;
+      eu.request = (async (q: string, v: any) => {
+        const d = await real(q, v);
+        if (/mutation Batch/.test(q) && q.includes("productSet") && lost++ === 0) throw new Error("Shopify CLI gave no answer and was stopped");
+        return d;
+      }) as typeof eu.request;
+      const engine = engineFor(dev, eu);
+      const plan = await engine.plan("dev", "eu", { resources: ["products"] });
+      const { results } = await engine.apply(plan.id);
+      expect(results.map((r) => r.outcome)).toEqual(["created", "created", "created", "created"]);
+      // A create isn't sent a second time.
+      expect(eu.calls.filter((c) => c.field === "Batch")).toHaveLength(1);
     } finally {
       delete process.env.SYNC_BULK_THRESHOLD;
     }

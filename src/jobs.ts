@@ -218,6 +218,7 @@ export function jobStatus(job: ApplyJob, now: number = Date.now(), failuresShown
     totals: { created: sum("created"), updated: sum("updated"), skipped: sum("skipped"), failed: sum("failed"), left: sum("left") },
     byResource: kinds,
     bulk: bulk ? `Shopify has written about ${bulk.written} of ${bulk.total} ${bulk.kind} in its bulk operation` : undefined,
+    startedAt: new Date(job.startedAt).toISOString(),
     elapsed: minutes(elapsed),
     remaining,
     failureReasons: allFailures.length ? [...reasons.values()].sort((a, b) => b.count - a.count).slice(0, 10) : undefined,
@@ -259,7 +260,8 @@ export function jobLine(j: JobFile, now = Date.now()): string {
     `${t.created + t.updated} written, ${t.failed} failed, ${t.left} left`,
     j.bulk,
     j.remaining ? `about ${j.remaining} left` : undefined,
-    `elapsed ${j.elapsed}`,
+    // While it runs, the time so far is counted here: the file is only rewritten when something happens.
+    `elapsed ${j.state === "running" && j.startedAt ? minutes(now - Date.parse(j.startedAt)) : j.elapsed}`,
   ]
     .filter(Boolean)
     .join(" | ") + `\n  ${j.phase}${stale}`;

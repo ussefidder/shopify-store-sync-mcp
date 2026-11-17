@@ -5,6 +5,7 @@ import { createFiles, filenameFromUrl, REF_PREFIX, variantKey, variantRef, type 
 import type { FetchOptions, Item, ResourceAdapter } from "./types.js";
 import { compact, PAGE_INFO } from "./util.js";
 import { canonicalDecimal } from "./values.js";
+import { batchedMutation, bulkWrites, writeRequests, type BatchSpec } from "../shopify/batch.js";
 
 /*
  * Products, keyed by handle. Opt-in (not in the default set).
@@ -589,6 +590,21 @@ async function set(client: AdminClient, d: Record<string, unknown>, create: bool
   return id;
 }
 
+/**
+ * The same write as BULK_SET, several per request: at most 5 products or about 60 variants, so one
+ * request stays well inside the time a request may take. Variant ids are looked up afterwards, when
+ * something needs them. An update can be sent again safely; a create can't.
+ */
+const BATCH: BatchSpec = {
+  vars: "$identifier#: ProductSetIdentifiers, $input#: ProductSetInput!",
+  field: "productSet(identifier: $identifier#, input: $input#, synchronous: true) { product { id handle } userErrors { field message code } }",
+  root: "productSet",
+  perRequest: 5,
+  weight: (line) => Math.max(1, ((line.input as { variants?: unknown[] } | undefined)?.variants ?? []).length),
+  maxWeight: 60,
+  idempotent: (line) => Boolean(line.identifier),
+};
+
 const BULK_SET = /* GraphQL */ `
   mutation BulkProductSet($identifier: ProductSetIdentifiers, $input: ProductSetInput!) {
     productSet(identifier: $identifier, input: $input, synchronous: true) {
@@ -747,7 +763,7 @@ export const products: ResourceAdapter = {
       input: withSources(inputs[k]!, ctx.files),
     }));
     for (const [k, r] of early) ctx.onDone?.(k, r);
-    ctx.onPhase?.(`writing ${lines.length} products in Shopify bulk operations`);
+
     const toResult = (r: LineResult): { id?: string; error?: string } => {
       const ps = r.data?.productSet;
       const errors = [...(r.errors ?? []), ...(ps?.userErrors ?? [])].map((e: { message: string }) => e.message);
@@ -756,22 +772,31 @@ export const products: ResourceAdapter = {
       return { id: ps.product.id as string };
     };
     const done = new Map<number, { id?: string; error?: string }>();
-    const results = await bulkMutation(ctx.client, BULK_SET, lines, {
-      timeoutMs: bulkTimeoutMs(),
-      onProgress: ctx.onWritten,
-      signal: ctx.signal,
-      onStart: ctx.onOperation,
-      onPart: (part, parts, start, rows) => {
-        rows.forEach((r, j) => {
-          const res = toResult(r);
-          done.set(sent[start + j]!, res);
-          // A line Shopify gave no result for is checked against the store below before it is reported.
-          if (!r.unknown) ctx.onDone?.(sent[start + j]!, res);
-        });
-        const failed = rows.filter((_, j) => done.get(sent[start + j]!)?.error).length;
-        ctx.onPhase?.(`products: part ${part} of ${parts} finished, ${rows.length - failed} written${failed ? `, ${failed} failed` : ""}`);
-      },
-    });
+    const take = (start: number, rows: LineResult[]) =>
+      rows.forEach((r, j) => {
+        const res = toResult(r);
+        done.set(sent[start + j]!, res);
+        // A line Shopify gave no result for is checked against the store below before it is reported.
+        if (!r.unknown) ctx.onDone?.(sent[start + j]!, res);
+      });
+    let results: LineResult[];
+    if (bulkWrites()) {
+      ctx.onPhase?.(`writing ${lines.length} products in Shopify bulk operations`);
+      results = await bulkMutation(ctx.client, BULK_SET, lines, {
+        timeoutMs: bulkTimeoutMs(),
+        onProgress: ctx.onWritten,
+        signal: ctx.signal,
+        onStart: ctx.onOperation,
+        onPart: (part, parts, start, rows) => {
+          take(start, rows);
+          const failed = rows.filter((_, j) => done.get(sent[start + j]!)?.error).length;
+          ctx.onPhase?.(`products: part ${part} of ${parts} finished, ${rows.length - failed} written${failed ? `, ${failed} failed` : ""}`);
+        },
+      });
+    } else {
+      ctx.onPhase?.(`writing ${lines.length} products, a few per request, ${writeRequests()} requests at once`);
+      results = await batchedMutation(ctx.client, BATCH, lines, { signal: ctx.signal, onResults: take });
+    }
     results.forEach((r, j) => done.has(sent[j]!) || done.set(sent[j]!, toResult(r)));
     // Lines without a result (their operation was abandoned or cancelled) may have been written all
     // the same: the store says which new products exist now.

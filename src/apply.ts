@@ -258,7 +258,7 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
   const runBulk = async (kind: ResourceKind, ops: PlanOp[]): Promise<PlanOp[]> => {
     const adapter = ADAPTERS[kind];
     if (opts.signal?.aborted) return ops;
-    opts.onPhase?.(`writing ${ops.length} ${kind} in one Shopify bulk operation`);
+    opts.onPhase?.(`preparing ${ops.length} ${kind} to write in batches`);
     // Files the target lacks are taken from the source's URLs by the bulk write itself (products).
     resolver.allowUploads = kind !== "products";
     const items: { op: PlanOp; data: Record<string, unknown> }[] = [];

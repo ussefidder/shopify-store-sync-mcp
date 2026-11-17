@@ -450,3 +450,46 @@ describe("snapshot folders read like a store", async () => {
     expect(applyView("products", product, { inventory: true }).variants).toEqual([{ options: { Size: "M" }, sku: "T-M", inventory: { Shop: 27 } }]);
   });
 });
+
+describe("batched writes", async () => {
+  const { batchedMutation, groupLines } = await import("../src/shopify/batch.js");
+  const spec = { vars: "$x#: Int", field: "echo(x: $x#) { ok }", root: "echo", perRequest: 3 };
+  it("groups by count and by weight", () => {
+    const lines = [1, 1, 5, 1, 1, 1, 9].map((w) => ({ w }));
+    const groups = groupLines(lines, { ...spec, perRequest: 3, weight: (l) => l.w as number, maxWeight: 6 });
+    expect(groups.map((g) => [g.start, g.lines.length])).toEqual([[0, 2], [2, 2], [4, 2], [6, 1]]);
+  });
+
+  it("sends several writes per request, keeps results in line order and repeats only what is safe to repeat", async () => {
+    const seen: string[] = [];
+    let failures = 0;
+    const client = {
+      store: { alias: "s", domain: "s.myshopify.com" } as any,
+      request: async (q: string, v: Record<string, number>) => {
+        seen.push(q);
+        if (v.x0 === 3 && failures++ === 0) throw new Error("network");
+        return Object.fromEntries(Object.entries(v).map(([k, x]) => [`w${k.slice(1)}`, { ok: x }]));
+      },
+    };
+    const lines = Array.from({ length: 8 }, (_, i) => ({ x: i }));
+    const starts: number[] = [];
+    const res = await batchedMutation(client as any, { ...spec, idempotent: () => true }, lines, { concurrency: 2, onResults: (start) => starts.push(start) });
+    expect(seen[0]).toBe("mutation Batch($x0: Int, $x1: Int, $x2: Int) { w0: echo(x: $x0) { ok } w1: echo(x: $x1) { ok } w2: echo(x: $x2) { ok } }");
+    expect(res.map((r) => r.data?.echo.ok)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(starts.sort()).toEqual([0, 3, 6]);
+    expect(seen).toHaveLength(4);
+    // Not safe to repeat: the request isn't sent again and its writes are marked as unknown.
+    failures = 0;
+    const once = await batchedMutation(client as any, spec, lines, { concurrency: 1 });
+    expect(once.slice(3, 6).every((r) => r.unknown && r.errors?.[0]?.message === "not written: network")).toBe(true);
+    expect(once[6]!.data?.echo.ok).toBe(6);
+  });
+
+  it("starts nothing more once cancelled", async () => {
+    const abort = new AbortController();
+    const client = { store: {} as any, request: async (_q: string, v: Record<string, number>) => (abort.abort(), Object.fromEntries(Object.keys(v).map((k) => [`w${k.slice(1)}`, { ok: 1 }]))) };
+    const res = await batchedMutation(client as any, spec, Array.from({ length: 9 }, (_, i) => ({ x: i })), { concurrency: 1, signal: abort.signal });
+    expect(res.slice(0, 3).every((r) => r.data)).toBe(true);
+    expect(res.slice(3).every((r) => r.errors?.[0]?.message === "not written: the apply was cancelled")).toBe(true);
+  });
+});

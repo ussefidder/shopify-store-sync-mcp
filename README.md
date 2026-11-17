@@ -78,16 +78,16 @@ The store setup that usually gets rebuilt by hand, plus the images it uses. Refe
 
 ## Built for big catalogs
 
-Thousands of products are fine. Above 250 products the tool switches to Shopify bulk operations by itself: Shopify exports or writes the whole catalog on its side instead of answering one request per product. Comparing a 72-product store with a 4,530-product one went from about 10 hours to 82 seconds.
+Thousands of products are fine. Above 250 products the tool reads with Shopify bulk exports and writes in batches by itself, instead of one request per product. Comparing a 72-product store with a 4,530-product one went from about 10 hours to 82 seconds.
 
 <p align="center">
   <img src="docs/images/big-catalogs.png" alt="Full product diff, 72 against 4,530 products: about 10 hours before, 82 seconds now. Copying every product with variants, images and metafields: about 70,000 requests before, 10 bulk operations now, 5 running at once" width="100%">
 </p>
 
 - **Reads**: both stores are listed by handle first, and only the products both have are read in full. A full read of a big catalog is one bulk export.
-- **Writes**: new and changed products go in bulk with their variants. Missing images are created first, once each and all at the same time, so no product waits on a download and a shared image isn't copied per product. Metafield values go 25 per call. A big write is split into 5 operations running at once.
+- **Writes**: new and changed products go a few per request, 12 requests at once, with their variants, prices and stock. Missing images are created first, once each and all at the same time, so no product waits on a download and a shared image isn't copied per product. Metafield values go 100 per request. Measured on a live store, this is several times faster than Shopify's bulk write operations, which stay available with `SYNC_BULK_WRITES=true`.
 - **Live status**: a big apply runs in the background. `apply_status` shows what is written, failed and left per resource type, and the time remaining. Reports list 50 items per section, with counts of the rest.
-- **Nothing to set up**: it kicks in on its own. `SYNC_BULK_THRESHOLD` and `SYNC_BULK_PARALLEL` tune it, and if a store won't run bulk writes the tool says so and writes one by one.
+- **Nothing to set up**: it kicks in on its own. `SYNC_BULK_THRESHOLD` and `SYNC_WRITE_REQUESTS` tune it.
 
 ## Use cases
 
@@ -298,11 +298,13 @@ You can also pass the whole config as JSON in `SHOPIFY_STORES`, or point `SHOPIF
 | `SYNC_CLI_TIMEOUT_MS` | `120000` | How long one Shopify CLI call may take before it is stopped |
 | `SYNC_MAX_ITEMS` | `50000` | Longest list read from a store; a longer one is an error, never a silent cut |
 | `SYNC_WRITE_CONCURRENCY` | `4` | How many independent writes run at once |
-| `SYNC_BULK_THRESHOLD` | `250` | Above this many products, reads and product writes (and metafield values) go through one Shopify bulk operation instead of single requests |
+| `SYNC_BULK_THRESHOLD` | `250` | Above this many items, products and metafield values are read with a Shopify bulk export and written in batches instead of one request each |
+| `SYNC_WRITE_REQUESTS` | `12` | How many batched write requests run at once on one store |
+| `SYNC_BULK_WRITES` | off | `true` writes large sets through Shopify bulk operations instead of batched requests: fewer requests, usually much slower |
 | `SYNC_BULK_TIMEOUT_MS` | `1800000` | How long a bulk operation may go without writing anything more before it is given up on (a big one may run for hours) |
 | `SYNC_BACKGROUND_STEPS` | `50` | Plans with more steps than this are applied in the background; follow them with `apply_status` |
-| `SYNC_BULK_PARALLEL` | `5` | How many bulk write operations run at once on one store (a big write is split into parts) |
-| `SYNC_CLI_CONCURRENCY` | `4` | With the Shopify CLI sign-in, how many `shopify` processes run at once per store (up to 16) |
+| `SYNC_BULK_PARALLEL` | `5` | With `SYNC_BULK_WRITES`, how many bulk write operations run at once on one store |
+| `SYNC_CLI_CONCURRENCY` | `12` | With the Shopify CLI sign-in, how many `shopify` processes run at once per store (up to 16) |
 | `SYNC_AUDIT_LOG` | `~/.shopify-store-sync/audit.log` | Where every write is logged |
 | `SYNC_STATE_DIR` | `~/.shopify-store-sync` | Where plans and the audit log are kept |
 
@@ -522,7 +524,7 @@ Two references followed from the source store to the target, as the sample sync 
 ## Tested on real stores
 
 <p align="center">
-  <img src="docs/images/tested.png" alt="157 automated tests, 83 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
+  <img src="docs/images/tested.png" alt="162 automated tests, 83 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
 </p>
 
 <details>
@@ -598,7 +600,7 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 - [x] Published on npm, runs with `npx`
 
 *Quality*
-- [x] 157 automated tests against an in-memory Shopify, plus MCP protocol tests
+- [x] 162 automated tests against an in-memory Shopify, plus MCP protocol tests
 - [x] Every GraphQL operation validated against Shopify's schema for 2026-04, 2026-10 and 2027-01
 - [x] Tested live between two stores on Linux and Windows, Shopify CLI 4.9 and 5
 - [x] Parallel reads and writes (metaobject types read and entries written in parallel; the check before writing re-reads only what the plan touches) with throttle-aware retries; clear errors for missing installs, expired sign-ins and auto-managed policies

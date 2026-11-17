@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.0
+
+- **Large writes are several times faster.** Products and metafield values above 250 items are now written a few per request, 12 requests at once (`SYNC_WRITE_REQUESTS`), instead of through Shopify bulk operations. Timed on a live store with 4,000 products, about 46,000 variants and 86,000 metafield values: bulk operations wrote about one item every five seconds each, five at most (products 1 h 50 min, metafield values 1 h 5 min); batched requests wrote the same products at 190 a minute and metafield values at over 8,000 a minute. `SYNC_BULK_WRITES=true` keeps the bulk operations
+- Results of a large write now arrive request by request, so `apply_status` and `status --watch` show written, failed and left counts and the time remaining while it runs
+- A request that fails after it may have been saved is handled safely: a write that can be repeated is sent again, and for new products the store is asked which ones exist
+- With the Shopify CLI sign-in, up to 12 `shopify` processes run at once by default (`SYNC_CLI_CONCURRENCY`, was 4)
+- `status --watch` counts the time so far while nothing changes
+
 ## 0.10.4
 
 Found in the 4,000-product live test:

@@ -1,9 +1,10 @@
 import { assertNoUserErrors, paginate, type AdminClient } from "../shopify/client.js";
-import { bulkMutation, bulkQuery, bulkThreshold, bulkTimeoutMs } from "../shopify/bulk.js";
+import { bulkMutation, bulkQuery, bulkThreshold, bulkTimeoutMs, type LineResult } from "../shopify/bulk.js";
 import type { FetchOptions, Item, ResourceAdapter } from "./types.js";
 import { variantKey, type RefNode } from "../refs.js";
 import { reservedPrefix } from "./util.js";
 import { canonicalDecimal } from "./values.js";
+import { batchedMutation, bulkWrites, writeRequests, type BatchSpec } from "../shopify/batch.js";
 
 /*
  * Metafield values, keyed by where they live:
@@ -127,6 +128,15 @@ function itemsOf(prefix: string, owner: { id: string; metafields: Metafields }, 
   }
   return { items, skipped };
 }
+
+/** The same write as BULK_SET, several per request. Setting a value twice is harmless, so a failed request is sent again. */
+const BATCH: BatchSpec = {
+  vars: "$m#: [MetafieldsSetInput!]!",
+  field: "metafieldsSet(metafields: $m#) { metafields { id } userErrors { field message code } }",
+  root: "metafieldsSet",
+  perRequest: 4,
+  idempotent: () => true,
+};
 
 const BULK_SET = /* GraphQL */ `
   mutation BulkMetafieldsSet($m: [MetafieldsSetInput!]!) {
@@ -295,17 +305,32 @@ export const metafields: ResourceAdapter = {
         }),
       }));
       const first = round === 0;
-      ctx.onPhase?.(`writing ${pending.length} metafield values in Shopify bulk operations${first ? "" : ` (retry ${round})`}`);
-      const res = await bulkMutation(ctx.client, BULK_SET, lines, {
-        timeoutMs: bulkTimeoutMs(),
-        signal: ctx.signal,
-        onStart: ctx.onOperation,
-        onProgress: first ? (n) => ctx.onWritten?.(Math.min(n * 25, items.length)) : undefined,
-        onPart: (part, parts, _start, rows) => {
-          const failed = rows.filter((r) => r.errors?.length || r.data?.metafieldsSet?.userErrors?.length).length;
-          ctx.onPhase?.(`metafields${first ? "" : ` (retry ${round})`}: part ${part} of ${parts} finished${failed ? `, ${failed} batch${failed === 1 ? "" : "es"} of 25 with errors` : ""}`);
-        },
-      });
+      const retry = first ? "" : ` (retry ${round})`;
+      let res: LineResult[];
+      if (bulkWrites()) {
+        ctx.onPhase?.(`writing ${pending.length} metafield values in Shopify bulk operations${retry}`);
+        res = await bulkMutation(ctx.client, BULK_SET, lines, {
+          timeoutMs: bulkTimeoutMs(),
+          signal: ctx.signal,
+          onStart: ctx.onOperation,
+          onProgress: first ? (n) => ctx.onWritten?.(Math.min(n * 25, items.length)) : undefined,
+          onPart: (part, parts, _start, rows) => {
+            const failed = rows.filter((r) => r.errors?.length || r.data?.metafieldsSet?.userErrors?.length).length;
+            ctx.onPhase?.(`metafields${retry}: part ${part} of ${parts} finished${failed ? `, ${failed} batch${failed === 1 ? "" : "es"} of 25 with errors` : ""}`);
+          },
+        });
+      } else {
+        ctx.onPhase?.(`writing ${pending.length} metafield values, ${BATCH.perRequest * 25} per request, ${writeRequests()} requests at once${retry}`);
+        res = await batchedMutation(ctx.client, BATCH, lines, {
+          signal: ctx.signal,
+          // Values of a call that went through are reported straight away, so progress is live.
+          onResults: (start, rows) =>
+            rows.forEach((r, j) => {
+              if (r.errors?.length || r.data?.metafieldsSet?.userErrors?.length) return;
+              groups[start + j]!.forEach((i, k) => ctx.onDone?.(i, { id: r.data?.metafieldsSet?.metafields?.[k]?.id ?? "" }));
+            }),
+        });
+      }
       const again: number[] = [];
       res.forEach((r, li) => {
         const g = groups[li]!;
