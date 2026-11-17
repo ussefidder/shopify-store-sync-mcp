@@ -651,21 +651,21 @@ render("at-a-glance", 1280, 560, `
 `);
 
 // ---------------------------------------------------------------- big catalogs
-const big = (title, beforeVal, beforeNote, afterVal, afterNote) => `
+const big = (title, beforeLbl, beforeVal, beforeNote, afterLbl, afterVal, afterNote) => `
   <div class="cmp card">
     <div class="ct">${title}</div>
     <div class="row2">
-      <div class="side"><div class="lbl">before</div><div class="v r">${beforeVal}</div><div class="muted n">${beforeNote}</div></div>
+      <div class="side"><div class="lbl">${beforeLbl}</div><div class="v r">${beforeVal}</div><div class="muted n">${beforeNote}</div></div>
       <div class="arrow">→</div>
-      <div class="side"><div class="lbl">now</div><div class="v g">${afterVal}</div><div class="muted n">${afterNote}</div></div>
+      <div class="side"><div class="lbl">${afterLbl}</div><div class="v g">${afterVal}</div><div class="muted n">${afterNote}</div></div>
     </div>
   </div>`;
 render("big-catalogs", 1280, 300, `
 <div class="wrap">
-  <div class="title"><h2>Built for big catalogs</h2><span class="muted">measured live: 4,000 products, 46,000 variants, 86,000 metafield values</span></div>
+  <div class="title"><h2>Built for big catalogs</h2><span class="muted">this tool, earlier version against current, measured live</span></div>
   <div class="cmps">
-    ${big("Full product diff, 72 products against 4,530", "~10 h", "one request per product", "82 s", "one bulk export")}
-    ${big("Full copy: products, variants, images, prices, stock, metafields", "~3 h", "Shopify bulk operations", "51 min", "batched requests, 12 at once")}
+    ${big("Full product diff, 72 products against 4,530", "version 0.8.0", "~10 h", "one request per product", "version 0.8.1 and later", "82 s", "one bulk export")}
+    ${big("Full copy of 4,000 products, with variants, stock and metafields", "version 0.10", "~3 h", "Shopify bulk operations", "version 0.11 and later", "51 min", "batched requests, 12 at once")}
   </div>
   <div class="pills2">
     <span class="pill"><span class="dot bg-g"></span>Products 6x faster: 1 h 51 min → 18.5 min</span>
