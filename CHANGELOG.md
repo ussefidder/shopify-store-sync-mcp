@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.4
+
+- README only, no code change: a banner listing every main feature, an "Everything it does" overview on the first screen, a comparison with store-copy apps (Matrixify, Rewind Staging, Simple Sync) from their own pages, the explainer video with a narrated big-catalog scene, and an invitation to send recommendations
+
 ## 0.11.3
 
 - **Stock updates on existing variants work on API 2026-04 and later.** Shopify now requires an idempotency key (the `@idempotent` directive) on `inventorySetQuantities` and `inventoryActivate`; without it the whole product update failed when stock was synced with `inventory: true`. Found live on 2026-10: a product edited by hand in the target failed to update. Earlier API versions are sent the mutations without the key, as before

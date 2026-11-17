@@ -8,12 +8,12 @@
     "url": "https://github.com/ussefidder/shopify-store-sync-mcp",
     "source": "github"
   },
-  "version": "0.11.3",
+  "version": "0.11.4",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "shopify-store-sync-mcp",
-      "version": "0.11.3",
+      "version": "0.11.4",
       "transport": {
         "type": "stdio"
       },
