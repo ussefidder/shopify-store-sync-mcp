@@ -1,42 +1,133 @@
 {
   "voice": "af_heart",
   "speed": 1.0,
-  "elevenlabs": { "voice": "Bella", "model": "eleven_multilingual_v2" },
+  "elevenlabs": {
+    "voice": "Bella",
+    "model": "eleven_multilingual_v2"
+  },
   "scenes": [
-    { "id": "problem", "lines": [
-      { "say": "You built it on your dev store.", "caption": "You built it on your dev store." },
-      { "say": "Now production needs it too.", "caption": "Now production needs it too." },
-      { "say": "Metaobjects, menus, pages, redirects: rebuilt by hand, because every I D is different.", "caption": "Metaobjects, menus, pages, redirects: rebuilt by hand, because every ID is different." }
-    ]},
-    { "id": "ask", "lines": [
-      { "say": "With Shopify Store Sync, you just ask.", "caption": "With Shopify Store Sync, you just ask." },
-      { "say": "It compares both stores, field by field,", "caption": "It compares both stores, field by field," },
-      { "say": "and shows you a plan before anything is written.", "caption": "and shows you a plan before anything is written." }
-    ]},
-    { "id": "apply", "hold": 0.6, "lines": [
-      { "say": "Production is protected, so you confirm it yourself. The assistant can't.", "caption": "Production is protected, so you confirm it yourself. The assistant can't." },
-      { "say": "Then it writes. Five changes. Nothing deleted.", "caption": "Then it writes. Five changes. Nothing deleted." },
-      { "say": "Both stores, in sync.", "caption": "Both stores, in sync." }
-    ]},
-    { "id": "setup", "lines": [
-      { "say": "Setup takes a minute.", "caption": "Setup takes a minute." },
-      { "say": "Install Shopify C L I.", "caption": "Install Shopify CLI." },
-      { "say": "Connect each store, and approve in your browser. No app to create, no tokens to paste.", "caption": "Connect each store and approve in your browser. No app to create, no tokens to paste." },
-      { "say": "Then add the server to Claude, Cursor, or any M C P client.", "caption": "Then add the server to Claude, Cursor or any MCP client." }
-    ]},
-    { "id": "terminal", "lines": [
-      { "say": "Prefer the terminal? The same engine runs as a command line tool.", "caption": "Prefer the terminal? The same engine runs as a command-line tool." },
-      { "say": "Diff. Plan. Apply.", "caption": "Diff. Plan. Apply." },
-      { "say": "Add exit code, and a scheduled job catches drift for you.", "caption": "Add --exit-code and a scheduled job catches drift for you." }
-    ]},
-    { "id": "coverage", "lines": [
-      { "say": "It syncs products, collections, pages, menus, redirects, metafields, metaobjects, and translations.", "caption": "It syncs products, collections, pages, menus, redirects, metafields, metaobjects and translations." }
-    ]},
-    { "id": "safety", "lines": [
-      { "say": "And it's built for production: read-only by default, every change reviewed first, and it never deletes.", "caption": "Built for production: read-only by default, every change reviewed first, and it never deletes." }
-    ]},
-    { "id": "cta", "hold": 1.8, "lines": [
-      { "say": "Free and open source. Try it on a dev store today.", "caption": "Free and open source. Try it on a dev store today." }
-    ]}
+    {
+      "id": "problem",
+      "lines": [
+        {
+          "say": "You built it on your dev store.",
+          "caption": "You built it on your dev store."
+        },
+        {
+          "say": "Now production needs it too.",
+          "caption": "Now production needs it too."
+        },
+        {
+          "say": "Metaobjects, menus, pages, redirects: rebuilt by hand, because every I D is different.",
+          "caption": "Metaobjects, menus, pages, redirects: rebuilt by hand, because every ID is different."
+        }
+      ]
+    },
+    {
+      "id": "ask",
+      "lines": [
+        {
+          "say": "With Shopify Store Sync, you just ask.",
+          "caption": "With Shopify Store Sync, you just ask."
+        },
+        {
+          "say": "It compares both stores, field by field,",
+          "caption": "It compares both stores, field by field,"
+        },
+        {
+          "say": "and shows you a plan before anything is written.",
+          "caption": "and shows you a plan before anything is written."
+        }
+      ]
+    },
+    {
+      "id": "apply",
+      "hold": 0.6,
+      "lines": [
+        {
+          "say": "Production is protected, so you confirm it yourself. The assistant can't.",
+          "caption": "Production is protected, so you confirm it yourself. The assistant can't."
+        },
+        {
+          "say": "Then it writes. Five changes. Nothing deleted.",
+          "caption": "Then it writes. Five changes. Nothing deleted."
+        },
+        {
+          "say": "Both stores, in sync.",
+          "caption": "Both stores, in sync."
+        }
+      ]
+    },
+    {
+      "id": "setup",
+      "lines": [
+        {
+          "say": "Setup takes a minute.",
+          "caption": "Setup takes a minute."
+        },
+        {
+          "say": "Install Shopify C L I.",
+          "caption": "Install Shopify CLI."
+        },
+        {
+          "say": "Connect each store, and approve in your browser. No app to create, no tokens to paste.",
+          "caption": "Connect each store and approve in your browser. No app to create, no tokens to paste."
+        },
+        {
+          "say": "Then add the server to Claude, Cursor, or any M C P client.",
+          "caption": "Then add the server to Claude, Cursor or any MCP client."
+        }
+      ]
+    },
+    {
+      "id": "terminal",
+      "lines": [
+        {
+          "say": "Prefer the terminal? The same engine runs as a command line tool.",
+          "caption": "Prefer the terminal? The same engine runs as a command-line tool."
+        },
+        {
+          "say": "Diff. Plan. Apply.",
+          "caption": "Diff. Plan. Apply."
+        },
+        {
+          "say": "Add exit code, and a scheduled job catches drift for you.",
+          "caption": "Add --exit-code and a scheduled job catches drift for you."
+        }
+      ]
+    },
+    {
+      "id": "coverage",
+      "lines": [
+        {
+          "say": "It syncs products, collections, pages, menus, redirects, metafields, metaobjects, and translations.",
+          "caption": "It syncs products, collections, pages, menus, redirects, metafields, metaobjects and translations."
+        }
+      ]
+    },
+    {
+      "id": "scale",
+      "hold": 7.2,
+      "lines": []
+    },
+    {
+      "id": "safety",
+      "lines": [
+        {
+          "say": "And it's built for production: read-only by default, every change reviewed first, and it never deletes.",
+          "caption": "Built for production: read-only by default, every change reviewed first, and it never deletes."
+        }
+      ]
+    },
+    {
+      "id": "cta",
+      "hold": 1.8,
+      "lines": [
+        {
+          "say": "Free and open source. Try it on a dev store today.",
+          "caption": "Free and open source. Try it on a dev store today."
+        }
+      ]
+    }
   ]
 }
