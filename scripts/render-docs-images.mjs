@@ -580,16 +580,16 @@ const big = (title, beforeVal, beforeNote, afterVal, afterNote) => `
   </div>`;
 render("big-catalogs", 1280, 300, `
 <div class="wrap">
-  <div class="title"><h2>Built for big catalogs</h2><span class="muted">Shopify bulk operations, picked automatically above 250 products</span></div>
+  <div class="title"><h2>Built for big catalogs</h2><span class="muted">measured live: 4,000 products, 46,000 variants, 86,000 metafield values</span></div>
   <div class="cmps">
-    ${big("Full product diff, 72 products against 4,530", "~10 h", "one request per product", "82 s", "measured, one bulk export")}
-    ${big("Copy every product with variants, images and metafields", "~70,000", "requests, a few at a time", "10", "bulk operations, 5 running at once")}
+    ${big("Full product diff, 72 products against 4,530", "~10 h", "one request per product", "82 s", "one bulk export")}
+    ${big("Full copy: products, variants, images, prices, stock, metafields", "~3 h", "Shopify bulk operations", "51 min", "batched requests, 12 at once")}
   </div>
   <div class="pills2">
-    <span class="pill"><span class="dot bg-g"></span>Images from the source's URLs</span>
-    <span class="pill"><span class="dot bg-b"></span>Metafields 25 per call</span>
-    <span class="pill"><span class="dot bg-a"></span>Only shared products read in full</span>
-    <span class="pill"><span class="dot bg-r"></span>Falls back to one by one</span>
+    <span class="pill"><span class="dot bg-g"></span>Products 6x faster: 1 h 51 min → 18.5 min</span>
+    <span class="pill"><span class="dot bg-b"></span>Metafields: 1 h 7 min → 25 min</span>
+    <span class="pill"><span class="dot bg-a"></span>Each image created once</span>
+    <span class="pill"><span class="dot bg-r"></span>Live status and cancel</span>
   </div>
 </div>`, CARD_CSS + `
   .cmps { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -636,7 +636,7 @@ render("tested", 1280, 288, `
 <div class="wrap">
   <div class="title"><h2>Tested on real stores, not just in theory</h2><span class="muted">two live Shopify stores, on Linux and Windows</span></div>
   <div class="stats">
-    <div class="stat card"><b class="g">162</b><span>automated tests</span></div>
+    <div class="stat card"><b class="g">163</b><span>automated tests</span></div>
     <div class="stat card"><b class="b">83</b><span>GraphQL operations validated against Shopify's schema</span></div>
     <div class="stat card"><b class="a">11</b><span>item types written to a live store</span></div>
     <div class="stat card"><b style="color:${P}">2</b><span>sign-in methods used live: Shopify CLI and an app</span></div>
@@ -658,7 +658,7 @@ const todo = (t) => `<div class="it"><span class="ck muted">○</span>${t}</div>
 const group = (title, cls, items) => `<div class="grp"><div class="gt ${cls}">${title}</div>${items.join("")}</div>`;
 render("roadmap", 1280, 462, `
 <div class="wrap">
-  <div class="title"><h2>Roadmap</h2><span class="muted">shipped in 0.11.0, and what comes next</span></div>
+  <div class="title"><h2>Roadmap</h2><span class="muted">shipped in 0.11.1, and what comes next</span></div>
   <div class="cols">
     <div class="card pane">
       <div class="ph"><span class="badge bg-g">Shipped</span></div>
@@ -666,7 +666,7 @@ render("roadmap", 1280, 462, `
         ${group("Syncing", "g", [done("11 item types incl. products"), done("ID remapping, incl. variants"), done("Barcodes, weight, stock (opt-in)"), done("Batched writes for big catalogs")])}
         ${group("Safety", "g", [done("Dry-run plans, drift check"), done("Never deletes, inside items too"), done("A person confirms production"), done("Validated input, time limits")])}
         ${group("Ways to use it", "g", [done("MCP server, 12 tools, live status"), done("CLI: drift checks, md reports"), done("Config as code, theme diff"), done("No-app sign-in, on npm")])}
-        ${group("Quality", "g", [done("162 automated tests, linted"), done("Checked on 3 API versions"), done("Live on Linux and Windows"), done("Parallel reads and writes")])}
+        ${group("Quality", "g", [done("163 automated tests, linted"), done("Checked on 3 API versions"), done("Live on Linux and Windows"), done("Parallel reads and writes")])}
       </div>
     </div>
     <div class="card pane">

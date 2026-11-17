@@ -29,6 +29,10 @@ export interface ApplyJob {
   results: Map<number, OpResult>;
   /** When the first write finished, to estimate the time left from the rate since then. */
   firstWriteAt?: number;
+  /** When each resource type's first result came in, so each type's time left is estimated from its own pace. */
+  kindStart: Record<string, number>;
+  /** The resource type being written now. */
+  current?: string;
   /** The running bulk write: items Shopify has written so far, and how many results of that kind were in before it began. */
   bulk?: { kind: string; written: number; total: number; before: number };
   error?: string;
@@ -97,6 +101,7 @@ export class ApplyJobs {
       byKind,
       results: new Map(),
       bulkOperations: [],
+      kindStart: {},
       abort: new AbortController(),
     };
     this.jobs.set(plan.id, job);
@@ -117,7 +122,11 @@ export class ApplyJobs {
       },
       onResult: (r) => {
         job.results.set(r.seq, r);
-        if (r.outcome !== "skipped") job.firstWriteAt ??= now();
+        if (r.outcome !== "skipped") {
+          job.firstWriteAt ??= now();
+          job.kindStart[r.kind] ??= now();
+          job.current = r.kind;
+        }
         this.persist(job);
         opts.onResult?.(r);
       },
@@ -187,13 +196,19 @@ export function jobStatus(job: ApplyJob, now: number = Date.now(), failuresShown
   const bulk = job.bulk;
   const inFlight = bulk ? Math.max(0, bulk.written - ([...job.results.values()].filter((r) => r.kind === bulk.kind).length - bulk.before)) : 0;
   const elapsed = (job.finishedAt ?? now) - job.startedAt;
+  // Time left for the type being written, from its own pace (a product takes far longer than a
+  // metafield value); types not started yet are named, not guessed.
   let remaining: string | undefined;
-  if (job.state === "running" && job.firstWriteAt) {
-    const writing = now - job.firstWriteAt;
-    const written = [...job.results.values()].filter((r) => r.outcome !== "skipped").length + inFlight;
-    const left = job.steps - finished - inFlight;
-    const done = written;
-    if (done > 0 && writing > 5_000 && left > 0) remaining = minutes((writing / done) * left);
+  const cur = bulk?.kind ?? job.current;
+  if (job.state === "running" && cur && job.kindStart[cur] !== undefined && kinds[cur]) {
+    const c = kinds[cur]!;
+    const done = c.created + c.updated + c.failed + (bulk?.kind === cur ? inFlight : 0);
+    const writing = now - job.kindStart[cur]!;
+    const left = c.left - (bulk?.kind === cur ? inFlight : 0);
+    const later = Object.entries(kinds).filter(([k, x]) => k !== cur && x.left > 0 && job.kindStart[k] === undefined);
+    const then = later.length ? `, then ${later.map(([k, x]) => `${x.left} ${k}`).join(" and ")}` : "";
+    if (done > 0 && writing > 5_000 && left > 0) remaining = `${minutes((writing / done) * left)} for ${cur}${then}`;
+    else if (left <= 0 && then) remaining = `${cur} done${then}`;
   }
   const allFailures = [...job.results.values()].filter((r) => r.outcome === "failed");
   const failures = kind ? allFailures.filter((r) => r.kind === kind) : allFailures;

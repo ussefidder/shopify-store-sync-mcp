@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.1
+
+- **Shopify's rate limit is waited out instead of failing writes.** When a batched request is turned away as Throttled, every request pauses, fewer run at once for a while, and the request is sent again (Shopify doesn't run a throttled request, so this is safe even for creates). In the live test on 0.11.0, 100 of 85,972 metafield values failed this way
+- The time left is estimated per resource type from its own pace, and types not started yet are named instead of guessed (a metafield value is written far faster than a product, so one shared pace over-estimated by hours)
+- README: the timings of the live 4,000-product test, bulk operations against batched requests
+
 ## 0.11.0
 
 - **Large writes are several times faster.** Products and metafield values above 250 items are now written a few per request, 12 requests at once (`SYNC_WRITE_REQUESTS`), instead of through Shopify bulk operations. Timed on a live store with 4,000 products, about 46,000 variants and 86,000 metafield values: bulk operations wrote about one item every five seconds each, five at most (products 1 h 50 min, metafield values 1 h 5 min); batched requests wrote the same products at 190 a minute and metafield values at over 8,000 a minute. `SYNC_BULK_WRITES=true` keeps the bulk operations

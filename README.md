@@ -78,11 +78,23 @@ The store setup that usually gets rebuilt by hand, plus the images it uses. Refe
 
 ## Built for big catalogs
 
-Thousands of products are fine. Above 250 products the tool reads with Shopify bulk exports and writes in batches by itself, instead of one request per product. Comparing a 72-product store with a 4,530-product one went from about 10 hours to 82 seconds.
+Thousands of products are fine. Above 250 items the tool reads with Shopify bulk exports and writes in batches by itself, instead of one request per item. Comparing a 72-product store with a 4,530-product one went from about 10 hours to 82 seconds.
 
 <p align="center">
-  <img src="docs/images/big-catalogs.png" alt="Full product diff, 72 against 4,530 products: about 10 hours before, 82 seconds now. Copying every product with variants, images and metafields: about 70,000 requests before, 10 bulk operations now, 5 running at once" width="100%">
+  <img src="docs/images/big-catalogs.png" alt="Full product diff, 72 against 4,530 products: about 10 hours before, 82 seconds now. Full copy of 4,000 products with variants, images, prices, stock and metafields: about 3 hours with Shopify bulk operations, 51 minutes with batched requests" width="100%">
 </p>
+
+**Timed live, store to store**: 4,000 products with 46,000 variants, images, prices and stock per location, and 85,972 metafield values, copied between two development stores through the MCP tools.
+
+| Step | Shopify bulk operations (0.10) | Batched requests (0.11) |
+|---|---:|---:|
+| Diff and plan | 6 min | 6 min |
+| 701 images, created once each | 3 min | 1 min |
+| 4,000 products | 1 h 51 min | **18.5 min** |
+| 85,972 metafield values | 1 h 7 min | **25 min** |
+| **Total** | **about 3 h** | **51 min** |
+
+Why: a Shopify bulk operation writes its items one after the other, about one every five seconds on these stores, and a store runs at most five at once. A few writes per request, twelve requests at once, go about six times faster for products. Metafield values start faster still and then settle at the store's API rate limit, which the tool waits out on its own.
 
 - **Reads**: both stores are listed by handle first, and only the products both have are read in full. A full read of a big catalog is one bulk export.
 - **Writes**: new and changed products go a few per request, 12 requests at once, with their variants, prices and stock. Missing images are created first, once each and all at the same time, so no product waits on a download and a shared image isn't copied per product. Metafield values go 100 per request. Measured on a live store, this is several times faster than Shopify's bulk write operations, which stay available with `SYNC_BULK_WRITES=true`.
@@ -524,7 +536,7 @@ Two references followed from the source store to the target, as the sample sync 
 ## Tested on real stores
 
 <p align="center">
-  <img src="docs/images/tested.png" alt="162 automated tests, 83 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
+  <img src="docs/images/tested.png" alt="163 automated tests, 83 GraphQL operations validated, 11 item types written live, 2 sign-in methods used live" width="100%">
 </p>
 
 <details>
@@ -543,6 +555,7 @@ Two references followed from the source store to the target, as the sample sync 
 | Theme settings diff | read-only, 15 files compared in about 1 second |
 | Products (Shopify CLI sign-in, Windows) | a real product copied as a draft with its 4 images and alt text; after editing the copy and adding a variant and an image there, the update restored the title and kept both; the next diff was identical |
 | Products: reading only named handles | planning one product went from 97 to 6 seconds |
+| Big catalog store to store (0.11.0, MCP, Windows) | 4,000 products, 46,000 variants with prices and stock, 701 images and 85,972 metafield values in 51 minutes from plan to finish, 0 products failed; [timings above](#built-for-big-catalogs) |
 | Menus (0.5.0) | a link added only in the target stayed in place through an update that added a link from the source; the plan named it; the next plan was empty |
 | Products: what only the target has (0.5.0) | a tag and a YouTube video added only in the target were both still there after an update that renamed the product and added a tag |
 | Protected store over MCP (0.5.0, stdio, Windows) | refused when the assistant passed the domain itself; applied after the person typed it when the client asked |
@@ -600,7 +613,7 @@ Behaviours of the live API found this way are covered by tests: `nodes` returns 
 - [x] Published on npm, runs with `npx`
 
 *Quality*
-- [x] 162 automated tests against an in-memory Shopify, plus MCP protocol tests
+- [x] 163 automated tests against an in-memory Shopify, plus MCP protocol tests
 - [x] Every GraphQL operation validated against Shopify's schema for 2026-04, 2026-10 and 2027-01
 - [x] Tested live between two stores on Linux and Windows, Shopify CLI 4.9 and 5
 - [x] Parallel reads and writes (metaobject types read and entries written in parallel; the check before writing re-reads only what the plan touches) with throttle-aware retries; clear errors for missing installs, expired sign-ins and auto-managed policies

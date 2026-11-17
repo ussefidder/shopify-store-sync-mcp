@@ -391,8 +391,8 @@ describe("apply_status", async () => {
     expect(s).toMatchObject({ state: "running", phase: "writing products", totals: { created: 3, failed: 1, left: 6 } });
     expect(s.byResource.products).toMatchObject({ total: 6, created: 3, failed: 1, left: 2 });
     expect(s.byResource.metafields).toMatchObject({ total: 4, left: 4 });
-    // 4 written in the minute since the first write: 6 left take about a minute and a half.
-    expect(s.remaining).toBe("2 min");
+    // 4 products in the minute since the first one: 2 more take about half a minute. Metafields haven't started, so they're named, not guessed.
+    expect(s.remaining).toBe("1 min for products, then 4 metafields");
     expect(s.failures).toEqual([{ seq: 2, kind: "products", key: "k1", message: "bad" }]);
     expect(s.failureReasons).toEqual([{ kind: "products", reason: "bad", count: 1, examples: ["k1"], firstMessage: "bad" }]);
     expect(jobStatus(job, 120_000, 20, "metafields").failures).toEqual([]);
@@ -483,6 +483,32 @@ describe("batched writes", async () => {
     const once = await batchedMutation(client as any, spec, lines, { concurrency: 1 });
     expect(once.slice(3, 6).every((r) => r.unknown && r.errors?.[0]?.message === "not written: network")).toBe(true);
     expect(once[6]!.data?.echo.ok).toBe(6);
+  });
+
+  it("waits out Shopify's rate limit and sends a turned-away request again, even a create, instead of failing it", async () => {
+    const { ShopifyError } = await import("../src/shopify/client.js");
+    let calls = 0;
+    const waits: number[] = [];
+    const client = {
+      store: {} as any,
+      request: async (_q: string, v: Record<string, number>) => {
+        // The first 4 requests are turned away as Throttled, as after the CLI's own retries ran out.
+        if (++calls <= 4) throw new ShopifyError("s.myshopify.com: Throttled", [{ message: "Throttled", extensions: { code: "THROTTLED" } }]);
+        return Object.fromEntries(Object.entries(v).map(([k, x]) => [`w${k.slice(1)}`, { ok: x }]));
+      },
+    };
+    const lines = Array.from({ length: 12 }, (_, i) => ({ x: i }));
+    let clock = 0;
+    const res = await batchedMutation(client as any, spec, lines, {
+      concurrency: 4,
+      now: () => clock,
+      wait: async (ms) => {
+        waits.push(ms);
+        clock += ms;
+      },
+    });
+    expect(res.map((r) => r.data?.echo.ok)).toEqual(lines.map((l) => l.x));
+    expect(waits.length).toBeGreaterThan(0);
   });
 
   it("starts nothing more once cancelled", async () => {
