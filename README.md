@@ -28,7 +28,7 @@
   <img src="docs/images/quickstart.png" alt="Three steps: connect your stores with npx shopify-store-sync-mcp connect, add the server to your AI client, ask in plain language" width="100%">
 </p>
 
-https://github.com/user-attachments/assets/66a2dfd0-5770-4403-992c-cfe133ea0e9c
+https://github.com/user-attachments/assets/988dea82-0cc9-4241-9605-f2c38601c908
 
 <sub>Compare, plan, confirm, apply: the full walkthrough, with sound. Every output shown is real, from two sample stores.</sub>
 
