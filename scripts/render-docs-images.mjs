@@ -53,35 +53,47 @@ function render(name, width, height, body, css = "") {
 }
 
 // ---------------------------------------------------------------- hero
-render("hero", 1280, 360, `
+render("hero", 1280, 420, `
 <div class="wrap">
   <div class="glow"></div>
   <div class="left">
-    <div class="eyebrow mono">MCP SERVER · SHOPIFY ADMIN API</div>
+    <div class="eyebrow mono">MCP SERVER · CLI · SHOPIFY ADMIN API · FREE, MIT</div>
     <h1>shopify-store-sync-mcp</h1>
-    <p class="tag">Diff and sync configuration between Shopify stores, straight from your AI assistant.</p>
+    <p class="tag">Diff and sync Shopify stores from your AI assistant: definitions, metaobjects, menus, pages, products, metafields and translations.</p>
     <div class="pills">
+      <span class="pill"><span class="dot bg-g"></span>Field-level diff</span>
       <span class="pill"><span class="dot bg-g"></span>Dry-run plans</span>
       <span class="pill"><span class="dot bg-b"></span>Cross-store ID remapping</span>
-      <span class="pill"><span class="dot bg-a"></span>Drift-checked writes</span>
+      <span class="pill"><span class="dot bg-b"></span>Drift-checked writes</span>
       <span class="pill"><span class="dot bg-r"></span>Never deletes</span>
+      <span class="pill"><span class="dot bg-r"></span>Production guardrails</span>
+      <span class="pill"><span class="dot bg-a"></span>4,000 products in 51 min</span>
+      <span class="pill"><span class="dot bg-a"></span>Live status and cancel</span>
+      <span class="pill"><span class="dot bg-p"></span>Prices and stock</span>
+      <span class="pill"><span class="dot bg-p"></span>Translations</span>
+      <span class="pill"><span class="dot bg-t"></span>Theme settings diff</span>
+      <span class="pill"><span class="dot bg-t"></span>Config as code</span>
+      <span class="pill"><span class="dot bg-t"></span>CLI drift checks</span>
     </div>
   </div>
   <div class="stores">
     <div class="store card"><div class="muted small">source</div><div class="sname">dev</div><div class="mono small muted">dev.myshopify.com</div></div>
-    <div class="arrow"><div class="line"></div><div class="mono small">plan → apply</div></div>
-    <div class="store card prot"><div class="muted small">target · protected</div><div class="sname">eu</div><div class="mono small muted">eu.myshopify.com</div></div>
+    <div class="arrow"><div class="line"></div><div class="mono small">diff → plan → apply</div></div>
+    <div class="store card prot"><div class="muted small">target · protected</div><div class="sname">prod</div><div class="mono small muted">prod.myshopify.com</div></div>
+    <div class="mono small muted tools">12 MCP tools · any MCP client</div>
   </div>
 </div>`, `
-  .wrap { position: relative; width: 1280px; height: 360px; padding: 56px 64px; display: flex; align-items: center; gap: 48px; overflow: hidden;
+  .wrap { position: relative; width: 1280px; height: 420px; padding: 48px 64px; display: flex; align-items: center; gap: 48px; overflow: hidden;
           background: radial-gradient(1200px 400px at 0% 0%, #13202a 0%, #0b0f14 60%); }
   .glow { position: absolute; right: -120px; top: -160px; width: 520px; height: 520px; border-radius: 50%;
           background: radial-gradient(circle, rgba(87,194,110,.18), transparent 65%); }
   .left { flex: 1; position: relative; }
   .eyebrow { font-size: 13px; letter-spacing: .12em; color: #57c26e; margin-bottom: 14px; }
   h1 { font-size: 52px; font-weight: 800; letter-spacing: -0.02em; }
-  .tag { margin-top: 12px; font-size: 21px; color: #b5c2cf; max-width: 640px; line-height: 1.4; }
-  .pills { margin-top: 26px; display: flex; flex-wrap: wrap; gap: 10px; }
+  .tag { margin-top: 12px; font-size: 19px; color: #b5c2cf; max-width: 760px; line-height: 1.45; }
+  .pills { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .pills .pill { font-size: 13.5px; padding: 5px 11px; }
+  .bg-p { background: #a371f7; } .bg-t { background: #39c5cf; }
   .stores { position: relative; display: flex; flex-direction: column; align-items: center; gap: 10px; width: 300px; }
   .store { width: 300px; padding: 16px 20px; }
   .store.prot { border-color: #3a2a2a; }
@@ -89,6 +101,7 @@ render("hero", 1280, 360, `
   .small { font-size: 13px; }
   .arrow { display: flex; align-items: center; gap: 12px; color: #57c26e; height: 34px; }
   .line { width: 2px; height: 34px; background: linear-gradient(#57c26e, #2a6b3a); }
+  .tools { margin-top: 6px; white-space: nowrap; }
 `);
 
 // ---------------------------------------------------------------- demo (real output)
