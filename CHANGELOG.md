@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.3
+
+- **Stock updates on existing variants work on API 2026-04 and later.** Shopify now requires an idempotency key (the `@idempotent` directive) on `inventorySetQuantities` and `inventoryActivate`; without it the whole product update failed when stock was synced with `inventory: true`. Found live on 2026-10: a product edited by hand in the target failed to update. Earlier API versions are sent the mutations without the key, as before
+- The in-memory Shopify used by the tests now refuses those mutations without a key, like the live API
+
 ## 0.11.2
 
 - Every request Shopify turns away for its rate limit is now waited out for up to about two minutes before it counts as failed (was about 30 seconds), on every path: small plans written one by one, reads, and both sign-in methods. Together with 0.11.1, a busy store slows a sync down instead of failing parts of it

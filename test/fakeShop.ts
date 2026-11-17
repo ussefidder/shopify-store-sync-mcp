@@ -1,5 +1,5 @@
 import type { StoreConfig } from "../src/config.js";
-import type { AdminClient } from "../src/shopify/client.js";
+import { ShopifyError, type AdminClient } from "../src/shopify/client.js";
 
 /**
  * In-memory stand-in for the Admin GraphQL API: just enough of each operation this
@@ -520,6 +520,10 @@ export class FakeShop implements AdminClient {
       case "locations":
         return conn(s.locations);
       case "inventorySetQuantities": {
+        // Like the live API from 2026-04: stock writes need an idempotency key.
+        if (this.store.apiVersion >= "2026-04" && (!/@idempotent\(key: \$key\)/.test(query) || !v.key)) {
+          throw new ShopifyError(`${this.store.domain}: The @idempotent directive is required for this mutation but was not provided.`);
+        }
         for (const q of v.input.quantities) {
           const variant = s.products.flatMap((x) => x.variants ?? []).find((x) => `${x.id}-item` === q.inventoryItemId);
           const loc = s.locations.find((l) => l.id === q.locationId);
@@ -530,6 +534,10 @@ export class FakeShop implements AdminClient {
         return { userErrors: [] };
       }
       case "inventoryActivate": {
+        // Like the live API from 2026-04: stock writes need an idempotency key.
+        if (this.store.apiVersion >= "2026-04" && (!/@idempotent\(key: \$key\)/.test(query) || !v.key)) {
+          throw new ShopifyError(`${this.store.domain}: The @idempotent directive is required for this mutation but was not provided.`);
+        }
         const variant = s.products.flatMap((x) => x.variants ?? []).find((x) => `${x.id}-item` === v.i);
         const loc = s.locations.find((l) => l.id === v.l);
         if (variant && loc) variant.stock = { ...(variant.stock ?? {}), [loc.name]: v.q ?? 0 };

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { assertNoUserErrors, envNumber, paginate, type AdminClient } from "../shopify/client.js";
 import { bulkMutation, bulkQuery, bulkThreshold, bulkTimeoutMs, type LineResult } from "../shopify/bulk.js";
 import { eachLimited } from "../refs.js";
@@ -555,8 +556,8 @@ async function setExistingStock(client: AdminClient, productId: string, d: Recor
       const current = level?.quantities[0]?.quantity;
       if (!level) {
         const r = await client.request(
-          `mutation($i: ID!, $l: ID!, $q: Int) { inventoryActivate(inventoryItemId: $i, locationId: $l, available: $q) { userErrors { field message } } }`,
-          { i: t.inventoryItem.id, l: locationId, q: quantity },
+          "mutation InventoryActivate($i: ID!, $l: ID!, $q: Int" + keyVar(client) + ") { inventoryActivate(inventoryItemId: $i, locationId: $l, available: $q)" + keyUse(client) + " { userErrors { field message } } }",
+          { i: t.inventoryItem.id, l: locationId, q: quantity, ...keyValue(client) },
         );
         assertNoUserErrors(r.inventoryActivate, `inventoryActivate ${String(d.handle)}`);
       } else if (current !== quantity) {
@@ -566,11 +567,21 @@ async function setExistingStock(client: AdminClient, productId: string, d: Recor
   }
   if (!quantities.length) return;
   const r = await client.request(
-    `mutation($input: InventorySetQuantitiesInput!) { inventorySetQuantities(input: $input) { userErrors { field message code } } }`,
-    { input: { name: "available", reason: "correction", quantities } },
+    "mutation InventorySet($input: InventorySetQuantitiesInput!" + keyVar(client) + ") { inventorySetQuantities(input: $input)" + keyUse(client) + " { userErrors { field message code } } }",
+    { input: { name: "available", reason: "correction", quantities }, ...keyValue(client) },
   );
   assertNoUserErrors(r.inventorySetQuantities, `inventorySetQuantities ${String(d.handle)}`);
 }
+
+/*
+ * From API 2026-04 Shopify requires an idempotency key on stock writes (an @idempotent directive):
+ * the same key sent twice is applied once. Earlier versions don't know the directive, so it is only
+ * added from 2026-01, where it is accepted.
+ */
+const takesKey = (client: AdminClient) => (client.store.apiVersion ?? "9999-99") >= "2026-01";
+const keyVar = (client: AdminClient) => (takesKey(client) ? ", $key: String!" : "");
+const keyUse = (client: AdminClient) => (takesKey(client) ? " @idempotent(key: $key)" : "");
+const keyValue = (client: AdminClient) => (takesKey(client) ? { key: randomUUID() } : {});
 
 async function set(client: AdminClient, d: Record<string, unknown>, create: boolean): Promise<string> {
   const target = create ? undefined : await readTarget(client, String(d.handle));
