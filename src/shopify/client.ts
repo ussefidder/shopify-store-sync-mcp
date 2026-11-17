@@ -11,6 +11,9 @@ export interface UserError {
   code?: string | null;
 }
 
+/** How many times a request Shopify turns away for its rate limit is sent again (about two minutes of waiting). */
+export const THROTTLE_RETRIES = 12;
+
 export class ShopifyError extends Error {
   constructor(
     message: string,
@@ -159,7 +162,8 @@ export class ShopifyAdminClient implements AdminClient {
       };
 
       const throttled = body.errors?.some((e) => e.extensions?.code === "THROTTLED");
-      if (throttled && attempt < this.maxRetries) {
+      // A throttled request wasn't run, so waiting it out is always safe; it is given a couple of minutes.
+      if (throttled && attempt < THROTTLE_RETRIES) {
         const cost = body.extensions?.cost;
         const needed = (cost?.requestedQueryCost ?? 100) - (cost?.throttleStatus?.currentlyAvailable ?? 0);
         const rate = cost?.throttleStatus?.restoreRate ?? 50;

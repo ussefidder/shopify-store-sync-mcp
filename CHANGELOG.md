@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.2
+
+- Every request Shopify turns away for its rate limit is now waited out for up to about two minutes before it counts as failed (was about 30 seconds), on every path: small plans written one by one, reads, and both sign-in methods. Together with 0.11.1, a busy store slows a sync down instead of failing parts of it
+
 ## 0.11.1
 
 - **Shopify's rate limit is waited out instead of failing writes.** When a batched request is turned away as Throttled, every request pauses, fewer run at once for a while, and the request is sent again (Shopify doesn't run a throttled request, so this is safe even for creates). In the live test on 0.11.0, 100 of 85,972 metafield values failed this way

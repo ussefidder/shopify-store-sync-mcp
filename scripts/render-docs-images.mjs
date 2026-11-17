@@ -658,7 +658,7 @@ const todo = (t) => `<div class="it"><span class="ck muted">○</span>${t}</div>
 const group = (title, cls, items) => `<div class="grp"><div class="gt ${cls}">${title}</div>${items.join("")}</div>`;
 render("roadmap", 1280, 462, `
 <div class="wrap">
-  <div class="title"><h2>Roadmap</h2><span class="muted">shipped in 0.11.1, and what comes next</span></div>
+  <div class="title"><h2>Roadmap</h2><span class="muted">shipped in 0.11.2, and what comes next</span></div>
   <div class="cols">
     <div class="card pane">
       <div class="ph"><span class="badge bg-g">Shipped</span></div>

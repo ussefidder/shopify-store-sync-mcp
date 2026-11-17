@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { StoreConfig } from "../config.js";
-import { envNumber, ShopifyError, type AdminClient, type GraphQLError } from "./client.js";
+import { envNumber, ShopifyError, THROTTLE_RETRIES, type AdminClient, type GraphQLError } from "./client.js";
 
 /*
  * Talks to a store through Shopify CLI's own sign-in (`shopify store auth`), so no app,
@@ -262,7 +262,8 @@ export class ShopifyCliClient implements AdminClient {
         const out = parseCliOutput(res.stdout) ?? parseCliOutput(res.stderr);
         const errors = out?.errors ?? out?.error?.details?.errors;
         const throttled = errors?.some((e) => e.extensions?.code === "THROTTLED");
-        if (throttled && attempt < this.maxRetries) {
+        // A throttled request wasn't run, so waiting it out is always safe; it is given a couple of minutes.
+        if (throttled && attempt < Math.max(this.maxRetries, THROTTLE_RETRIES)) {
           await this.wait(Math.min(16_000, 1000 * 2 ** attempt));
           continue;
         }
