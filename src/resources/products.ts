@@ -504,7 +504,7 @@ async function readStock(client: AdminClient, nodes: Node[]): Promise<Stock> {
     return stock;
   }
   await eachLimited(nodes, 4, async (n) => {
-    const variants = await paginate<{ id: string; inventoryItem: { inventoryLevels: { nodes: Level[] } } }>(client, STOCK_QUERY, { id: n.id }, (d) => d.product.variants);
+    const variants = await paginate<{ id: string; inventoryItem: { inventoryLevels: { nodes: Level[] } } }>(client, STOCK_QUERY, { id: n.id }, (d) => d.product?.variants ?? { nodes: [], pageInfo: DONE });
     for (const v of variants) for (const l of v.inventoryItem.inventoryLevels.nodes) add(v.id, l);
   });
   return stock;
@@ -541,7 +541,7 @@ const STOCK_NOW = /* GraphQL */ `
  */
 async function setExistingStock(client: AdminClient, productId: string, d: Record<string, unknown>, locations: Locations, existing: Set<string>) {
   type V = { selectedOptions: { name: string; value: string }[]; inventoryItem: { id: string; inventoryLevels: { nodes: { location: { id: string }; quantities: { quantity: number }[] }[] } } };
-  const now = await paginate<V>(client, STOCK_NOW, { id: productId }, (x) => x.product.variants);
+  const now = await paginate<V>(client, STOCK_NOW, { id: productId }, (x) => x.product?.variants ?? { nodes: [], pageInfo: DONE });
   const byKey = new Map(now.map((v) => [variantKey(Object.fromEntries(v.selectedOptions.map((o) => [o.name, o.value]))), v]));
   const quantities: Record<string, unknown>[] = [];
   for (const v of (d.variants as Variant[]) ?? []) {
