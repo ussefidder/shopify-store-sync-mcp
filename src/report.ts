@@ -118,7 +118,7 @@ export function planMarkdown(plan: Plan, limit = Infinity): string {
     lines.push("", "| # | Action | Resource | Item | Details |", "|---:|---|---|---|---|");
     for (const o of plan.ops.slice(0, limit)) {
       const details = o.reason ? o.reason : o.changes?.length ? o.changes.map((c) => c.path).join(", ") : "";
-      lines.push(`| ${o.seq} | ${o.action} | ${o.kind} | ${code(o.key)} | ${details.replace(/\|/g, "\\|")} |`);
+      lines.push(`| ${o.seq} | ${o.action} | ${o.kind} | ${code(o.key)} | ${details.replace(/\\/g, "\\\\").replace(/\|/g, "\\|")} |`);
     }
     if (plan.ops.length > limit) lines.push(`| … | | | ${plan.ops.length - limit} more steps | |`);
     const updates = plan.ops.filter((o) => o.action === "update" && o.changes?.length).slice(0, limit);

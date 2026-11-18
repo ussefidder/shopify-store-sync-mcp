@@ -1,6 +1,11 @@
 import { bulkQuery, bulkThreshold, bulkTimeoutMs } from "./shopify/bulk.js";
 import { paginate, type AdminClient } from "./shopify/client.js";
 
+/** A value for Shopify's search syntax, single-quoted: backslashes first, then quotes, so neither can end the value early. */
+export function searchValue(v: string): string {
+  return `'${v.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+}
+
 /**
  * Resource IDs differ between stores, so before comparing or copying anything we
  * rewrite every Shopify GID into a portable reference that is stable across stores:
@@ -393,7 +398,7 @@ export class RefToGidResolver {
 
     await eachLimited(chunks(files, 25), 4, async (group) => {
       const names = group.map((r) => r.slice(`${REF_PREFIX}File/`.length));
-      const q = names.map((n) => `filename:'${n.replace(/'/g, "\\'")}'`).join(" OR ");
+      const q = names.map((n) => `filename:${searchValue(n)}`).join(" OR ");
       const d = await this.client.request(
         `query($q: String!) { files(first: 250, query: $q) { nodes { __typename id ... on MediaImage { alt image { url } } ... on GenericFile { alt url } ... on Video { alt filename originalSource { url } } } } }`,
         { q },
@@ -469,7 +474,7 @@ export class RefToGidResolver {
         const field = kind === "Page" ? "pages" : "blogs";
         const handle = rest.join("/");
         const d = await c.request(`query($q: String!) { ${field}(first: 5, query: $q) { nodes { id handle } } }`, {
-          q: `handle:'${handle.replace(/'/g, "\\'")}'`,
+          q: `handle:${searchValue(handle)}`,
         });
         return (d[field].nodes as { id: string; handle: string }[]).find((n) => n.handle === handle)?.id;
       }
@@ -535,7 +540,7 @@ export class RefToGidResolver {
   private async findOrUploadFile(ref: string, filename: string): Promise<string | undefined> {
     const d = await this.client.request(
       `query($q: String!) { files(first: 50, query: $q) { nodes { __typename id ... on MediaImage { alt image { url } } ... on GenericFile { alt url } ... on Video { alt filename originalSource { url } } } } }`,
-      { q: `filename:'${filename.replace(/'/g, "\\'")}'` },
+      { q: `filename:${searchValue(filename)}` },
     );
     const found = (d.files.nodes as RefNode[]).find((n) => nodeToFile(n)?.filename === filename);
     if (found) return found.id;
