@@ -271,8 +271,8 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv = process.en
       }
       case "plans": {
         const plans = engine.plans.list().sort((x, y) => y.createdAt.localeCompare(x.createdAt)).slice(0, 20);
-        if (asJson) out(plans.map((p) => ({ id: p.id, createdAt: p.createdAt, status: p.status, source: p.source.alias, target: p.target.alias, ops: p.ops.length })));
-        else for (const p of plans) console.log(`${p.id}  ${p.createdAt.slice(0, 16)}  ${p.status.padEnd(17)} ${p.source.alias} -> ${p.target.alias}  ${p.ops.length} steps`);
+        if (asJson) out(plans.map((p) => ({ id: p.id, createdAt: p.createdAt, status: p.status, source: p.source.alias, target: p.target.alias, ops: p.ops })));
+        else for (const p of plans) console.log(`${p.id}  ${p.createdAt.slice(0, 16)}  ${p.status.padEnd(17)} ${p.source.alias} -> ${p.target.alias}  ${p.ops} steps`);
         return 0;
       }
       case "apply": {

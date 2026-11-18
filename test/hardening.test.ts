@@ -428,7 +428,13 @@ describe("plans on disk", () => {
     writeFileSync(join(dir, "notes.txt"), "not a plan");
 
     store.save(plan("00000000-0000-4000-8000-000000000003"));
-    expect(readdirSync(dir).sort()).toEqual(["00000000-0000-4000-8000-000000000002.json", "00000000-0000-4000-8000-000000000003.json", "notes.txt"]);
+    expect(readdirSync(dir).sort()).toEqual([
+      "00000000-0000-4000-8000-000000000002.json",
+      "00000000-0000-4000-8000-000000000002.summary.json",
+      "00000000-0000-4000-8000-000000000003.json",
+      "00000000-0000-4000-8000-000000000003.summary.json",
+      "notes.txt",
+    ]);
     expect(store.get(old)).toBeUndefined();
   });
 

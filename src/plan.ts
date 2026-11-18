@@ -188,37 +188,110 @@ export function stateDir(env: NodeJS.ProcessEnv = process.env): string {
 /** Plan files older than this are removed whenever a new plan is saved. They expire after an hour anyway. */
 export const PLAN_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** Plans are kept in memory and on disk so they survive an MCP server restart. */
+/** How many plans stay in memory. Older ones are read again from disk when asked for. */
+export const PLANS_IN_MEMORY = 5;
+
+/** What a list of plans shows. Kept in a small file next to each plan, so listing never reads whole plans. */
+export interface PlanSummary {
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+  status: Plan["status"];
+  source: Plan["source"];
+  target: Plan["target"];
+  /** Number of steps. */
+  ops: number;
+}
+
+export function planSummary(plan: Plan): PlanSummary {
+  const { id, createdAt, expiresAt, status, source, target } = plan;
+  return { id, createdAt, expiresAt, status, source: { alias: source.alias, domain: source.domain }, target: { alias: target.alias, domain: target.domain }, ops: plan.ops.length };
+}
+
+const PLAN_ID = /^[0-9a-f-]{36}$/;
+const PLAN_FILE = /^([0-9a-f-]{36})\.json$/;
+const SUMMARY_FILE = /^([0-9a-f-]{36})\.summary\.json$/;
+const STATUSES = new Set<string>(["pending", "applied", "partially_applied", "failed"]);
+const isStoreRef = (v: unknown): v is Plan["source"] =>
+  Boolean(v) && typeof (v as Plan["source"]).alias === "string" && typeof (v as Plan["source"]).domain === "string";
+
+/**
+ * Plans are kept on disk so they survive an MCP server restart, and the few most recent in memory.
+ * A plan holds the store content it would write, so a big one can run to hundreds of megabytes.
+ */
 export class PlanStore {
+  /** Most recently used last. */
   private readonly plans = new Map<string, Plan>();
+  /** Plans that couldn't be written to disk: memory is their only copy, so they are never dropped from it. */
+  private readonly unsaved = new Set<string>();
   private readonly dir: string;
 
   constructor(dir = join(stateDir(), "plans")) {
     this.dir = dir;
   }
 
-  save(plan: Plan): void {
+  private planFile(id: string) {
+    return join(this.dir, `${id}.json`);
+  }
+
+  private summaryFile(id: string) {
+    return join(this.dir, `${id}.summary.json`);
+  }
+
+  private remember(plan: Plan): void {
+    this.plans.delete(plan.id);
     this.plans.set(plan.id, plan);
+    for (const id of this.plans.keys()) {
+      if (this.plans.size <= PLANS_IN_MEMORY) break;
+      if (id !== plan.id && !this.unsaved.has(id)) this.plans.delete(id);
+    }
+  }
+
+  /**
+   * Keep the plan, in memory and on disk. Returns undefined when it is on disk, or why it couldn't be
+   * written there (then it lasts only as long as this process).
+   */
+  save(plan: Plan): string | undefined {
+    let problem: string | undefined;
     try {
       mkdirSync(this.dir, { recursive: true });
-      writeFileSync(join(this.dir, `${plan.id}.json`), JSON.stringify(plan, null, 2), { mode: 0o600 });
+      // No indentation: on a big catalog that alone is a third of the file.
+      writeFileSync(this.planFile(plan.id), JSON.stringify(plan), { mode: 0o600 });
+      this.unsaved.delete(plan.id);
+      try {
+        writeFileSync(this.summaryFile(plan.id), JSON.stringify(planSummary(plan)), { mode: 0o600 });
+      } catch {
+        /* the list reads the plan itself instead */
+      }
+    } catch (e) {
+      this.unsaved.add(plan.id);
+      problem = e instanceof RangeError ? "it is too large to write as one file" : (e as Error).message;
+    }
+    this.remember(plan);
+    try {
       this.prune();
     } catch {
-      /* disk persistence is best-effort */
+      /* pruning is best-effort */
     }
+    return problem;
   }
 
   /** Delete plan files that are long past their expiry; they hold store content. */
   prune(now = Date.now()): number {
     let removed = 0;
-    for (const f of readdirSync(this.dir)) {
-      if (!/^[0-9a-f-]{36}\.json$/.test(f)) continue;
-      const file = join(this.dir, f);
+    const files = readdirSync(this.dir);
+    const plans = new Set(files.map((f) => PLAN_FILE.exec(f)?.[1]).filter(Boolean));
+    for (const f of files) {
+      const id = PLAN_FILE.exec(f)?.[1];
+      const orphan = SUMMARY_FILE.exec(f)?.[1];
       try {
-        if (now - statSync(file).mtimeMs > PLAN_KEEP_MS) {
-          rmSync(file);
-          this.plans.delete(f.slice(0, -5));
+        if (id && now - statSync(join(this.dir, f)).mtimeMs > PLAN_KEEP_MS) {
+          rmSync(join(this.dir, f));
+          rmSync(this.summaryFile(id), { force: true });
+          this.plans.delete(id);
           removed++;
+        } else if (orphan && !plans.has(orphan)) {
+          rmSync(join(this.dir, f), { force: true });
         }
       } catch {
         /* someone else removed it */
@@ -227,10 +300,10 @@ export class PlanStore {
     return removed;
   }
 
-  get(id: string): Plan | undefined {
-    if (this.plans.has(id)) return this.plans.get(id);
-    if (!/^[0-9a-f-]{36}$/.test(id)) return undefined;
-    const file = join(this.dir, `${id}.json`);
+  /** The plan file as written, or undefined when it is missing or damaged. Not kept in memory. */
+  private read(id: string): Plan | undefined {
+    if (!PLAN_ID.test(id)) return undefined;
+    const file = this.planFile(id);
     if (!existsSync(file)) return undefined;
     let plan: Plan;
     try {
@@ -239,17 +312,60 @@ export class PlanStore {
       return undefined; // a half-written or damaged file is treated as no plan
     }
     if (!plan || plan.id !== id || !Array.isArray(plan.ops)) return undefined;
-    this.plans.set(id, plan);
     return plan;
   }
 
-  list(): Plan[] {
-    const ids = new Set(this.plans.keys());
+  get(id: string): Plan | undefined {
+    const plan = this.plans.get(id) ?? this.read(id);
+    if (plan) this.remember(plan);
+    return plan;
+  }
+
+  private readSummary(id: string): PlanSummary | undefined {
     try {
-      for (const f of readdirSync(this.dir)) if (f.endsWith(".json")) ids.add(f.slice(0, -5));
+      const s = JSON.parse(readFileSync(this.summaryFile(id), "utf8")) as PlanSummary;
+      if (
+        s?.id === id &&
+        typeof s.createdAt === "string" &&
+        typeof s.expiresAt === "string" &&
+        STATUSES.has(s.status) &&
+        isStoreRef(s.source) &&
+        isStoreRef(s.target) &&
+        Number.isInteger(s.ops)
+      ) {
+        return s;
+      }
+    } catch {
+      /* missing or damaged: read the plan instead */
+    }
+    // A plan saved before summaries existed (or whose summary is damaged): read it once, and write its summary for next time.
+    const plan = this.read(id);
+    if (!plan) return undefined;
+    const summary = planSummary(plan);
+    try {
+      writeFileSync(this.summaryFile(id), JSON.stringify(summary), { mode: 0o600 });
+    } catch {
+      /* best-effort */
+    }
+    return summary;
+  }
+
+  /** Every plan kept, in no particular order, without reading whole plans from disk. */
+  list(): PlanSummary[] {
+    const out = new Map<string, PlanSummary>();
+    for (const plan of this.plans.values()) out.set(plan.id, planSummary(plan));
+    let files: string[] = [];
+    try {
+      files = readdirSync(this.dir);
     } catch {
       /* no dir yet */
     }
-    return [...ids].map((id) => this.get(id)).filter((p): p is Plan => Boolean(p));
+    for (const f of files) {
+      const id = PLAN_FILE.exec(f)?.[1];
+      if (!id || out.has(id)) continue;
+      const summary = this.readSummary(id);
+      if (summary) out.set(id, summary);
+    }
+    return [...out.values()];
   }
 }

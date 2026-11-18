@@ -297,7 +297,12 @@ export class Engine {
         );
       }
     }
-    this.plans.save(plan);
+    const notSaved = this.plans.save(plan);
+    if (notSaved) {
+      plan.warnings.push(
+        `This plan could not be saved to disk (${notSaved}), so it lasts only while this process runs. Narrow the scope (resources, include) to make it smaller.`,
+      );
+    }
     return plan;
   }
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.7
+
+- **Listing plans no longer reads every plan.** Each plan is saved with a small summary next to it, and `get_plan` without an id and the `plans` command read only those. Before, they read every plan of the last 7 days in full, and a plan for a big catalog can run to hundreds of megabytes. A plan saved by an earlier version gets its summary the first time it is listed
+- **Plans stay out of memory.** The server keeps the 5 most recently used plans in memory and reads the others from disk when asked; before, every plan made or listed stayed in memory until its file was a week old. A plan that can't be written to disk stays in memory, and its warnings say so
+- Plans are written without indentation: a plan of 50,000 changed products is about 230 MB instead of 400 MB, written in 0.7 s instead of 1.9 s
+
 ## 0.11.6
 
 - Every tool description now says what the tool returns, which tool to use instead and when, and what its parameters do, so assistants pick the right tool and call it right the first time. No behavior change

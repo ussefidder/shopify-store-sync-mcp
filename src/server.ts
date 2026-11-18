@@ -488,7 +488,7 @@ export function createServer(deps: ServerDeps): McpServer {
           .list()
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
           .slice(0, 20)
-          .map((p) => ({ plan_id: p.id, createdAt: p.createdAt, status: p.status, source: p.source.alias, target: p.target.alias, ops: p.ops.length }));
+          .map((p) => ({ plan_id: p.id, createdAt: p.createdAt, status: p.status, source: p.source.alias, target: p.target.alias, ops: p.ops }));
         return json({ plans: list });
       }
       const plan = engine.plans.get(args.plan_id);
