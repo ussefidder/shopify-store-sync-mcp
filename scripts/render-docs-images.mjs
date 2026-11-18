@@ -80,7 +80,7 @@ render("banner", 1280, 420, `
     <div class="store card"><div class="muted small">source</div><div class="sname">dev</div><div class="mono small muted">dev.myshopify.com</div></div>
     <div class="arrow"><div class="line"></div><div class="mono small">diff → plan → apply</div></div>
     <div class="store card prot"><div class="muted small">target · protected</div><div class="sname">prod</div><div class="mono small muted">prod.myshopify.com</div></div>
-    <div class="mono small muted tools">12 MCP tools · any MCP client</div>
+    <div class="mono small muted tools">13 MCP tools · any MCP client</div>
   </div>
 </div>`, `
   .wrap { position: relative; width: 1280px; height: 420px; padding: 48px 64px; display: flex; align-items: center; gap: 48px; overflow: hidden;
@@ -348,7 +348,7 @@ render("social-preview", 1280, 640, `
     <div class="pill"><span class="dot bg-t"></span>Config as code</div>
     <div class="pill"><span class="dot bg-t"></span>CLI drift checks</div>
   </div>
-  <div class="foot mono muted">github.com/ussefidder/shopify-store-sync-mcp · 12 MCP tools · MIT</div>
+  <div class="foot mono muted">github.com/ussefidder/shopify-store-sync-mcp · 13 MCP tools · MIT</div>
 </div>`, `
   .wrap { position: relative; width: 1280px; height: 640px; padding: 72px 96px; overflow: hidden;
           background: radial-gradient(1000px 500px at 0% 0%, #13202a 0%, #0b0f14 60%); }
@@ -625,7 +625,7 @@ const feat = (abbr, color, title, text, tools = "") =>
   `<div class="tile card"><div class="th"><div class="ico" style="background:${color}">${abbr}</div><h3>${title}</h3></div><p>${text}</p>${tools ? `<div class="tl mono">${tools}</div>` : ""}</div>`;
 render("at-a-glance", 1280, 560, `
 <div class="wrap">
-  <div class="title"><h2>Everything it does</h2><span class="muted">12 MCP tools and a CLI · Claude, Cursor or any MCP client · free, MIT</span></div>
+  <div class="title"><h2>Everything it does</h2><span class="muted">13 MCP tools and a CLI · Claude, Cursor or any MCP client · free, MIT</span></div>
   <div class="grid" style="grid-template-columns: repeat(4, 1fr)">
     ${feat("DF", G, "Field-level diff", "Every difference between two stores, field by field, even inside JSON values.", "diff_stores · compare_item")}
     ${feat("PL", G, "Dry-run plans", "Creates, updates, conflicts and missing references, reviewed before anything is written.", "plan_sync · get_plan")}
@@ -747,7 +747,7 @@ render("roadmap", 1280, 462, `
       <div class="two">
         ${group("Syncing", "g", [done("11 item types incl. products"), done("ID remapping, incl. variants"), done("Barcodes, weight, stock (opt-in)"), done("Batched writes for big catalogs")])}
         ${group("Safety", "g", [done("Dry-run plans, drift check"), done("Never deletes, inside items too"), done("A person confirms production"), done("Validated input, time limits")])}
-        ${group("Ways to use it", "g", [done("MCP server, 12 tools, live status"), done("CLI: drift checks, md reports"), done("Config as code, theme diff"), done("No-app sign-in, on npm")])}
+        ${group("Ways to use it", "g", [done("MCP server, 13 tools, live status"), done("CLI: drift checks, md reports"), done("Config as code, theme diff"), done("No-app sign-in, on npm")])}
         ${group("Quality", "g", [done("163 automated tests, linted"), done("Checked on 3 API versions"), done("Live on Linux and Windows"), done("Parallel reads and writes")])}
       </div>
     </div>

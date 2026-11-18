@@ -3,7 +3,7 @@ import { isAbsolute, join, parse as parsePath, relative, resolve } from "node:pa
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ElicitResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { ApplyRefused, type OpResult } from "./apply.js";
+import { ApplyRefused, auditLogPath, readAuditLog, type OpResult } from "./apply.js";
 import { ApplyJobs, jobStatus, readJobFile } from "./jobs.js";
 import type { StoreConfig, StoreRegistry } from "./config.js";
 import { preview, type ResourceDiff } from "./diff.js";
@@ -263,7 +263,17 @@ export function createServer(deps: ServerDeps): McpServer {
     return report ? (store: string, kind: ResourceKind, items: number) => report(`read ${items} ${kind} from ${store}`) : undefined;
   };
 
-  const server = new McpServer({ name: "shopify-store-sync-mcp", version: VERSION });
+  const server = new McpServer(
+    { name: "shopify-store-sync-mcp", version: VERSION },
+    {
+      instructions: [
+        "Syncs configuration between Shopify stores. Use this order: list_stores to see the stores and which accept writes, diff_stores (or compare_item for one item) to see what differs, plan_sync to build a dry-run plan, show the plan to the person, then apply_plan only after they approve it.",
+        "Nothing is written to Shopify except by apply_plan, and it never deletes. A protected store asks the person to confirm; never try to confirm for them.",
+        "Large applies run in the background: follow them with apply_status, stop them with cancel_apply, and read what was written with get_audit_log.",
+        "snapshot_store returns a store's configuration in the response; export_snapshot saves it to files for git instead.",
+      ].join(" "),
+    },
+  );
 
   /**
    * The confirmation for a protected store has to come from a person. The assistant can read the
@@ -335,7 +345,7 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: "Snapshot a store",
       description:
-        "Read configuration from one store (or a snapshot folder) in portable form (IDs replaced by handles). Returns counts and keys; set full=true to include the data.",
+        "Read configuration from one store (or a snapshot folder) and return it in the response, in portable form (IDs replaced by handles). Returns counts and keys; set full=true to include the data. Writes nothing; to save the configuration to files, use export_snapshot.",
       inputSchema: {
         store: z.string().describe(SOURCE_HELP),
         ...scopeArgs,
@@ -366,7 +376,7 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: "Export a store's configuration to files",
       description:
-        "Write a store's configuration to a folder as one JSON file per item (sorted keys, no store IDs), ready to commit to git. Use \"dir:<path>\" as the source of diff_stores or plan_sync to compare or restore from it. Only writes local files, never to Shopify.",
+        "Save a store's configuration to a folder on disk as one JSON file per item (sorted keys, no store IDs), ready to commit to git. Returns only a summary; to look at the configuration in the response, use snapshot_store. Use \"dir:<path>\" as the source of diff_stores or plan_sync to compare or restore from it. Only writes local files, never to Shopify.",
       inputSchema: {
         store: z.string().describe("Store alias to read"),
         dir: z
@@ -594,6 +604,32 @@ export function createServer(deps: ServerDeps): McpServer {
         state: "interrupted",
         bulkOperations: stopped.map((s) => ({ id: s.id, result: s.error ?? "cancel requested" })),
         note: "The server that ran this apply had stopped; its Shopify bulk operations were asked to stop. What they wrote stays written. Run plan_sync again to see what is left.",
+      });
+    }),
+  );
+
+  server.registerTool(
+    "get_audit_log",
+    {
+      title: "Read the audit log",
+      description:
+        "Read what apply_plan wrote: the most recent audit log entries, newest first, one per step (plan, target store, resource type, key, outcome and message). Filter by plan, outcome (created, updated, skipped, failed) or resource type. Read-only; the log is a local file and nothing is read from Shopify.",
+      inputSchema: {
+        plan_id: z.string().optional().describe("Only entries of this plan."),
+        outcome: z.enum(["created", "updated", "skipped", "failed"]).optional().describe("Only entries with this outcome."),
+        resource: z.enum(RESOURCE_KINDS).optional().describe("Only entries of this resource type."),
+        limit: z.number().int().min(1).max(1000).optional().describe("Max entries returned (default 50). matched counts them all."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    guard(async (args: { plan_id?: string; outcome?: string; resource?: string; limit?: number }) => {
+      const r = readAuditLog(auditLogPath({ ...process.env, ...env }), { planId: args.plan_id, outcome: args.outcome, kind: args.resource, limit: args.limit });
+      return json({
+        log: r.file,
+        matched: r.matched,
+        returned: r.entries.length,
+        note: r.truncated ? "The log is large; only its most recent 8 MB were searched." : r.matched === 0 ? "No matching entries. Nothing has been applied yet, or the filters exclude everything." : undefined,
+        entries: r.entries,
       });
     }),
   );

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.5
+
+- **New tool `get_audit_log`**: read back what an apply wrote, newest first, one entry per step with its outcome. Filter by plan, outcome (created, updated, skipped, failed) or resource type. Read-only, and only the end of a large log is read so it stays quick
+- The server now publishes instructions that clients show the assistant before the tools: diff, then plan, then apply after the person approves; never confirm a protected store for them
+- `snapshot_store` and `export_snapshot` say more clearly which one returns the configuration and which one saves it to files
+- README: the Glama score badge, and the new tool in the tool list
+
 ## 0.11.4
 
 - README only, no code change: a banner listing every main feature, an "Everything it does" overview on the first screen, a comparison with store-copy apps (Matrixify, Rewind Staging, Simple Sync) from their own pages, the explainer video with a narrated big-catalog scene, and an invitation to send recommendations

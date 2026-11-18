@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, closeSync, mkdirSync, openSync, readSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { hashData } from "./diff.js";
 import { collectRefs, mapStrings, REF_PREFIX, RefToGidResolver } from "./refs.js";
@@ -74,6 +74,62 @@ export function checkApplyAllowed(plan: Plan, target: AdminClient["store"], opts
   }
 }
 
+/** Where every write is logged: SYNC_AUDIT_LOG, or audit.log in the state folder. */
+export function auditLogPath(env: NodeJS.ProcessEnv = process.env): string {
+  return env.SYNC_AUDIT_LOG || join(stateDir(env), "audit.log");
+}
+
+export interface AuditQuery {
+  planId?: string;
+  outcome?: string;
+  kind?: string;
+  limit?: number;
+}
+
+/**
+ * The most recent audit log entries, newest first. Only the end of the file is read (the last
+ * 8 MB), so a log with years of applies stays quick to query.
+ */
+export function readAuditLog(file: string, q: AuditQuery = {}): { file: string; entries: Record<string, unknown>[]; matched: number; truncated: boolean } {
+  const limit = Math.min(Math.max(q.limit ?? 50, 1), 1000);
+  let text: string;
+  let truncated = false;
+  try {
+    const size = statSync(file).size;
+    const max = 8 * 1024 * 1024;
+    const fd = openSync(file, "r");
+    try {
+      const len = Math.min(size, max);
+      const buf = Buffer.alloc(len);
+      readSync(fd, buf, 0, len, size - len);
+      text = buf.toString("utf8");
+      if (size > max) {
+        truncated = true;
+        text = text.slice(text.indexOf("\n") + 1);
+      }
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return { file, entries: [], matched: 0, truncated: false };
+  }
+  const matches: Record<string, unknown>[] = [];
+  for (const line of text.split("\n").reverse()) {
+    if (!line.trim()) continue;
+    let e: Record<string, unknown>;
+    try {
+      e = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (q.planId && e.plan !== q.planId) continue;
+    if (q.outcome && e.outcome !== q.outcome) continue;
+    if (q.kind && e.kind !== q.kind) continue;
+    matches.push(e);
+  }
+  return { file, entries: matches.slice(0, limit), matched: matches.length, truncated };
+}
+
 function audit(file: string, entry: Record<string, unknown>): void {
   try {
     mkdirSync(dirname(file), { recursive: true });
@@ -139,7 +195,7 @@ async function readKeys(client: AdminClient, plan: Plan, ops: PlanOp[]): Promise
 
 export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOptions = {}): Promise<OpResult[]> {
   checkApplyAllowed(plan, client.store, opts);
-  const log = opts.auditLog ?? process.env.SYNC_AUDIT_LOG ?? join(stateDir(), "audit.log");
+  const log = opts.auditLog ?? auditLogPath();
   const resolver = new RefToGidResolver(client, new Map(Object.entries(plan.files ?? {})));
   const results: OpResult[] = [];
 

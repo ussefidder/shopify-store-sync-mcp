@@ -69,11 +69,35 @@ describe("MCP server", () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
-      ["apply_plan", "apply_status", "cancel_apply", "compare_item", "diff_stores", "diff_themes", "export_snapshot", "get_plan", "list_resource_types", "list_stores", "plan_sync", "snapshot_store"].sort(),
+      ["apply_plan", "apply_status", "cancel_apply", "compare_item", "diff_stores", "diff_themes", "export_snapshot", "get_audit_log", "get_plan", "list_resource_types", "list_stores", "plan_sync", "snapshot_store"].sort(),
     );
     // export_snapshot writes local files only; apply_plan writes to Shopify and cancel_apply stops its bulk operations.
     for (const t of tools) expect(t.annotations?.readOnlyHint).toBe(!["apply_plan", "cancel_apply", "export_snapshot"].includes(t.name));
     expect(tools.find((t) => t.name === "export_snapshot")?.annotations?.destructiveHint).toBe(false);
+  });
+
+  it("publishes instructions that give the diff, plan, apply order", async () => {
+    const { client } = await connect();
+    const text = client.getInstructions() ?? "";
+    expect(text).toContain("diff_stores");
+    expect(text).toContain("plan_sync");
+    expect(text).toContain("apply_plan");
+  });
+
+  it("reads back what an apply wrote with get_audit_log", async () => {
+    const { call } = await connect({ answer: () => ({ action: "accept", content: { domain: "prod.myshopify.com" } }) });
+    const empty = await call("get_audit_log");
+    expect(empty.json).toMatchObject({ matched: 0, returned: 0 });
+    const plan = await call("plan_sync", SCOPE);
+    await call("apply_plan", { plan_id: plan.json.plan_id, wait: true });
+    const all = await call("get_audit_log", { plan_id: plan.json.plan_id });
+    expect(all.json.matched).toBe(2);
+    expect(all.json.entries.map((e: any) => e.kind).sort()).toEqual(["pages", "redirects"]);
+    const pages = await call("get_audit_log", { plan_id: plan.json.plan_id, resource: "pages", limit: 1 });
+    expect(pages.json).toMatchObject({ matched: 1, returned: 1 });
+    expect(pages.json.entries[0]).toMatchObject({ kind: "pages", key: "faq", outcome: "created" });
+    const failed = await call("get_audit_log", { outcome: "failed" });
+    expect(failed.json.matched).toBe(0);
   });
 
   it("returns Markdown reports for a diff and a plan when asked", async () => {
