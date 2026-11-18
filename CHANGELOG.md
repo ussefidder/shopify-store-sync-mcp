@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.8
+
+- Search values sent to Shopify (file names when matching or uploading files, page and blog handles) now escape backslashes before quotes, so a name containing `\` can no longer end the value early and break the lookup. Found by CodeQL
+- Plan reports in Markdown escape backslashes before table pipes
+- CI on GitHub Actions: typecheck, lint, tests, GraphQL validation and build on Linux and Windows with Node 22 and 24. It found two Windows bugs in the GraphQL validation script, now fixed
+- `glama.json` added
+
 ## 0.11.7
 
 - **Listing plans no longer reads every plan.** Each plan is saved with a small summary next to it, and `get_plan` without an id and the `plans` command read only those. Before, they read every plan of the last 7 days in full, and a plan for a big catalog can run to hundreds of megabytes. A plan saved by an earlier version gets its summary the first time it is listed
