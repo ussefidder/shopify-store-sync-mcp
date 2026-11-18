@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { buildClientSchema, parse, validate } from "graphql";
 
@@ -50,7 +51,7 @@ const walk = (dir) =>
 
 let count = 0;
 let failed = 0;
-for (const file of walk(new URL("../src", import.meta.url).pathname)) {
+for (const file of walk(fileURLToPath(new URL("../src", import.meta.url)))) {
   const src = readFileSync(file, "utf8");
   // Constants defined in the same file (a shared selection set, a page size) are substituted too.
   const local = { ...subs };
