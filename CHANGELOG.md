@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.6
+
+- Every tool description now says what the tool returns, which tool to use instead and when, and what its parameters do, so assistants pick the right tool and call it right the first time. No behavior change
+- `plan_id` on `get_plan`, `apply_plan` and `apply_status`, and `exclude` on `diff_themes`, now have parameter descriptions
+- The `prices`, `inventory` and `as_drafts` options are described as deciding what is read and compared, since `diff_stores` and `snapshot_store` take them too and never write
+
 ## 0.11.5
 
 - **New tool `get_audit_log`**: read back what an apply wrote, newest first, one entry per step with its outcome. Filter by plan, outcome (created, updated, skipped, failed) or resource type. Read-only, and only the end of a large log is read so it stays quick

@@ -67,15 +67,15 @@ const scopeArgs = {
   metaobject_types: z.array(z.string()).optional().describe("Limit metaobjects to these types. Default: all non-reserved types."),
   namespaces: z.array(z.string()).optional().describe("Limit metafield values (metafields) to these namespaces."),
   locales: z.array(z.string()).optional().describe("Limit translations to these locales, e.g. [\"fr\", \"de\"]. Default: every non-primary locale."),
-  prices: z.boolean().optional().describe("products: also copy variant prices and compare-at prices. Off by default, since prices usually differ per store."),
+  prices: z.boolean().optional().describe("products: include variant prices and compare-at prices in what is read, compared and planned. Off by default, since prices usually differ per store."),
   inventory: z
     .boolean()
     .optional()
-    .describe("products: also copy stock, the available quantity per location, into the target's location with the same name. Off by default. Needs read_inventory and read_locations (and write_inventory to write): run connect again if the sign-in is older."),
+    .describe("products: include stock (the available quantity per location, matched to the target's location with the same name) in what is read, compared and planned. Off by default. Needs read_inventory and read_locations, plus write_inventory to apply: run connect again if the sign-in is older."),
   as_drafts: z
     .boolean()
     .optional()
-    .describe("Leave the published state alone: new pages are created hidden and new metaobject entries as drafts, existing ones keep their state. Products are always created as drafts."),
+    .describe("Leave the published state out of what is compared and copied: in a plan, new pages are created hidden and new metaobject entries as drafts, and existing ones keep their state. Products are always created as drafts."),
   include: z
     .array(z.string())
     .optional()
@@ -320,7 +320,8 @@ export function createServer(deps: ServerDeps): McpServer {
     "list_stores",
     {
       title: "List configured stores",
-      description: "List the Shopify stores this server can reach, with their write permissions. Also gives this server's version. Secrets are never returned.",
+      description:
+        "List the Shopify stores this server is configured for. Call it first: the aliases it returns are the store names every other tool takes (source, target, store). Returns { server, stores: [{ alias, domain, label, apiVersion, auth, allowWrites, protected }] }. allowWrites=false means apply_plan refuses that store; protected=true means a person confirms every apply to it. An empty list means no store is set up yet. Tokens and secrets are never returned. Takes no arguments and makes no Shopify calls. Next: list_resource_types for what can be synced, diff_stores to compare two stores.",
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
@@ -331,7 +332,8 @@ export function createServer(deps: ServerDeps): McpServer {
     "list_resource_types",
     {
       title: "List syncable resource types",
-      description: "Describe each resource type that can be snapshotted, diffed and synced, how items are keyed, and which are read by default.",
+      description:
+        "List the resource types this server can snapshot, diff and sync (metafield definitions, metaobjects, pages, menus, products...). Returns [{ kind, default, description }]: kind is the value to pass in the resources argument of snapshot_store, export_snapshot, diff_stores and plan_sync; default tells whether it is read when resources is omitted; description says how items are keyed and what is copied. Use it to choose resources; use list_stores for the stores themselves. Takes no arguments and makes no Shopify calls.",
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
@@ -345,7 +347,7 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: "Snapshot a store",
       description:
-        "Read configuration from one store (or a snapshot folder) and return it in the response, in portable form (IDs replaced by handles). Returns counts and keys; set full=true to include the data. Writes nothing; to save the configuration to files, use export_snapshot.",
+        "Read one store's configuration (or a snapshot folder made with export_snapshot) and return it in the response, in portable form with store IDs replaced by handles. Returns { store, domain, takenAt, resources: [{ kind, count, items }] }: items are keys only, or { key, data } with full=true, which can be large, so narrow first with resources, include or the other filters. Use it to inspect one store; to save the configuration to files use export_snapshot, and to compare two stores use diff_stores. Writes nothing.",
       inputSchema: {
         store: z.string().describe(SOURCE_HELP),
         ...scopeArgs,
@@ -376,7 +378,7 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: "Export a store's configuration to files",
       description:
-        "Save a store's configuration to a folder on disk as one JSON file per item (sorted keys, no store IDs), ready to commit to git. Returns only a summary; to look at the configuration in the response, use snapshot_store. Use \"dir:<path>\" as the source of diff_stores or plan_sync to compare or restore from it. Only writes local files, never to Shopify.",
+        "Save a store's configuration to a folder on disk, one JSON file per item (sorted keys, no store IDs), ready to commit to git. dir must be new, empty, or an earlier snapshot folder (its item files are replaced); any other folder is refused. Returns a summary { dir, files, kinds } with the count per resource type, not the data; to see the data in the response use snapshot_store. Later, pass \"dir:<path>\" as the source of diff_stores or plan_sync to compare against it or restore from it. Reads the store and writes only local files, never to Shopify.",
       inputSchema: {
         store: z.string().describe("Store alias to read"),
         dir: z
@@ -396,7 +398,7 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: "Diff two stores",
       description:
-        "Compare configuration between a source and a target: what exists only in the source, what differs (field by field), and what exists only in the target. Either side can be a snapshot folder (\"dir:<path>\"), e.g. to check whether production drifted from the committed config. Read-only.",
+        "Compare configuration between a source and a target, resource type by resource type. Returns for each type the counts (onlyInSource, changed, onlyInTarget, identical) and the keys in each section, with before and after values for every changed field (show_values=false keeps only the field paths); limit caps each list while the counts cover everything, and format=\"markdown\" gives a report to share. Either side can be a snapshot folder (\"dir:<path>\"), e.g. to check whether production drifted from the committed config. The options shared with plan_sync (resources, include, prices, inventory, as_drafts...) only decide what is read and compared, so the diff matches the plan the same options would produce; nothing is written. Use compare_item for a single item, diff_themes for theme settings, and plan_sync to prepare the changes.",
       inputSchema: {
         source: z.string().describe(SOURCE_HELP),
         target: z.string().describe(SOURCE_HELP),
@@ -427,7 +429,7 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: "Compare one item",
       description:
-        "Compare a single item between two stores, side by side: whether each has it, every field that differs (entry by entry inside JSON values), and whether the items it points at (products, pages, metaobjects...) exist in the target. Reads only that item where possible, so it is quick. Use it for a targeted check instead of a full diff. Read-only.",
+        "Compare a single item between two stores, side by side: whether each has it, every field that differs (entry by entry inside JSON values), and whether the items it points at (products, pages, metaobjects...) exist in the target. Reads only that item where possible, so it is quick. Returns { status (identical, different, only in source, only in target, in neither), changes, refs, notCompared }. Use it for a targeted check instead of diff_stores; take the key from a diff_stores result.",
       inputSchema: {
         source: z.string().describe(SOURCE_HELP),
         target: z.string().describe(SOURCE_HELP),
@@ -452,10 +454,10 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: "Plan a sync",
       description:
-        "Build a dry-run plan that would make the target store match the source (a store or a snapshot folder) for the selected resources: creates, updates, conflicts, files to upload and references missing in the target. Nothing is written. Returns a plan_id for apply_plan.",
+        "Build a dry-run plan that would make the target store match the source (a store or a \"dir:<path>\" snapshot folder) for the selected resources. Reads both sides and writes nothing. Returns { plan_id, expiresAt, totals (create, update, conflict), byResource, ops, warnings, filesToUpload, onlyInTarget, targetWritable, targetProtected }; each op has a seq number, key, action, reason, missing references and field changes (the first 200 ops are listed). Conflicts are items that can't be written, with the reason; items only in the target are listed and never deleted. Show the plan to the person, then pass plan_id to apply_plan; it expires after one hour, and get_plan shows it again. To only look at differences, use diff_stores instead.",
       inputSchema: {
         source: z.string().describe(SOURCE_HELP),
-        target: z.string().describe("Store alias to write to"),
+        target: z.string().describe("Store alias the plan would write to (see list_stores; snapshot folders can't be a target)."),
         ...scopeArgs,
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
@@ -471,10 +473,11 @@ export function createServer(deps: ServerDeps): McpServer {
     "get_plan",
     {
       title: "Get a plan",
-      description: "Show a previously created sync plan. With no plan_id, list recent plans.",
+      description:
+        "Show a sync plan made by plan_sync, before or after it is applied. With plan_id: the plan as plan_sync returned it (totals, ops with field changes, warnings, expiry) plus, once applied, the apply's state and totals; only the first 200 ops are listed and long values are shortened unless full=true, and format=\"markdown\" gives a report to share for review. Without plan_id: the 20 most recent plans (plan_id, createdAt, status, source, target, op count), to find one. To create a plan use plan_sync, to write it use apply_plan, and to follow a running apply use apply_status. Reads only the plans saved by this server, nothing from Shopify.",
       inputSchema: {
-        plan_id: z.string().optional(),
-        full: z.boolean().optional().describe("Return every op, untruncated."),
+        plan_id: z.string().optional().describe("The plan to show, as returned by plan_sync. Omit to list the recent plans."),
+        full: z.boolean().optional().describe("List every op with full values (default: first 200 ops, long values shortened)."),
         format: z.enum(["json", "markdown"]).optional().describe('"markdown" returns the plan as a report, to share before applying it.'),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
@@ -502,14 +505,14 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: "Apply a plan",
       description:
-        "Write a reviewed plan to the target store. Refused unless the target has allowWrites=true. For a protected store the person is asked to confirm in the client (or applies from the command line); the assistant can't confirm on their behalf. Re-reads the target first and skips anything that changed since planning. Uploads missing files. Creates and updates only, never deletes. Every op is written to an audit log.",
+        "Write a reviewed plan to the target store. Refused unless the target has allowWrites=true. For a protected store the person is asked to confirm in the client (or applies from the command line); the assistant can't confirm on their behalf. Re-reads the target first and skips anything that changed since planning. Uploads missing files. Creates and updates only, never deletes. Every op is written to the audit log (get_audit_log). Returns { plan_id, status, totals (created, updated, skipped, failed), results per op }; a plan of more than 50 steps runs in the background instead and returns at once: follow it with apply_status and stop it with cancel_apply. A plan can be applied once, within an hour of plan_sync.",
       inputSchema: {
-        plan_id: z.string(),
+        plan_id: z.string().describe("The plan to write, from plan_sync. It must not have been applied yet and must be less than an hour old."),
         confirm: z
           .string()
           .optional()
           .describe("Leave empty. Only read when the server runs with SYNC_ALLOW_AGENT_CONFIRM=true (unattended automation); otherwise a protected store is confirmed by the person, not by this argument."),
-        only: z.array(z.number().int().positive()).optional().describe("Apply only these op seq numbers."),
+        only: z.array(z.number().int().positive()).optional().describe("Apply only these ops, by their seq number in the plan (e.g. [1, 2, 3]). Default: every op."),
         wait: z
           .boolean()
           .optional()
@@ -552,9 +555,9 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: "Follow an apply",
       description:
-        "How far an apply has got: steps created, updated, skipped, failed and left per resource type, the current phase, progress inside a Shopify bulk operation, time so far and an estimate of the time left, failures counted per resource type and reason, and the latest failures. Also answers for an apply that ended or was interrupted by a server restart. With no plan_id, the most recent apply.",
+        "How far an apply has got: steps created, updated, skipped, failed and left per resource type, the current phase, progress inside a Shopify bulk operation, time so far and an estimate of the time left, failures counted per resource type and reason, and the latest failures. Also answers for an apply that ended or was interrupted by a server restart. Call it after apply_plan returns a background apply, every minute or so until state is done or error. resource narrows only the listed failures; the counts always cover every resource type. For what each step wrote use get_audit_log, to stop the apply use cancel_apply, and for what was planned use get_plan.",
       inputSchema: {
-        plan_id: z.string().optional(),
+        plan_id: z.string().optional().describe("The plan whose apply to report on. Default: the most recent apply."),
         failures: z.number().int().min(0).max(1000).optional().describe("How many of the latest failures to list (default 20)."),
         resource: z.enum(RESOURCE_KINDS as unknown as [string, ...string[]]).optional().describe("List only the failures of this resource type, e.g. products."),
       },
@@ -584,7 +587,7 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: "Cancel an apply",
       description:
-        "Stop an apply that is running in the background: no further step is started and the Shopify bulk operations it started are cancelled. What was already written stays written (nothing is rolled back or deleted). Also stops bulk operations left running by an apply whose server was restarted. Follow with apply_status, then plan_sync to see what is left.",
+        "Stop an apply that is running in the background: no further step is started and the Shopify bulk operations it started are cancelled. What was already written stays written (nothing is rolled back or deleted). Also stops bulk operations left running by an apply whose server was restarted. If the apply has already ended, nothing is cancelled and its final state is returned. Returns { plan_id, state (cancelling, or interrupted for an apply from before a restart), note }. Follow with apply_status, then plan_sync to see what is left.",
       inputSchema: { plan_id: z.string().optional().describe("The plan being applied. Default: the most recent apply.") },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
@@ -613,7 +616,7 @@ export function createServer(deps: ServerDeps): McpServer {
     {
       title: "Read the audit log",
       description:
-        "Read what apply_plan wrote: the most recent audit log entries, newest first, one per step (plan, target store, resource type, key, outcome and message). Filter by plan, outcome (created, updated, skipped, failed) or resource type. Read-only; the log is a local file and nothing is read from Shopify.",
+        "Read what apply_plan wrote: the most recent audit log entries, newest first, one per step (plan, target store, resource type, key, outcome and message). Filter by plan, outcome (created, updated, skipped, failed) or resource type. Returns { log (file path), matched, returned, entries }: limit (default 50) caps the entries while matched counts every match; in a very large log only the most recent 8 MB is searched. Use it after an apply to see exactly what was written; use apply_status for the progress of a running apply and get_plan for what a plan intended. The log is a local file; nothing is read from Shopify.",
       inputSchema: {
         plan_id: z.string().optional().describe("Only entries of this plan."),
         outcome: z.enum(["created", "updated", "skipped", "failed"]).optional().describe("Only entries with this outcome."),
@@ -638,14 +641,14 @@ export function createServer(deps: ServerDeps): McpServer {
     "diff_themes",
     {
       title: "Compare theme settings",
-      description: `Read-only comparison of theme configuration between two stores: JSON templates, section groups and settings_data.json (default files: ${DEFAULT_THEME_FILES.join(", ")}). Compares the published themes unless theme ids are given. Never writes to a theme. Needs read_themes.`,
+      description: `Compare theme configuration between two stores: JSON templates, section groups and settings_data.json (default files: ${DEFAULT_THEME_FILES.join(", ")}). Use it for theme settings; use diff_stores for store data such as metafields, metaobjects and pages. Compares the published themes unless source_theme or target_theme give theme ids. Returns file counts (onlyInSource, changed, onlyInTarget, identical), the files on one side only, and for each changed file the settings that differ with both values (first 100 per file); format="markdown" gives a report. Use ignore_settings to quiet settings that differ on purpose. Never writes to a theme; both stores need the read_themes scope.`,
       inputSchema: {
-        source: z.string().describe("Store alias"),
-        target: z.string().describe("Store alias"),
+        source: z.string().describe("Store alias to compare from (snapshot folders hold no themes)."),
+        target: z.string().describe("Store alias to compare with."),
         source_theme: z.string().optional().describe('"main" (default) or a theme id'),
         target_theme: z.string().optional().describe('"main" (default) or a theme id'),
         files: z.array(z.string()).optional().describe('Theme file patterns, e.g. ["templates/product*.json"]'),
-        exclude: z.array(z.string()).optional(),
+        exclude: z.array(z.string()).optional().describe('Theme file patterns to leave out, e.g. ["templates/gift_card.json"].'),
         ignore_settings: z
           .array(z.string())
           .optional()
