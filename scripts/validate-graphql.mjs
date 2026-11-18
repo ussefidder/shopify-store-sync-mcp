@@ -18,7 +18,12 @@ function schemaFile() {
   const pkg = join(cache, "package", "dist", "data");
   if (!existsSync(pkg)) {
     mkdirSync(cache, { recursive: true });
-    const tgz = execFileSync("npm", ["pack", "@shopify/dev-mcp", "--silent"], { cwd: cache }).toString().trim().split("\n").pop();
+    // On Windows npm is npm.cmd, which Node only runs through a shell (the arguments here are fixed strings).
+    const tgz = execFileSync("npm", ["pack", "@shopify/dev-mcp", "--silent"], { cwd: cache, shell: process.platform === "win32" })
+      .toString()
+      .trim()
+      .split(/\r?\n/)
+      .pop();
     execFileSync("tar", ["-xzf", tgz, "package/dist/data"], { cwd: cache });
   }
   const gz = join(pkg, `admin_${version}.json.gz`);
