@@ -65,6 +65,10 @@ export interface FakeState {
     seo?: { title: string | null; description: string | null };
     ruleSet?: { appliedDisjunctively: boolean; rules: any[] } | null;
     metafields?: FakeMetafield[];
+    /** Collection sources as the 2026-07+ API returns them (conditions with __typename, aliased fields allowed). */
+    sources?: any[];
+    /** Products picked by hand (manual collections). */
+    productIds?: string[];
   }[];
   /** A file with a url maps to shopify://File/<filename>; without one it stays unresolved. */
   files: { id: string; url?: string; alt?: string; kind?: "MediaImage" | "GenericFile" | "Video" | "Model3d" | "ExternalVideo" }[];
@@ -88,8 +92,50 @@ export interface FakeState {
   shopId: string;
   shopMetafields: FakeMetafield[];
   discounts: { id: string; discount: Record<string, unknown> }[];
-  locations: { id: string; name: string }[];
+  locations: FakeLocation[];
+  markets: FakeMarket[];
+  webPresences: FakeWebPresence[];
+  catalogs: { id: string; title: string; status: string; marketIds: string[]; priceListId?: string; publicationId?: string }[];
+  priceLists: {
+    id: string;
+    name: string;
+    currency: string;
+    adjustment: { type: string; value: number };
+    compareAtMode: string;
+    fixed: { variantId: string; price: string; compareAtPrice?: string }[];
+  }[];
+  /** Sales channels (app handle) and market catalogs (catalogId) products and collections can be published on. */
+  publications: { id: string; app?: string; catalogId?: string; autoPublish: boolean }[];
+  /** Resource id -> publication ids it is published on. */
+  published: Record<string, string[]>;
+  currencyCode?: string;
+  presentmentCurrencies?: string[];
+  /** Market-specific translations: resourceId -> marketId -> locale -> key -> value. */
+  marketTranslations: Record<string, Record<string, Record<string, Record<string, string>>>>;
 }
+
+export type FakeLocation = {
+  id: string;
+  name: string;
+  address?: Record<string, string>;
+  fulfillsOnlineOrders?: boolean;
+  isFulfillmentService?: boolean;
+};
+
+export type FakeMarket = {
+  id: string;
+  handle: string;
+  name: string;
+  type?: string;
+  status?: string;
+  /** Country codes, or "ALL". */
+  regions: string[] | "ALL";
+  currency?: { baseCurrency: string; localCurrencies: boolean; roundingEnabled: boolean };
+  priceInclusions?: { duties: string; taxes: string };
+  webPresenceIds?: string[];
+};
+
+export type FakeWebPresence = { id: string; subfolderSuffix?: string; domain?: string; defaultLocale: string; alternateLocales?: string[] };
 
 /** Files uploaded for bulk writes, by staged path (tests route uploads and downloads here). */
 export const bulkFiles = new Map<string, string>();
@@ -98,6 +144,13 @@ export function emptyState(): FakeState {
   return {
     shopId: gid("Shop"),
     locations: [],
+    markets: [],
+    webPresences: [],
+    catalogs: [],
+    priceLists: [],
+    publications: [],
+    published: {},
+    marketTranslations: {},
     discounts: [],
     shopMetafields: [],
     products: [],
@@ -267,6 +320,124 @@ export class FakeShop implements AdminClient {
     };
   }
 
+  /** collectionUpdate(collection: ...) on the 2026-07+ sources model, as far as the sync uses it. */
+  private updateSources(input: any) {
+    const s = this.state;
+    const c = s.collections.find((x) => x.id === input.id)!;
+    c.sources ??= [];
+    const typename = (kind: "Inclusion" | "Exclusion", key: string) => `CollectionSource${kind}Condition${key.charAt(0).toUpperCase()}${key.slice(1)}`;
+    const toObject = (kind: "Inclusion" | "Exclusion", cond: Record<string, any>) => {
+      const [key, f] = Object.entries(cond)[0]!;
+      const box = (x: unknown) => (typeof x === "string" && x.startsWith("gid://") ? { id: x } : x && typeof x === "object" && "categoryId" in (x as any) ? { category: { id: (x as any).categoryId }, includeDescendants: (x as any).includeDescendants } : x);
+      return {
+        __typename: typename(kind, key),
+        id: gid("CollectionSourceCondition"),
+        ...(f.matchType ? { matchType: f.matchType } : {}),
+        ...(f.relation ? { relation: f.relation } : {}),
+        ...(f.definitionId ? { definition: { id: f.definitionId } } : {}),
+        ...(f.value !== undefined ? { value: box(f.value) } : {}),
+        ...(f.values ? { values: f.values.map(box) } : {}),
+      };
+    };
+    for (const t of input.sourcesToCreate ?? []) {
+      if (t.subCollections) c.sources.push({ __typename: "CollectionSubCollectionsSource", id: gid("CollectionSubCollectionsSource"), title: t.subCollections.title, collections: t.subCollections.collectionIds.map((id: string) => ({ id })) });
+      if (t.source) {
+        c.sources.push({
+          __typename: "CollectionConditionsSource",
+          id: gid("CollectionConditionsSource"),
+          title: t.source.title,
+          inclusion: { matchType: t.source.inclusion?.matchType ?? null, conditions: (t.source.inclusion?.conditions ?? []).map((x: any) => toObject("Inclusion", x)) },
+          exclusion: { matchType: t.source.exclusion?.matchType ?? "ALL", conditions: (t.source.exclusion?.conditions ?? []).map((x: any) => toObject("Exclusion", x)) },
+        });
+        for (const sel of t.source.inclusion?.selections ?? []) (c.productIds ??= []).push(sel.productId);
+      }
+    }
+    for (const t of input.sourcesToUpdate ?? []) {
+      if (t.subCollections) {
+        const src = c.sources.find((x: any) => x.id === t.subCollections.id);
+        src.collections = t.subCollections.collectionIds.map((id: string) => ({ id }));
+      }
+      if (t.condition) {
+        const src = c.sources.find((x: any) => x.id === t.condition.id);
+        for (const [part, kind] of [["inclusion", "Inclusion"], ["exclusion", "Exclusion"]] as const) {
+          const u = t.condition[part];
+          if (!u) continue;
+          src[part] ??= { matchType: null, conditions: [] };
+          if (u.matchType) src[part].matchType = u.matchType;
+          for (const x of u.conditionsToCreate ?? []) src[part].conditions.push(toObject(kind, x));
+          for (const sel of u.selectionsToAdd ?? []) if (!(c.productIds ??= []).includes(sel.productId)) c.productIds.push(sel.productId);
+        }
+      }
+    }
+    return { collection: { id: c.id }, userErrors: [] };
+  }
+
+  /** Everything that holds metafields of an owner type. */
+  private ownersOf(ownerType: string): { id: string; metafields?: FakeMetafield[] }[] {
+    const s = this.state;
+    if (ownerType === "SHOP") return [{ id: s.shopId, get metafields() { return s.shopMetafields; }, set metafields(m) { s.shopMetafields = m!; } }];
+    if (ownerType === "COLLECTION") return s.collections;
+    if (ownerType === "PRODUCTVARIANT") return s.products.flatMap((p) => p.variants ?? []);
+    return s.products;
+  }
+
+  /** Items whose handle matches a products/collections search like "handle:'a' OR handle:b*" (everything without one). */
+  private searchHandles<T extends { handle: string }>(list: T[], q?: string): T[] {
+    if (!q) return list;
+    const terms = [...q.matchAll(/handle:(?:'([^']*)'|([a-z0-9-]+\*))/g)].map((m) => m[1] ?? m[2]!);
+    return list.filter((x) => terms.some((t) => (t.endsWith("*") ? x.handle.startsWith(t.slice(0, -1)) : x.handle === t)));
+  }
+
+  private publishedView(id: string) {
+    const on = (market: boolean) =>
+      conn((this.state.published[id] ?? []).filter((pid) => Boolean(this.state.publications.find((p) => p.id === pid)?.catalogId) === market).map((pid) => ({ publication: { id: pid } })));
+    return { apps: on(false), catalogs: on(true) };
+  }
+
+  private presenceView(w: FakeWebPresence) {
+    return {
+      id: w.id,
+      subfolderSuffix: w.subfolderSuffix ?? null,
+      domain: w.domain ? { host: w.domain } : null,
+      defaultLocale: { locale: w.defaultLocale },
+      alternateLocales: (w.alternateLocales ?? []).map((locale) => ({ locale })),
+    };
+  }
+
+  private marketView(m: FakeMarket) {
+    return {
+      id: m.id,
+      handle: m.handle,
+      name: m.name,
+      type: m.type ?? "REGION",
+      status: m.status ?? "ACTIVE",
+      conditions: {
+        regionsCondition: {
+          applicationLevel: m.regions === "ALL" ? "ALL" : "SPECIFIED",
+          regions: conn(m.regions === "ALL" ? [] : m.regions.map((code) => ({ code }))),
+        },
+      },
+      currencySettings: m.currency ? { baseCurrency: { currencyCode: m.currency.baseCurrency }, localCurrencies: m.currency.localCurrencies, roundingEnabled: m.currency.roundingEnabled } : null,
+      priceInclusions: m.priceInclusions ? { inclusiveDutiesPricingStrategy: m.priceInclusions.duties, inclusiveTaxPricingStrategy: m.priceInclusions.taxes } : null,
+      webPresences: conn((m.webPresenceIds ?? []).map((id) => this.presenceView(this.state.webPresences.find((w) => w.id === id)!))),
+    };
+  }
+
+  private catalogView(c: FakeState["catalogs"][number]) {
+    const pl = this.state.priceLists.find((x) => x.id === c.priceListId);
+    const pub = this.state.publications.find((x) => x.id === c.publicationId);
+    return {
+      id: c.id,
+      title: c.title,
+      status: c.status,
+      markets: conn(c.marketIds.map((id) => ({ handle: this.state.markets.find((m) => m.id === id)?.handle }))),
+      priceList: pl
+        ? { id: pl.id, currency: pl.currency, fixedPricesCount: pl.fixed.length, parent: { adjustment: pl.adjustment, settings: { compareAtMode: pl.compareAtMode } } }
+        : null,
+      publication: pub ? { id: pub.id, autoPublish: pub.autoPublish } : null,
+    };
+  }
+
   private handle(field: string, query: string, v: Record<string, any>, s: FakeState): unknown {
     switch (field) {
       // ---- reads
@@ -323,6 +494,7 @@ export class FakeShop implements AdminClient {
       case "customerAccountPages":
         return conn(s.customerAccountPages);
       case "shop":
+        if (/ShopCurrencies/.test(query)) return { currencyCode: s.currencyCode ?? "EUR", enabledPresentmentCurrencies: s.presentmentCurrencies ?? [s.currencyCode ?? "EUR"] };
         return { id: s.shopId, shopPolicies: s.shopPolicies, metafields: conn(filterNs(s.shopMetafields, v.namespace)) };
       case "discountNodes":
         return page(s.discounts, s.pageSize, v.after);
@@ -350,6 +522,8 @@ export class FakeShop implements AdminClient {
         );
       case "productsCount":
         return { count: s.products.length };
+      case "collectionsCount":
+        return { count: s.collections.length };
       case "productVariantsCount":
         return { count: s.products.reduce((n, p) => n + (p.variants?.length ?? 1), 0) };
       case "products":
@@ -361,8 +535,16 @@ export class FakeShop implements AdminClient {
           );
         }
         if (query.includes("variants(")) return conn(s.products.map((p) => this.productView(p)));
+        if (/query ProductPublications/.test(query)) {
+          return conn(
+            this.searchHandles(s.products, v.query).map((p) => ({ id: p.id, handle: p.handle, status: p.status ?? "ACTIVE", ...this.publishedView(p.id) })),
+          );
+        }
         return conn(s.products.map((p) => ({ ...p, metafields: conn(filterNs(p.metafields, v.namespace)) })));
       case "collections":
+        if (/query CollectionPublications/.test(query)) {
+          return conn(this.searchHandles(s.collections, v.query).map((c) => ({ id: c.id, handle: c.handle, ...this.publishedView(c.id) })));
+        }
         return conn(
           s.collections.map((c) => ({
             title: c.handle,
@@ -379,6 +561,16 @@ export class FakeShop implements AdminClient {
         return s.shopLocales;
       case "translatableResources": {
         const prefix = { PRODUCT: "Product", PAGE: "Page", COLLECTION: "Collection", METAOBJECT: "Metaobject", MENU: "Menu", SHOP_POLICY: "ShopPolicy" }[v.type as string];
+        if (v.marketId) {
+          const market = s.markets.find((m) => m.id === v.marketId);
+          const nodes = Object.entries(s.marketTranslations)
+            .filter(([id]) => id.startsWith(`gid://shopify/${prefix}/`))
+            .map(([id, byMarket]) => ({
+              resourceId: id,
+              translations: Object.entries(byMarket[v.marketId]?.[v.locale] ?? {}).map(([key, value]) => ({ key, value, market: { handle: market?.handle } })),
+            }));
+          return conn(nodes);
+        }
         const nodes = Object.entries(s.translations)
           .filter(([id]) => id.startsWith(`gid://shopify/${prefix}/`))
           .map(([id, byLocale]) => ({
@@ -429,6 +621,20 @@ export class FakeShop implements AdminClient {
         return conn(s.redirects);
 
       // ---- writes
+      case "metafieldDefinition": {
+        const i = v.identifier;
+        const def = s.metafieldDefinitions.find((d) => d.ownerType === i.ownerType && d.namespace === i.namespace && d.key === i.key);
+        if (!def) return null;
+        return { id: def.id, type: def.type, metafields: conn(this.ownersOf(i.ownerType).flatMap((o) => (o.metafields ?? []).filter((m) => m.namespace === i.namespace && m.key === i.key).map((m) => ({ type: m.type, value: m.value, owner: { id: o.id } })))) };
+      }
+      case "metafieldDefinitionDelete": {
+        const def = s.metafieldDefinitions.find((d) => d.id === v.id)!;
+        s.metafieldDefinitions = s.metafieldDefinitions.filter((d) => d !== def);
+        if (/deleteAllAssociatedMetafields: true/.test(query)) {
+          for (const o of this.ownersOf(def.ownerType)) o.metafields = (o.metafields ?? []).filter((m) => !(m.namespace === def.namespace && m.key === def.key));
+        }
+        return ok({ deletedDefinitionId: def.id });
+      }
       case "metafieldDefinitionCreate": {
         const d = v.definition;
         const def = {
@@ -512,13 +718,174 @@ export class FakeShop implements AdminClient {
         s.collections.push(c);
         return ok({ collection: { id: c.id } });
       }
+      case "collection": {
+        const c = s.collections.find((x) => x.id === v.id);
+        if (!c) return null;
+        if (query.includes("products(")) {
+          return { products: conn((c.productIds ?? []).map((id) => ({ handle: s.products.find((p) => p.id === id)?.handle }))) };
+        }
+        return { id: c.id, sources: c.sources ?? [] };
+      }
       case "collectionUpdate": {
+        if (v.collection) return this.updateSources(v.collection);
         const c = s.collections.find((x) => x.id === v.input.id)!;
         Object.assign(c, v.input, { ruleSet: v.input.ruleSet ?? c.ruleSet ?? null });
         return ok({ collection: { id: c.id } });
       }
       case "locations":
-        return conn(s.locations);
+        return conn(
+          s.locations.map((l) => ({
+            ...l,
+            isFulfillmentService: l.isFulfillmentService ?? false,
+            fulfillsOnlineOrders: l.fulfillsOnlineOrders ?? true,
+            address: { address1: null, address2: null, city: null, countryCode: "US", provinceCode: null, zip: null, phone: null, ...l.address },
+          })),
+        );
+      case "locationAdd": {
+        if (s.locations.some((l) => l.name === v.input.name)) return { location: null, userErrors: [{ field: ["input", "name"], message: "Name has already been taken", code: "TAKEN" }] };
+        const l: FakeLocation = { id: gid("Location"), name: v.input.name, address: v.input.address, fulfillsOnlineOrders: v.input.fulfillsOnlineOrders };
+        s.locations.push(l);
+        return ok({ location: { id: l.id } });
+      }
+      case "locationEdit": {
+        const l = s.locations.find((x) => x.id === v.id)!;
+        Object.assign(l, { address: { ...l.address, ...v.input.address }, fulfillsOnlineOrders: v.input.fulfillsOnlineOrders ?? l.fulfillsOnlineOrders });
+        return ok({ location: { id: l.id } });
+      }
+      case "markets":
+        return conn(s.markets.map((m) => this.marketView(m)));
+      case "webPresences":
+        return conn(s.webPresences.map((w) => this.presenceView(w)));
+      case "webPresenceCreate": {
+        const w: FakeWebPresence = { id: gid("MarketWebPresence"), subfolderSuffix: v.input.subfolderSuffix, defaultLocale: v.input.defaultLocale, alternateLocales: v.input.alternateLocales };
+        s.webPresences.push(w);
+        return ok({ webPresence: { id: w.id } });
+      }
+      case "marketCreate": {
+        const i = v.input;
+        const rc = i.conditions?.regionsCondition;
+        const regions: string[] | "ALL" = rc?.applicationLevel === "ALL" ? "ALL" : (rc?.regions ?? []).map((r: { countryCode: string }) => r.countryCode);
+        const taken = Array.isArray(regions) ? s.markets.find((m) => m.status !== "DRAFT" && Array.isArray(m.regions) && m.regions.some((r) => regions.includes(r))) : undefined;
+        if (taken && i.status !== "DRAFT") return { market: null, userErrors: [{ field: ["input", "conditions"], message: `a country already belongs to market ${taken.handle}`, code: "TAKEN" }] };
+        const m: FakeMarket = {
+          id: gid("Market"),
+          handle: i.handle,
+          name: i.name,
+          status: i.status ?? "ACTIVE",
+          regions,
+          currency: i.currencySettings,
+          priceInclusions: i.priceInclusions ? { duties: i.priceInclusions.dutiesPricingStrategy, taxes: i.priceInclusions.taxPricingStrategy } : undefined,
+          webPresenceIds: i.webPresences ?? [],
+        };
+        s.markets.push(m);
+        return ok({ market: { id: m.id } });
+      }
+      case "marketUpdate": {
+        const m = s.markets.find((x) => x.id === v.id)!;
+        const i = v.input;
+        if (i.name) m.name = i.name;
+        if (i.status) m.status = i.status;
+        const add = i.conditions?.conditionsToAdd?.regionsCondition;
+        if (add?.applicationLevel === "ALL") m.regions = "ALL";
+        else if (add?.regions && Array.isArray(m.regions)) m.regions = [...m.regions, ...add.regions.map((r: { countryCode: string }) => r.countryCode)];
+        if (i.currencySettings) m.currency = i.currencySettings;
+        if (i.priceInclusions) m.priceInclusions = { duties: i.priceInclusions.dutiesPricingStrategy, taxes: i.priceInclusions.taxPricingStrategy };
+        if (i.webPresencesToAdd) m.webPresenceIds = [...(m.webPresenceIds ?? []), ...i.webPresencesToAdd];
+        return ok({ market: { id: m.id } });
+      }
+      case "catalogs":
+        return conn(s.catalogs.map((c) => this.catalogView(c)));
+      case "catalog": {
+        const c = s.catalogs.find((x) => x.id === v.id);
+        return c ? { priceList: c.priceListId ? { id: c.priceListId } : null, publication: c.publicationId ? { id: c.publicationId } : null } : null;
+      }
+      case "priceList": {
+        const pl = s.priceLists.find((x) => x.id === v.id)!;
+        const prices = pl.fixed.map((f) => {
+          const product = s.products.find((p) => (p.variants ?? []).some((x) => x.id === f.variantId))!;
+          const variant = product.variants!.find((x) => x.id === f.variantId)!;
+          return {
+            price: { amount: f.price },
+            compareAtPrice: f.compareAtPrice ? { amount: f.compareAtPrice } : null,
+            variant: { product: { handle: product.handle }, selectedOptions: Object.entries(variant.options).map(([name, value]) => ({ name, value })) },
+          };
+        });
+        return { prices: conn(prices) };
+      }
+      case "catalogCreate": {
+        const c = { id: gid("MarketCatalog"), title: v.input.title, status: v.input.status, marketIds: v.input.context.marketIds ?? [] };
+        s.catalogs.push(c);
+        return ok({ catalog: { id: c.id } });
+      }
+      case "catalogUpdate": {
+        const c = s.catalogs.find((x) => x.id === v.id)!;
+        if (v.input.status) c.status = v.input.status;
+        if (v.input.context?.marketIds) c.marketIds = v.input.context.marketIds;
+        return ok({ catalog: { id: c.id } });
+      }
+      case "priceListCreate": {
+        const i = v.input;
+        const pl = { id: gid("PriceList"), name: i.name, currency: i.currency, adjustment: i.parent.adjustment, compareAtMode: i.parent.settings?.compareAtMode ?? "ADJUSTED", fixed: [] };
+        s.priceLists.push(pl);
+        const c = s.catalogs.find((x) => x.id === i.catalogId);
+        if (c) c.priceListId = pl.id;
+        return ok({ priceList: { id: pl.id } });
+      }
+      case "priceListUpdate": {
+        const pl = s.priceLists.find((x) => x.id === v.id)!;
+        if (v.input.currency) pl.currency = v.input.currency;
+        if (v.input.parent) Object.assign(pl, { adjustment: v.input.parent.adjustment, compareAtMode: v.input.parent.settings?.compareAtMode ?? pl.compareAtMode });
+        return ok({ priceList: { id: pl.id } });
+      }
+      case "priceListFixedPricesAdd": {
+        const pl = s.priceLists.find((x) => x.id === v.id)!;
+        for (const p of v.prices) {
+          pl.fixed = pl.fixed.filter((f) => f.variantId !== p.variantId);
+          pl.fixed.push({ variantId: p.variantId, price: p.price.amount, compareAtPrice: p.compareAtPrice?.amount });
+        }
+        return ok({ prices: v.prices.map((p: { price: unknown }) => ({ price: p.price })) });
+      }
+      case "publications":
+        // Like the live API: without a catalog type only sales channels are listed.
+        return conn(
+          s.publications.filter((p) => (v.type === "MARKET" ? Boolean(p.catalogId) : Boolean(p.app))).map((p) => {
+            const cat = s.catalogs.find((c) => c.id === p.catalogId);
+            return {
+              id: p.id,
+              catalog: p.app
+                ? { __typename: "AppCatalog", title: `Channel Catalog ${p.id.split("/").pop()} for ${p.app}`, apps: { nodes: [{ handle: p.app }] } }
+                : cat
+                  ? { __typename: "MarketCatalog", title: cat.title }
+                  : null,
+            };
+          }),
+        );
+      case "publicationCreate": {
+        const pub = { id: gid("Publication"), catalogId: v.input.catalogId, autoPublish: v.input.autoPublish ?? false };
+        s.publications.push(pub);
+        const c = s.catalogs.find((x) => x.id === v.input.catalogId);
+        if (c) c.publicationId = pub.id;
+        if (v.input.defaultState === "ALL_PRODUCTS") for (const p of s.products) (s.published[p.id] ??= []).push(pub.id);
+        return ok({ publication: { id: pub.id } });
+      }
+      case "publicationUpdate": {
+        const pub = s.publications.find((x) => x.id === v.id)!;
+        if (v.input.autoPublish !== undefined) pub.autoPublish = v.input.autoPublish;
+        return ok({ publication: { id: pub.id } });
+      }
+      case "publishablePublish": {
+        const list = (s.published[v.id] ??= []);
+        for (const i of v.input) {
+          if (!s.publications.some((p) => p.id === i.publicationId)) return { userErrors: [{ field: ["input"], message: "publication not found" }] };
+          if (!list.includes(i.publicationId)) list.push(i.publicationId);
+        }
+        return { userErrors: [] };
+      }
+      case "productUpdate": {
+        const p = s.products.find((x) => x.id === v.product.id)!;
+        if (v.product.status) p.status = v.product.status;
+        return ok({ product: { id: p.id } });
+      }
       case "inventorySetQuantities": {
         // Like the live API from 2026-04: stock writes need an idempotency key.
         if (this.store.apiVersion >= "2026-04" && (!/@idempotent\(key: \$key\)/.test(query) || !v.key)) {
@@ -552,7 +919,16 @@ export class FakeShop implements AdminClient {
         const q = String(v.query);
         const rows: Record<string, unknown>[] = [];
         const opts = (x: FakeVariant) => Object.entries(x.options).map(([name, value]) => ({ name, value }));
-        if (/^\{\s*products/.test(q) && q.includes("variants {")) {
+        if (q.includes("resourcePublicationsV2")) {
+          const market = q.includes("catalogType: MARKET");
+          const list = /^\{\s*products/.test(q) ? s.products : s.collections;
+          for (const x of list as { id: string; handle: string; status?: string }[]) {
+            rows.push({ id: x.id, handle: x.handle, ...(/^\{\s*products/.test(q) ? { status: x.status ?? "ACTIVE" } : {}) });
+            for (const pid of s.published[x.id] ?? []) {
+              if (Boolean(s.publications.find((p) => p.id === pid)?.catalogId) === market) rows.push({ publication: { id: pid }, __parentId: x.id });
+            }
+          }
+        } else if (/^\{\s*products/.test(q) && q.includes("variants {")) {
           for (const p of s.products) {
             const { media, variants, ...rest } = this.productView(p);
             rows.push(rest);
@@ -695,6 +1071,12 @@ export class FakeShop implements AdminClient {
             shop ?? [...s.products, ...s.collections, ...s.products.flatMap((p) => p.variants ?? [])].find((o) => o.id === m.ownerId);
           if (!owner) return { metafields: [], userErrors: [{ field: ["ownerId"], message: "Owner not found" }] };
           owner.metafields ??= [];
+          // Like Shopify: a value must have its definition's type.
+          const ownerType = shop ? "SHOP" : s.products.some((p) => p.id === m.ownerId) ? "PRODUCT" : s.collections.some((c) => c.id === m.ownerId) ? "COLLECTION" : "PRODUCTVARIANT";
+          const def = s.metafieldDefinitions.find((d) => d.ownerType === ownerType && d.namespace === m.namespace && d.key === m.key);
+          if (def && def.type.name !== m.type) {
+            return { metafields: [], userErrors: [{ field: ["metafields", "0", "type"], message: `Type must be ${def.type.name}`, code: "INVALID_TYPE" }] };
+          }
           const existing = owner.metafields.find((x) => x.namespace === m.namespace && x.key === m.key);
           if (existing) Object.assign(existing, { type: m.type, value: m.value });
           else owner.metafields.push({ namespace: m.namespace, key: m.key, type: m.type, value: m.value });
@@ -708,7 +1090,8 @@ export class FakeShop implements AdminClient {
           if (!content.some((c) => c.key === t.key && c.digest === t.translatableContentDigest)) {
             return { translations: null, userErrors: [{ field: ["translations"], message: `bad digest for ${t.key}` }] };
           }
-          ((s.translations[v.id] ??= {})[t.locale] ??= {})[t.key] = t.value;
+          if (t.marketId) (((s.marketTranslations[v.id] ??= {})[t.marketId] ??= {})[t.locale] ??= {})[t.key] = t.value;
+          else ((s.translations[v.id] ??= {})[t.locale] ??= {})[t.key] = t.value;
         }
         return ok({ translations: v.t.map((t: { key: string }) => ({ key: t.key })) });
       }

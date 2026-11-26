@@ -792,7 +792,8 @@ describe("targeted reads", () => {
     const engine = engineFor(dev, new FakeShop(FakeShop.config("stg")));
     const { diffs } = await engine.compare("dev", "stg", { resources: ["collections"], include: ["linen"] });
     expect(diffs[0]!.onlyInSource.map((i) => i.key)).toEqual(["linen"]);
-    expect(dev.calls.map((c) => c.field)).toEqual(["collectionByIdentifier"]);
+    // The collection, then its sources (Admin API 2026-07+): still no listing of every collection.
+    expect(dev.calls.map((c) => c.field)).toEqual(["collectionByIdentifier", "collectionByIdentifier"]);
   });
 
   it("check shows one item side by side, and whether what it points at exists in the target", async () => {

@@ -24,6 +24,9 @@ export function searchValue(v: string): string {
  *   gid://shopify/ProductVariant/1       -> shopify://ProductVariant/<product handle>/<option values, URL-encoded>
  *   gid://shopify/Shop/1                 -> shopify://Shop   (there is one per store)
  *
+ * Markets, locations and catalogs are written as refs by their adapters (shopify://Market/<handle>,
+ * shopify://Location/<name>, shopify://Catalog/<title>), so they can be looked up in a target too.
+ *
  * Files keep their source URL on the side, so a missing file can be uploaded to the target.
  * Anything we can't map (articles...) becomes shopify://unresolved/<Type>/<id>
  * and is reported as a warning instead of being silently copied.
@@ -529,6 +532,31 @@ export class RefToGidResolver {
           else if (!this.cache.has(r)) this.remember(r, v.id);
         }
         return found;
+      }
+      case "Market": {
+        const handle = rest.join("/");
+        const all = await paginate<{ id: string; handle: string }>(c, `query MarketRefs($after: String) { markets(first: 250, after: $after) { nodes { id handle } pageInfo { hasNextPage endCursor } } }`, {}, (d) => d.markets);
+        return all.find((n) => n.handle === handle)?.id;
+      }
+      case "Location": {
+        const name = rest.join("/");
+        const all = await paginate<{ id: string; name: string }>(
+          c,
+          `query LocationRefs($after: String) { locations(first: 250, after: $after, includeInactive: true) { nodes { id name } pageInfo { hasNextPage endCursor } } }`,
+          {},
+          (d) => d.locations,
+        );
+        return all.find((n) => n.name === name)?.id;
+      }
+      case "Catalog": {
+        const title = rest.join("/");
+        const all = await paginate<{ id: string; title: string }>(
+          c,
+          `query CatalogRefs($after: String) { catalogs(first: 250, after: $after, type: MARKET) { nodes { id title } pageInfo { hasNextPage endCursor } } }`,
+          {},
+          (d) => d.catalogs,
+        );
+        return all.find((n) => n.title === title)?.id;
       }
       case "File":
         return this.findOrUploadFile(ref, rest.join("/"));

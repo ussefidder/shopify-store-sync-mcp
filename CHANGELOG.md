@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.12.0
+
+- **Markets** (`markets`, opt-in): country markets by handle, with countries, currency settings, tax and duty inclusions and web presences. Countries and web presences only the target has are kept; missing subfolders are created, missing domains reported
+- **Market catalogs** (`catalogs`, opt-in): status, markets and price list (currency, adjustment, compare-at mode), and fixed variant prices with `prices`. A price list in a currency the target doesn't sell in is refused before anything is written
+- **Sales channels** (`sales_channels`, opt-in): which sales channels and market catalogs each product and collection is published on, and each product's status (active, draft, archived). Only adds, never unpublishes. Channels the target hasn't installed are named in the plan; items are still published on the others
+- **Locations** (`locations`, opt-in): inventory locations by name, with address and online fulfillment. Same name in two countries is a conflict, not a move
+- **Collections on Shopify's sources model** (Admin API 2026-07+): exclusions, sub-collections and conditions only the new model has are compared and copied, add-only. Stores pinned to 2026-04 keep the ruleSet behaviour
+- **Products picked by hand into manual collections**: `collection_products` (`--with-collection-products`), added and never removed; products the target lacks are reported
+- **Stores in different currencies**: `currency_rates` (`--currency-rate MAD:EUR=0.092`) converts product prices, catalog fixed prices and market currencies. Without a rate, prices in another currency are left out and the plan says so; nothing is ever converted on a guess
+- **Sales channels on big catalogs**: read with bulk exports, written 25 per request and 12 requests at once. Live, 100 products went from about 12 minutes to 40 seconds
+- **Market translations**: `market_translations` (`--market-translations`) also copies the translations each market overrides
+- **When a metafield's type differs**: `type_mismatch` (`--type-mismatch`) with `convert_values` (keep the target's type, convert the values to it) or `retype_definitions` (delete and create the target's definition again with the source's type, its values backed up and converted). Without it, nothing changes: the plan reports a conflict
+- The Shopify CLI sign-in asks for `read_markets`, `read_publications`, and with writes `write_markets`, `write_publications`, `write_locations`: run `connect` again to use the new resources
+- New collections and catalogs: the plan only warns that they won't be published when `sales_channels` isn't part of it
+
 ## 0.11.8
 
 - Search values sent to Shopify (file names when matching or uploading files, page and blog handles) now escape backslashes before quotes, so a name containing `\` can no longer end the value early and break the lookup. Found by CodeQL

@@ -32,6 +32,8 @@ export const READ_SCOPES = [
   "read_discounts",
   "read_inventory",
   "read_locations",
+  "read_markets",
+  "read_publications",
 ];
 export const WRITE_SCOPES = [
   "write_products",
@@ -43,6 +45,9 @@ export const WRITE_SCOPES = [
   "write_translations",
   "write_files",
   "write_inventory",
+  "write_markets",
+  "write_publications",
+  "write_locations",
 ];
 
 /**

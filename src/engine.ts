@@ -5,6 +5,9 @@ import { buildPlan, PlanStore, type Plan } from "./plan.js";
 import { collectRefs, REF_PREFIX, RefToGidResolver, UNRESOLVED_PREFIX } from "./refs.js";
 import { DEFAULT_KINDS, type FetchOptions, type ResourceKind } from "./resources/index.js";
 import { listProducts } from "./resources/products.js";
+import { publicationsByLabel } from "./resources/salesChannels.js";
+import { applyTypeMismatch, type TypeMismatch } from "./typeMismatch.js";
+import { adjustCurrencies, shopCurrencies, type Rates } from "./currency.js";
 import { ShopifyAdminClient, type AdminClient } from "./shopify/client.js";
 import { ShopifyCliClient } from "./shopify/cliClient.js";
 import { applyView, takeSnapshot, type ReadProgress, type Snapshot } from "./snapshot.js";
@@ -20,7 +23,11 @@ export interface Scope {
   metaobjectTypes?: string[];
   namespaces?: string[];
   locales?: string[];
-  /** Copy variant prices too (products). */
+  /** Copy the products picked by hand into manual collections (collections). */
+  collectionProducts?: boolean;
+  /** Also read and copy the translations each market overrides (translations). */
+  marketTranslations?: boolean;
+  /** Copy variant prices too (products), and fixed prices of price lists (catalogs). */
   prices?: boolean;
   /** Copy stock too: available quantity per location, matched by location name (products). */
   inventory?: boolean;
@@ -28,6 +35,10 @@ export interface Scope {
   drafts?: boolean;
   include?: string[];
   exclude?: string[];
+  /** Exchange rates for stores that sell in different currencies, "FROM:TO" -> rate (the reverse works too). */
+  currencyRates?: Rates;
+  /** When a metafield's type differs between the stores: convert the values, or retype the target's definition. Default: report a conflict. */
+  typeMismatch?: TypeMismatch;
   /** Compare Shopify-reserved metafield definitions too (read-only). */
   includeReserved?: boolean;
 }
@@ -105,6 +116,8 @@ export class Engine {
       metaobjectTypes: scope.metaobjectTypes,
       namespaces: scope.namespaces,
       locales: scope.locales,
+      marketTranslations: scope.marketTranslations || undefined,
+      collectionProducts: scope.collectionProducts || undefined,
       prices: scope.prices,
       inventory: scope.inventory || undefined,
       drafts: scope.drafts || undefined,
@@ -182,6 +195,12 @@ export class Engine {
     // Something one side couldn't read (a "PRODUCT.*" style key) is left out on both sides:
     // otherwise everything the target has there would look missing and be planned as new.
     const unreadable = (k: ResourceKind) => [a, b].flatMap((s) => (s.resources[k]?.skipped ?? []).filter((x) => x.key.endsWith("*")).map((x) => x.key));
+    // Stores that sell in different currencies: amounts converted with the person's rates, or left out.
+    let currencyNotes: string[] = [];
+    if (!isDirSpec(source) && !isDirSpec(target) && ((scope.prices && kinds.includes("products")) || kinds.includes("catalogs") || kinds.includes("markets"))) {
+      const [sc, tc] = await Promise.all([shopCurrencies(this.client(source)), shopCurrencies(this.client(target))]);
+      currencyNotes = adjustCurrencies(a, b, sc, tc, scope.currencyRates, Boolean(scope.prices));
+    }
     const diffs = kinds.map((k) => {
       const filter = Engine.filter(scope);
       const out = unreadable(k);
@@ -191,7 +210,7 @@ export class Engine {
       ...(a.resources[k]?.skipped ?? []).map((x) => ({ kind: k, ...x, key: x.key.endsWith("*") ? `${x.key} (in ${a.store})` : x.key })),
       ...(b.resources[k]?.skipped ?? []).filter((x) => x.key.endsWith("*")).map((x) => ({ kind: k, ...x, key: `${x.key} (in ${b.store})` })),
     ]);
-    return { source: a, target: b, diffs, skipped };
+    return { source: a, target: b, diffs, skipped, currencyNotes };
   }
 
   /**
@@ -249,7 +268,7 @@ export class Engine {
 
   async plan(source: string, target: string, scope: Scope, onRead?: ReadProgress): Promise<Plan> {
     if (isDirSpec(target)) throw new Error("the target of a sync must be a store, not a snapshot folder");
-    const { source: a, diffs, skipped } = await this.compare(source, target, scope, onRead);
+    const { source: a, diffs, skipped, currencyNotes } = await this.compare(source, target, scope, onRead);
     const t = this.client(target);
     this.events.phase?.(`checking what ${t.store.alias} already has that the changes point at`);
     const plan = await buildPlan({
@@ -261,6 +280,8 @@ export class Engine {
       resolver: new RefToGidResolver(t),
       fetchOptions: Engine.fetchOptions(scope),
     });
+    plan.warnings.push(...currencyNotes);
+    if (scope.typeMismatch) await applyTypeMismatch(plan, scope.typeMismatch, t);
     const newProducts = plan.ops.filter((o) => o.kind === "products" && o.action === "create").length;
     if (newProducts) plan.warnings.push(`${newProducts} new product(s) will be created as drafts; publish them in ${t.store.alias} when they're ready.`);
     if (plan.ops.some((o) => o.kind === "products" && o.action !== "conflict") && !scope.prices) {
@@ -283,8 +304,28 @@ export class Engine {
       }
     }
     const newCollections = plan.ops.filter((o) => o.kind === "collections" && o.action === "create").length;
-    if (newCollections) {
-      plan.warnings.push(`${newCollections} new collection(s) will not be published to any sales channel; publish them in ${t.store.alias} when they're ready.`);
+    if (newCollections && !plan.kinds.includes("sales_channels")) {
+      plan.warnings.push(`${newCollections} new collection(s) will not be published to any sales channel; publish them in ${t.store.alias} when they're ready, or include sales_channels.`);
+    }
+    const newCatalogs = plan.ops.filter((o) => o.kind === "catalogs" && o.action === "create" && o.data.publication).map((o) => o.key);
+    if (newCatalogs.length && !plan.kinds.includes("sales_channels")) {
+      plan.warnings.push(
+        `New catalog(s) ${newCatalogs.join(", ")} will start with no products, so their markets won't sell anything until products are added; include sales_channels to copy which products they include.`,
+      );
+    }
+    const publishing = plan.ops.filter((o) => o.kind === "sales_channels" && o.action !== "conflict");
+    if (publishing.length) {
+      const have = await publicationsByLabel(t);
+      const created = new Set(plan.ops.filter((o) => o.kind === "catalogs" && o.action === "create" && o.data.publication).map((o) => `catalog:${o.key}`));
+      const missing = new Map<string, number>();
+      for (const o of publishing) {
+        for (const c of (o.data.channels as string[]) ?? []) if (!have.has(c) && !created.has(c)) missing.set(c, (missing.get(c) ?? 0) + 1);
+      }
+      for (const [c, n] of missing) {
+        plan.warnings.push(
+          `${n} item(s) are on ${c}, which ${t.store.alias} doesn't have (${c.startsWith("catalog:") ? "sync that catalog too" : "install that sales channel there"}); they will be published on their other channels and reported as failed.`,
+        );
+      }
     }
     if (plan.ops.some((o) => o.kind === "translations")) {
       const enabled = new Set(

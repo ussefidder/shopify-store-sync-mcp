@@ -392,7 +392,7 @@ export async function applyPlan(plan: Plan, client: AdminClient, opts: ApplyOpti
     const adapter = ADAPTERS[kind];
     if (adapter.bulkWrite) {
       const bulk = ops;
-      if (bulk.length > bulkThreshold()) {
+      if (bulk.length > (adapter.batchFrom ?? bulkThreshold())) {
         const left = await runBulk(kind, bulk);
         ops = ops.filter((o) => !bulk.includes(o) || left.includes(o));
       }

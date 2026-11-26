@@ -1,5 +1,6 @@
 import { accessDenied, assertNoUserErrors, paginate } from "../shopify/client.js";
 import type { Item, ResourceAdapter } from "./types.js";
+import { retypeDefinition } from "../retype.js";
 import { compact, oneOf, PAGE_INFO, reservedPrefix, sortValidations } from "./util.js";
 
 export const DEFAULT_OWNER_TYPES = [
@@ -170,7 +171,15 @@ export const metafieldDefinitions: ResourceAdapter = {
     return res.metafieldDefinitionCreate.createdDefinition.id;
   },
 
-  async update({ client }, _target, d) {
+  async update(ctx, target, d) {
+    const { client } = ctx;
+    if (d.retypeFrom) {
+      // type_mismatch: retype_definitions. The type can't change in place: delete, create, put the values back.
+      const { retypeFrom: _from, ...wanted } = d;
+      const { backup, left } = await retypeDefinition(client, wanted, () => metafieldDefinitions.create(ctx, target.key, wanted));
+      if (left) throw new Error(`retyped to ${String(d.type)}, but ${left} value(s) couldn't be converted from ${String(_from)}; they are kept in ${backup}`);
+      return;
+    }
     const res = await client.request(
       `mutation($definition: MetafieldDefinitionUpdateInput!) {
         metafieldDefinitionUpdate(definition: $definition) { updatedDefinition { id } userErrors { field message code } }

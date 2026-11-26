@@ -5,22 +5,30 @@ import type { FileSource, GidToRefMapper, RefToGidResolver } from "../refs.js";
 export const RESOURCE_KINDS = [
   "metafield_definitions",
   "metaobject_definitions",
+  "locations",
+  "markets",
   "products",
   "collections",
+  "catalogs",
   "pages",
   "shop_policies",
   "metaobjects",
   "menus",
   "redirects",
   "metafields",
+  "sales_channels",
   "translations",
   "discounts",
 ] as const;
 
 export type ResourceKind = (typeof RESOURCE_KINDS)[number];
 
-/** Read by default. products, metafields and translations can be large, so they are opt-in; discounts are compare-only. */
-export const OPT_IN_KINDS: readonly ResourceKind[] = ["products", "metafields", "translations", "discounts"];
+/**
+ * Read by default. products, metafields, translations and sales_channels can be large, so they are opt-in;
+ * discounts are compare-only; locations, markets and catalogs change how and where the store sells, so they
+ * are only touched when asked for.
+ */
+export const OPT_IN_KINDS: readonly ResourceKind[] = ["products", "metafields", "translations", "discounts", "locations", "markets", "catalogs", "sales_channels"];
 export const DEFAULT_KINDS: readonly ResourceKind[] = RESOURCE_KINDS.filter((k) => !OPT_IN_KINDS.includes(k));
 
 /** A resource as fetched from a store. `data` is what gets compared and copied. */
@@ -43,7 +51,11 @@ export interface FetchOptions {
   namespaces?: string[];
   /** Locales to read translations for. Default: every non-primary locale of the store. */
   locales?: string[];
-  /** Include variant prices and compare-at prices (products kind). Off by default: prices usually differ per store. */
+  /** Collections: also compare and copy which products are picked by hand into manual collections (added, never removed). */
+  collectionProducts?: boolean;
+  /** Also read the translations each market overrides (translations kind), keyed "<locale>@<market>:...". */
+  marketTranslations?: boolean;
+  /** Include variant prices and compare-at prices (products kind), and fixed prices in catalog price lists. Off by default: prices usually differ per store. */
   prices?: boolean;
   /** Include stock: available quantities per location, matched to the target's locations by name (products kind). */
   inventory?: boolean;
@@ -133,6 +145,8 @@ export interface ResourceAdapter {
    * except file refs that don't exist in the target yet. Returns, per item, the new id or an error.
    * Throws BulkUnavailable when the store won't run a bulk write, so items are written one by one.
    */
+  /** Use bulkWrite above this many items instead of the store-wide threshold (SYNC_BULK_THRESHOLD): for writes that are cheap to batch. */
+  batchFrom?: number;
   bulkWrite?(ctx: BulkWriteContext, items: { key: string; action: "create" | "update"; data: Record<string, unknown> }[]): Promise<{ id?: string; error?: string }[]>;
 }
 

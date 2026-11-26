@@ -57,7 +57,7 @@ const scopeArgs = {
     .array(z.enum(RESOURCE_KINDS))
     .min(1)
     .optional()
-    .describe(`Resource types to include. Default: ${DEFAULT_KINDS.join(", ")}. products, metafields and translations are opt-in.`),
+    .describe(`Resource types to include. Default: ${DEFAULT_KINDS.join(", ")}. products, metafields, translations, discounts, locations, markets, catalogs and sales_channels are opt-in.`),
   owner_types: z
     .array(z.string())
     .optional()
@@ -67,7 +67,18 @@ const scopeArgs = {
   metaobject_types: z.array(z.string()).optional().describe("Limit metaobjects to these types. Default: all non-reserved types."),
   namespaces: z.array(z.string()).optional().describe("Limit metafield values (metafields) to these namespaces."),
   locales: z.array(z.string()).optional().describe("Limit translations to these locales, e.g. [\"fr\", \"de\"]. Default: every non-primary locale."),
-  prices: z.boolean().optional().describe("products: include variant prices and compare-at prices in what is read, compared and planned. Off by default, since prices usually differ per store."),
+  collection_products: z
+    .boolean()
+    .optional()
+    .describe("collections: also compare and copy which products are picked by hand into manual collections, matched by handle. Added, never removed. Off by default (one read per manual collection)."),
+  market_translations: z
+    .boolean()
+    .optional()
+    .describe('translations: also read the translations each market overrides, keyed "<locale>@<market handle>:<Type>/<handle>", and register them for the market of the same handle in the target. Off by default (one read per market, language and resource type).'),
+  prices: z
+    .boolean()
+    .optional()
+    .describe("products: include variant prices and compare-at prices; catalogs: include fixed prices in price lists. Read, compared and planned only when on. Off by default, since prices usually differ per store."),
   inventory: z
     .boolean()
     .optional()
@@ -81,6 +92,18 @@ const scopeArgs = {
     .optional()
     .describe('Only keys matching one of these globs, e.g. ["PRODUCT.custom.*", "faq/*", "fr:*"].'),
   exclude: z.array(z.string()).optional().describe("Drop keys matching any of these globs."),
+  currency_rates: z
+    .record(z.string().regex(/^[A-Z]{3}:[A-Z]{3}$/), z.number().positive())
+    .optional()
+    .describe(
+      'Exchange rates for stores that sell in different currencies, like {"MAD:EUR": 0.092} (the reverse rate is used too). Product prices (with prices), catalog fixed prices and market currencies are converted with them. Without a rate, prices in another currency are left out and the plan says so; a percentage price list follows the target\'s currency.',
+    ),
+  type_mismatch: z
+    .enum(["convert_values", "retype_definitions"])
+    .optional()
+    .describe(
+      'plan_sync only, when a metafield has one type in the source and another in the target (e.g. single_line_text_field and list.single_line_text_field). Default: reported as a conflict and skipped. "convert_values": keep the target definition\'s type and convert the source values to it (a value becomes a list of one; a list of one becomes a value). "retype_definitions": give the target definition the source\'s type; Shopify can\'t change a type in place, so it is deleted and created again, its values saved to a backup file first and written back converted. Needs metafield_definitions in resources.',
+    ),
   include_reserved: z
     .boolean()
     .optional()
@@ -93,12 +116,16 @@ type ScopeArgs = {
   metaobject_types?: string[];
   namespaces?: string[];
   locales?: string[];
+  market_translations?: boolean;
+  collection_products?: boolean;
   prices?: boolean;
   inventory?: boolean;
   as_drafts?: boolean;
   include?: string[];
   exclude?: string[];
   include_reserved?: boolean;
+  type_mismatch?: "convert_values" | "retype_definitions";
+  currency_rates?: Record<string, number>;
 };
 
 const toScope = (a: ScopeArgs): Scope => ({
@@ -107,10 +134,14 @@ const toScope = (a: ScopeArgs): Scope => ({
   metaobjectTypes: a.metaobject_types,
   namespaces: a.namespaces,
   locales: a.locales,
+  marketTranslations: a.market_translations,
+  collectionProducts: a.collection_products,
   prices: a.prices,
   inventory: a.inventory,
   drafts: a.as_drafts,
   includeReserved: a.include_reserved,
+  typeMismatch: a.type_mismatch,
+  currencyRates: a.currency_rates,
   include: a.include,
   exclude: a.exclude,
 });

@@ -1,3 +1,4 @@
+import { parseRates } from "./currency.js";
 import { join } from "node:path";
 import { ApplyRefused } from "./apply.js";
 import { DEFAULT_API_VERSION, loadStores, StoreRegistry, type StoreConfig } from "./config.js";
@@ -41,9 +42,16 @@ Options
   --namespaces a,b       metafield value namespaces      --locales fr,de   translation locales
   --owner-types a,b      metafield owners, e.g. SHOP,PRODUCTVARIANT (definitions and values)
   --include-reserved     also compare Shopify-reserved (category) metafield definitions; never written
-  --with-prices          products: also copy variant prices
+  --with-prices          products: also copy variant prices; catalogs: fixed prices in price lists
+  --market-translations  translations: also the translations each market overrides
+  --with-collection-products  collections: also the products picked by hand into manual collections
   --with-inventory       products: also copy stock per location (matched by location name)
   --as-drafts            new pages are created hidden, new metaobject entries as drafts
+  --currency-rate r      stores in different currencies: FROM:TO=rate, comma-separated
+                         (MAD:EUR=0.092); converts prices, fixed prices and market currencies
+  --type-mismatch m      plan: when a metafield's type differs, convert-values (to the target's type)
+                         or retype-definitions (delete and recreate the target's definition, values
+                         backed up and converted). Default: reported as a conflict
   --writes               connect: also request write scopes (default: what the store config allows)
   --scopes a,b           connect: extra read scopes, e.g. read_customers,read_orders (to compare
                          those metafield definitions; off by default because they expose customer data)
@@ -70,10 +78,11 @@ export function parseArgs(argv: string[]): { positional: string[]; flags: Flags 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a.startsWith("--")) {
-      const [name, inline] = a.slice(2).split("=", 2) as [string, string | undefined];
+      const eq = a.indexOf("=");
+      const [name, inline] = eq > 2 ? [a.slice(2, eq), a.slice(eq + 1)] : [a.slice(2), undefined];
       const next = argv[i + 1];
       if (inline !== undefined) flags[name] = inline;
-      else if (next !== undefined && !next.startsWith("--") && !["json", "exit-code", "values", "writes", "with-prices", "with-inventory", "as-drafts", "include-reserved", "quiet"].includes(name)) flags[name] = argv[++i]!;
+      else if (next !== undefined && !next.startsWith("--") && !["json", "exit-code", "values", "writes", "with-prices", "market-translations", "with-collection-products", "with-inventory", "as-drafts", "include-reserved", "quiet"].includes(name)) flags[name] = argv[++i]!;
       else flags[name] = true;
     } else positional.push(a);
   }
@@ -81,6 +90,13 @@ export function parseArgs(argv: string[]): { positional: string[]; flags: Flags 
 }
 
 const list = (v: string | true | undefined) => (typeof v === "string" ? v.split(",").map((s) => s.trim()).filter(Boolean) : undefined);
+
+function typeMismatchFlag(v: string | true | undefined): Scope["typeMismatch"] {
+  if (v === undefined) return undefined;
+  const m = String(v).replace(/-/g, "_");
+  if (m !== "convert_values" && m !== "retype_definitions") throw new Error(`--type-mismatch takes convert-values or retype-definitions, not "${String(v)}"`);
+  return m;
+}
 
 export function scopeFromFlags(flags: Flags): Scope {
   const resources = list(flags.resources);
@@ -94,11 +110,15 @@ export function scopeFromFlags(flags: Flags): Scope {
     namespaces: list(flags.namespaces),
     locales: list(flags.locales),
     prices: flags["with-prices"] === true,
+    marketTranslations: flags["market-translations"] === true,
+    collectionProducts: flags["with-collection-products"] === true,
     inventory: flags["with-inventory"] === true,
     drafts: flags["as-drafts"] === true,
     metaobjectTypes: list(flags["metaobject-types"]),
     ownerTypes: list(flags["owner-types"]),
     includeReserved: flags["include-reserved"] === true,
+    typeMismatch: typeMismatchFlag(flags["type-mismatch"]),
+    currencyRates: typeof flags["currency-rate"] === "string" ? parseRates(flags["currency-rate"]) : undefined,
   };
 }
 

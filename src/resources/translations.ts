@@ -2,6 +2,7 @@ import { assertNoUserErrors, paginate } from "../shopify/client.js";
 import { REF_PREFIX, UNRESOLVED_PREFIX } from "../refs.js";
 import type { Item, ResourceAdapter } from "./types.js";
 import { reservedPrefix } from "./util.js";
+import { marketIds } from "./markets.js";
 
 /*
  * Translations of products, pages, collections, metaobjects, menus and store policies, one item
@@ -11,6 +12,10 @@ import { reservedPrefix } from "./util.js";
  * Shopify ties each translation to a digest of the original text it translates. Those digests
  * are store-specific, so translations are registered against the target's own content. They
  * run last in a plan, after pages, collections and metaobjects have been synced.
+ *
+ * With market translations on, the translations a market overrides are read too, keyed
+ * "<locale>@<market handle>:<Type>/<handle>" (e.g. "fr@canada:Page/shipping"), and registered
+ * for the market of the same handle in the target.
  */
 
 export const TRANSLATABLE_TYPES = ["PRODUCT", "PAGE", "COLLECTION", "METAOBJECT", "MENU", "SHOP_POLICY"] as const;
@@ -29,9 +34,22 @@ const QUERY = /* GraphQL */ `
   }
 `;
 
+/** The same, for the translations one market overrides (Translate & Adapt, per market). */
+const MARKET_QUERY = /* GraphQL */ `
+  query MarketTranslations($type: TranslatableResourceType!, $locale: String!, $marketId: ID!, $after: String) {
+    translatableResources(resourceType: $type, first: 50, after: $after) {
+      nodes {
+        resourceId
+        translations(locale: $locale, marketId: $marketId) { key value market { handle } }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+
 interface Node {
   resourceId: string;
-  translations: { key: string; value: string | null }[];
+  translations: { key: string; value: string | null; market?: { handle: string } | null }[];
 }
 
 export const translations: ResourceAdapter = {
@@ -56,20 +74,33 @@ export const translations: ResourceAdapter = {
         .filter((l) => !l.primary)
         .map((l) => l.locale);
 
-    const found: { locale: string; node: Node }[] = [];
-    const pairs = TRANSLATABLE_TYPES.flatMap((type) => locales.map((locale) => ({ type, locale })));
-    const lists = await Promise.all(pairs.map((v) => paginate<Node>(client, QUERY, v, (d) => d.translatableResources)));
+    const found: { locale: string; market?: string; node: Node }[] = [];
+    const pairs: { type: string; locale: string; market?: string; marketId?: string }[] = TRANSLATABLE_TYPES.flatMap((type) => locales.map((locale) => ({ type, locale })));
+    if (opts.marketTranslations) {
+      const ids = await marketIds(client);
+      for (const [market, marketId] of ids) for (const type of TRANSLATABLE_TYPES) for (const locale of locales) pairs.push({ type, locale, market, marketId });
+    }
+    const lists = await Promise.all(
+      pairs.map(({ type, locale, marketId }) =>
+        paginate<Node>(client, marketId ? MARKET_QUERY : QUERY, { type, locale, ...(marketId ? { marketId } : {}) }, (d) => d.translatableResources),
+      ),
+    );
     lists.forEach((nodes, i) => {
-      for (const node of nodes) if (node.translations.some((t) => t.value)) found.push({ locale: pairs[i]!.locale, node });
+      const market = pairs[i]!.market;
+      for (const node of nodes) {
+        // Only what the market itself overrides, not the shop-wide translation it falls back to.
+        const own = market ? { ...node, translations: node.translations.filter((t) => t.market?.handle === market) } : node;
+        if (own.translations.some((t) => t.value)) found.push({ locale: pairs[i]!.locale, market, node: own });
+      }
     });
 
     await mapper.load(found.map((f) => f.node.resourceId));
     const items: Item[] = [];
     const skipped: { key: string; reason: string }[] = [];
-    for (const { locale, node } of found) {
+    for (const { locale, market, node } of found) {
       const ref = mapper.map(node.resourceId);
       const name = ref.slice(REF_PREFIX.length);
-      const key = `${locale}:${name}`;
+      const key = market ? `${locale}@${market}:${name}` : `${locale}:${name}`;
       if (ref.startsWith(UNRESOLVED_PREFIX)) {
         skipped.push({ key, reason: "resource can't be matched across stores" });
         continue;
@@ -84,7 +115,7 @@ export const translations: ResourceAdapter = {
           .sort((a, b) => a.key.localeCompare(b.key))
           .map((t) => [t.key, t.value as string]),
       );
-      items.push({ key, id: node.resourceId, data: { resource: node.resourceId, locale, values } });
+      items.push({ key, id: node.resourceId, data: { resource: node.resourceId, locale, ...(market ? { market: `${REF_PREFIX}Market/${market}` } : {}), values } });
     }
     return { items, skipped };
   },
@@ -104,7 +135,7 @@ export const translations: ResourceAdapter = {
     const values = d.values as Record<string, string>;
     const inputs = Object.entries(values)
       .filter(([key]) => digests.has(key))
-      .map(([key, value]) => ({ key, value, locale: d.locale, translatableContentDigest: digests.get(key) }));
+      .map(([key, value]) => ({ key, value, locale: d.locale, translatableContentDigest: digests.get(key), ...(d.market ? { marketId: d.market } : {}) }));
     const missing = Object.keys(values).filter((k) => !digests.has(k));
 
     if (inputs.length) {

@@ -1,12 +1,15 @@
-import { assertNoUserErrors, paginate } from "../shopify/client.js";
-import { REF_PREFIX } from "../refs.js";
-import type { Item, ResourceAdapter } from "./types.js";
+import { assertNoUserErrors, paginate, type AdminClient } from "../shopify/client.js";
+import { REF_PREFIX, type RefToGidResolver } from "../refs.js";
+import type { FetchOptions, Item, ResourceAdapter } from "./types.js";
+import { addProducts, alignSources, manualProducts, normalizeSources, readSources, supportsSources, writeSources } from "./collectionSources.js";
 import { compact, PAGE_INFO } from "./util.js";
 
 /*
  * Collections: title, description, sort order, template, SEO and, for smart collections,
- * their rules. Manual collections keep their own product lists: membership is not copied.
- * A new collection is not published to any sales channel; publish it in the target when ready.
+ * their rules. On Admin API 2026-07 and later, also what Shopify's collection sources add:
+ * exclusions, sub-collections, and conditions a ruleSet can't express (collectionSources.ts).
+ * Manual membership (products picked by hand) only with the collection_products option, added
+ * and never removed. Publishing is the sales_channels resource's job.
  *
  * Deprecated API in use, on purpose: `Collection.ruleSet` and the `input` argument of
  * collectionCreate / collectionUpdate. Their replacement (collection "sources", `collection`
@@ -149,7 +152,7 @@ function input(d: Record<string, unknown>) {
 export const collections: ResourceAdapter = {
   kind: "collections",
   description:
-    "Collections, keyed by handle: title, description, sort order, template, SEO and smart-collection rules. Manual collection membership and sales-channel publishing are not copied, so a new collection is not visible on any channel until someone publishes it.",
+    "Collections, keyed by handle: title, description, sort order, template, SEO and smart-collection rules; on Admin API 2026-07+, also exclusions, sub-collections and conditions only Shopify's new collection sources hold. Products picked by hand into manual collections only with collection_products (added, never removed). Publishing is synced by sales_channels.",
 
   async fetch(client, opts) {
     // A few exact handles (from include patterns or a plan's keys) are looked up directly.
@@ -158,10 +161,21 @@ export const collections: ResourceAdapter = {
       const found = await Promise.all(
         k.exact.map(async (handle) => (await client.request<{ collectionByIdentifier: Node | null }>(BY_HANDLE, { handle })).collectionByIdentifier),
       );
-      return { items: found.filter((n): n is Node => Boolean(n)).map(normalizeCollection), skipped: [] };
+      return { items: await extras(client, opts, found.filter((n): n is Node => Boolean(n)).map(normalizeCollection)), skipped: [] };
     }
     const nodes = await paginate<Node>(client, QUERY, {}, (d) => d.collections);
-    return { items: nodes.map(normalizeCollection), skipped: [] };
+    return { items: await extras(client, opts, nodes.map(normalizeCollection)), skipped: [] };
+  },
+
+  alignTarget(source, target) {
+    const out = alignSources(source, target);
+    if (target.products) {
+      const wanted = new Set((source.products as string[]) ?? []);
+      const kept = (target.products as string[]).filter((h) => wanted.has(h));
+      if (kept.length) out.products = kept;
+      else delete out.products;
+    }
+    return out;
   },
 
   refFor(key) {
@@ -177,21 +191,54 @@ export const collections: ResourceAdapter = {
     return undefined;
   },
 
-  async create({ client }, _key, d) {
+  async create({ client, resolver }, _key, d) {
     const res = await client.request(
       `mutation($input: CollectionInput!) { collectionCreate(input: $input) { collection { id } userErrors { field message } } }`,
       { input: input(d) },
     );
     assertNoUserErrors(res.collectionCreate, `collectionCreate ${String(d.handle)}`);
-    return res.collectionCreate.collection.id;
+    const id = res.collectionCreate.collection.id as string;
+    await afterWrite(client, resolver, id, String(d.handle), d);
+    return id;
   },
 
-  async update({ client }, target, d) {
+  async update({ client, resolver }, target, d) {
     const { handle: _handle, ...rest } = input(d) as Record<string, unknown>;
     const res = await client.request(
       `mutation($input: CollectionInput!) { collectionUpdate(input: $input) { collection { id } userErrors { field message } } }`,
       { input: { id: target.id, ...rest } },
     );
     assertNoUserErrors(res.collectionUpdate, `collectionUpdate ${target.key}`);
+    const have = new Set((target.data.products as string[]) ?? []);
+    await afterWrite(client, resolver, target.id, target.key, { ...d, products: ((d.products as string[]) ?? []).filter((h) => !have.has(h)) });
   },
 };
+
+/** Sources (exclusions, sub-collections, source-only conditions) and hand-picked products. */
+async function extras(client: AdminClient, opts: FetchOptions, items: Item[]): Promise<Item[]> {
+  if (supportsSources(client.store.apiVersion) && items.length) {
+    const sources = await readSources(client, new Set(items.map((i) => i.key)));
+    for (const it of items) {
+      const extra = normalizeSources(sources.get(it.key) ?? [], Boolean(it.data.rules));
+      // Conditions only the new model holds make a collection automated, like a ruleSet does.
+      it.data = { ...it.data, ...extra, ...(extra.sourceConditions ? { smart: true } : {}) };
+    }
+  }
+  if (opts.collectionProducts) {
+    // Only collections made of hand-picked products: a sub-collection's products come from its collections.
+    for (const it of items) {
+      if (it.data.smart || it.data.subCollections) continue;
+      const products = await manualProducts(client, it.id);
+      if (products.length) it.data = { ...it.data, products };
+    }
+  }
+  return items;
+}
+
+async function afterWrite(client: AdminClient, resolver: RefToGidResolver, id: string, handle: string, d: Record<string, unknown>): Promise<void> {
+  if (supportsSources(client.store.apiVersion)) await writeSources(client, id, d);
+  const missing = await addProducts(client, resolver, id, (d.products as string[]) ?? []);
+  if (missing.length) {
+    throw new Error(`collection ${handle} written, but ${missing.length} product(s) it holds aren't in the target: ${missing.slice(0, 10).join(", ")}${missing.length > 10 ? ", ..." : ""}`);
+  }
+}
