@@ -567,9 +567,22 @@ const CARD_CSS = `
   .ico { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
          font-weight: 700; font-size: 13px; color: #0b0f14; }
   .tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid #2c3a4a; color: #8b98a8; margin-left: 6px; vertical-align: middle; font-weight: 500; }
+  .ver { display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid #2c3a4a; color: #8b98a8; font-weight: 600; font-family: "DejaVu Sans Mono", ui-monospace, monospace; white-space: nowrap; }
+  .ver.new { background: #57c26e; border-color: #57c26e; color: #0b0f14; }
+  .ver.upd { border-color: #57c26e; color: #57c26e; }
+  .tile.isnew { border-color: #2f6b3c; }
+  .tt { display: flex; align-items: center; }
+  .vrow { display: flex; gap: 6px; margin-left: auto; align-items: center; }
 `;
-const tile = (abbr, color, title, text, tag = "") =>
-  `<div class="tile card"><div class="ico" style="background:${color}">${abbr}</div><h3>${title}${tag ? `<span class="tag">${tag}</span>` : ""}</h3><p>${text}</p></div>`;
+// since: "0.4" for an existing feature, "new" for 0.12, "0.2+" for one 0.12 extended
+const ver = (since) => {
+  if (!since) return "";
+  if (since === "new") return `<span class="ver new">NEW 0.12</span>`;
+  if (since.endsWith("+")) return `<span class="ver">v${since.slice(0, -1)}</span><span class="ver upd">updated 0.12</span>`;
+  return `<span class="ver">v${since}</span>`;
+};
+const tile = (abbr, color, title, text, tag = "", since = "") =>
+  `<div class="tile card${since === "new" ? " isnew" : ""}"><div class="tt"><div class="ico" style="background:${color}">${abbr}</div><div class="vrow">${ver(since)}</div></div><h3>${title}${tag ? `<span class="tag">${tag}</span>` : ""}</h3><p>${text}</p></div>`;
 const G = "#57c26e", B = "#6cb6ff", A = "#e3b341", R = "#f47067", P = "#a371f7", T = "#39c5cf";
 
 // ---------------------------------------------------------------- quick start in 3 steps
@@ -601,44 +614,52 @@ render("quickstart", 1280, 330, `
 `);
 
 // ---------------------------------------------------------------- what it syncs
-render("what-it-syncs", 1280, 625, `
+render("what-it-syncs", 1280, 815, `
 <div class="wrap">
-  <div class="title"><h2>What it syncs</h2><span class="muted">with the images they use, and every reference remapped</span></div>
+  <div class="title"><h2>What it syncs</h2><span class="muted">with the images they use, and every reference remapped · v = version that added it</span></div>
   <div class="grid" style="grid-template-columns: repeat(4, 1fr)">
-    ${tile("MF", G, "Metafield definitions", "Types, validations, access, pinning and capabilities, per owner type.")}
-    ${tile("MO", G, "Metaobject definitions", "Schemas, access and capabilities, self-references included.")}
-    ${tile("ME", B, "Metaobject entries", "Every field value, references to products, pages and entries remapped.")}
-    ${tile("CO", B, "Collections", "Descriptions, SEO, sort order and smart-collection rules.")}
-    ${tile("PG", A, "Pages", "Title, body, template and published state, or hidden with as_drafts.")}
-    ${tile("NV", A, "Menus", "Full 3-level trees, customer account menus included. The target's own links are kept.")}
-    ${tile("RD", T, "Redirects", "Thousands of URL redirects, no CSV.")}
-    ${tile("PL", T, "Store policies", "Refund, privacy, terms, shipping and contact text.")}
-    ${tile("PR", R, "Products", "Content, images, variants with SKU, barcode, weight and variant image. New ones as drafts; prices and stock only if asked.", "opt-in")}
-    ${tile("MV", P, "Metafield values", "On products, collections, variants and the shop, matched by handle and option values.", "opt-in")}
-    ${tile("TR", P, "Translations", "Products, pages, collections, metaobjects, menus and policies, per language.", "opt-in")}
-    ${tile("IMG", "#8b98a8", "Files and images", "Matched by file name; missing ones uploaded to the target.")}
+    ${tile("MF", G, "Metafield definitions", "Types, validations, access and capabilities. A type that differs: values converted or the definition retyped.", "", "0.1+")}
+    ${tile("MO", G, "Metaobject definitions", "Schemas, access and capabilities, self-references included.", "", "0.1")}
+    ${tile("ME", B, "Metaobject entries", "Every field value, references to products, pages and entries remapped.", "", "0.1")}
+    ${tile("CO", B, "Collections", "Smart rules, and on Shopify's sources model: exclusions, sub-collections, hand-picked products.", "", "0.2+")}
+    ${tile("PG", A, "Pages", "Title, body, template and published state, or hidden with as_drafts.", "", "0.1")}
+    ${tile("NV", A, "Menus", "Full 3-level trees, customer account menus included. The target's own links are kept.", "", "0.1")}
+    ${tile("RD", T, "Redirects", "Thousands of URL redirects, no CSV.", "", "0.1")}
+    ${tile("PL", T, "Store policies", "Refund, privacy, terms, shipping and contact text.", "", "0.2")}
+    ${tile("PR", R, "Products", "Variants with SKU, barcode, weight and image. New ones as drafts; prices and stock only if asked.", "opt-in", "0.4")}
+    ${tile("MV", P, "Metafield values", "On products, collections, variants and the shop, matched by handle and option values.", "opt-in", "0.2")}
+    ${tile("TR", P, "Translations", "Per language, and now the text each market overrides.", "opt-in", "0.2+")}
+    ${tile("IMG", "#8b98a8", "Files and images", "Matched by file name; missing ones uploaded to the target.", "", "0.2")}
+    ${tile("MK", G, "Markets", "Countries, currency, tax and duty inclusions, subfolders and domains.", "opt-in", "new")}
+    ${tile("CA", G, "Catalogs", "Market catalogs with price lists and fixed prices, converted between currencies.", "opt-in", "new")}
+    ${tile("SC", G, "Sales channels", "Where each product and collection is published, and product status. Only adds.", "opt-in", "new")}
+    ${tile("LO", G, "Locations", "Inventory locations with their address. Same name, other country: a conflict.", "opt-in", "new")}
   </div>
 </div>`, CARD_CSS);
 
 // ---------------------------------------------------------------- everything it does, at a glance (first screen of the README)
-const feat = (abbr, color, title, text, tools = "") =>
-  `<div class="tile card"><div class="th"><div class="ico" style="background:${color}">${abbr}</div><h3>${title}</h3></div><p>${text}</p>${tools ? `<div class="tl mono">${tools}</div>` : ""}</div>`;
-render("at-a-glance", 1280, 560, `
+const feat = (abbr, color, title, text, tools = "", since = "") =>
+  `<div class="tile card${since === "new" ? " isnew" : ""}"><div class="th"><div class="ico" style="background:${color}">${abbr}</div><h3>${title}</h3><div class="vrow">${ver(since)}</div></div><p>${text}</p>${tools ? `<div class="tl mono">${tools}</div>` : ""}</div>`;
+render("at-a-glance", 1280, 790, `
 <div class="wrap">
-  <div class="title"><h2>Everything it does</h2><span class="muted">13 MCP tools and a CLI · Claude, Cursor or any MCP client · free, MIT</span></div>
+  <div class="title"><h2>Everything it does</h2><span class="muted">13 MCP tools and a CLI · Claude, Cursor or any MCP client · free, MIT · v = version that added it</span></div>
   <div class="grid" style="grid-template-columns: repeat(4, 1fr)">
-    ${feat("DF", G, "Field-level diff", "Every difference between two stores, field by field, even inside JSON values.", "diff_stores · compare_item")}
-    ${feat("PL", G, "Dry-run plans", "Creates, updates, conflicts and missing references, reviewed before anything is written.", "plan_sync · get_plan")}
-    ${feat("AP", B, "Safe apply", "Re-reads the target first and skips what drifted. Never deletes. Every write logged.", "apply_plan")}
-    ${feat("PR", R, "Production guardrails", "Writes off by default. Protected stores are confirmed by a person, not the assistant.")}
-    ${feat("ID", B, "Cross-store ID remapping", "References to products, pages, collections and entries land on the right item by handle.")}
-    ${feat("BC", A, "Built for big catalogs", "4,000 products, 46,000 variants and 86,000 metafield values copied in 51 minutes.")}
-    ${feat("ST", A, "Live status and cancel", "Big applies run in the background, with progress and time left per resource type.", "apply_status · cancel_apply")}
-    ${feat("SK", R, "Products, prices and stock", "Variants, images, prices and stock per location. New products land as drafts.", "opt-in")}
-    ${feat("TR", P, "Metafields and translations", "Values on products, variants, collections and the shop. Translations per language.", "opt-in")}
-    ${feat("TH", P, "Theme settings diff", "Compare theme templates and settings between two stores.", "diff_themes")}
-    ${feat("GIT", T, "Config as code", "Write a store's setup to a folder and keep it in git.", "export_snapshot")}
-    ${feat("CLI", T, "CLI and drift checks", 'The same engine from the terminal. <span class="nw">--exit-code</span> turns diff into a scheduled drift check.', "npx shopify-store-sync-mcp")}
+    ${feat("DF", G, "Field-level diff", "Every difference between two stores, field by field, even inside JSON values.", "diff_stores · compare_item", "0.1")}
+    ${feat("PL", G, "Dry-run plans", "Creates, updates, conflicts and missing references, reviewed before anything is written.", "plan_sync · get_plan", "0.1")}
+    ${feat("AP", B, "Safe apply", "Re-reads the target first and skips what drifted. Never deletes. Every write logged.", "apply_plan", "0.1")}
+    ${feat("PR", R, "Production guardrails", "Writes off by default. Protected stores are confirmed by a person, not the assistant.", "", "0.1")}
+    ${feat("ID", B, "Cross-store ID remapping", "References to products, pages, collections and entries land on the right item by handle.", "", "0.1")}
+    ${feat("BC", A, "Built for big catalogs", "4,000 products, 46,000 variants and 86,000 metafield values copied in 51 minutes.", "", "0.11")}
+    ${feat("ST", A, "Live status and cancel", "Big applies run in the background, with progress and time left per resource type.", "apply_status · cancel_apply", "0.10")}
+    ${feat("SK", R, "Products, prices and stock", "Variants, images, prices and stock per location. New products land as drafts.", "opt-in", "0.4")}
+    ${feat("TR", P, "Metafields, translations", "Values on products, variants, collections and the shop. Translations per language and market.", "opt-in", "0.2+")}
+    ${feat("TH", P, "Theme settings diff", "Compare theme templates and settings between two stores.", "diff_themes", "0.2")}
+    ${feat("GIT", T, "Config as code", "Write a store's setup to a folder and keep it in git.", "export_snapshot", "0.2")}
+    ${feat("CLI", T, "CLI and drift checks", 'The same engine from the terminal. <span class="nw">--exit-code</span> turns diff into a scheduled drift check.', "npx shopify-store-sync-mcp", "0.2")}
+    ${feat("MK", G, "Markets and catalogs", "Country markets, catalogs and price lists, copied with their countries and subfolders.", "markets · catalogs", "new")}
+    ${feat("SC", G, "Sales channels and locations", "Publishing and product status, written 25 per request. Warehouses with their address.", "sales_channels · locations", "new")}
+    ${feat("FX", G, "Multi-currency stores", "Prices, fixed prices and market currencies converted with a rate you give, never guessed.", "--currency-rate MAD:EUR=0.092", "new")}
+    ${feat("TY", G, "Metafield type differences", "Single on one side, list on the other: convert the values, or retype with a backup first.", "--type-mismatch", "new")}
   </div>
 </div>`, CARD_CSS + `
   .tile { padding: 14px 16px; }
@@ -714,17 +735,17 @@ render("safety", 1280, 432, `
 </div>`, CARD_CSS);
 
 // ---------------------------------------------------------------- tested
-render("tested", 1280, 288, `
+render("tested", 1280, 300, `
 <div class="wrap">
   <div class="title"><h2>Tested on real stores, not just in theory</h2><span class="muted">two live Shopify stores, on Linux and Windows</span></div>
   <div class="stats">
-    <div class="stat card"><b class="g">163</b><span>automated tests</span></div>
-    <div class="stat card"><b class="b">83</b><span>GraphQL operations validated against Shopify's schema</span></div>
-    <div class="stat card"><b class="a">11</b><span>item types written to a live store</span></div>
+    <div class="stat card"><b class="g">198</b><span>automated tests</span></div>
+    <div class="stat card"><b class="b">122</b><span>GraphQL operations validated against Shopify's schema</span></div>
+    <div class="stat card"><b class="a">15</b><span>item types written to a live store</span></div>
     <div class="stat card"><b style="color:${P}">2</b><span>sign-in methods used live: Shopify CLI and an app</span></div>
   </div>
   <div class="checks">
-    ${["Create and update across 7 resource types", "Image uploaded to the target by file name", "French translation registered", "Product copied as a draft with its 4 images", "Protected store confirmed by a person", "Target edited after planning: step skipped", "Target-only links, tags and media kept", "Shopify CLI sign-in on Windows"].map((t) => `<div class="ck"><span class="g">✓</span> ${t}</div>`).join("")}
+    ${["Create and update across 7 resource types", "Image uploaded to the target by file name", "French translation registered", "Product copied as a draft with its 4 images", "Protected store confirmed by a person", "Target edited after planning: step skipped", "Target-only links, tags and media kept", "Shopify CLI sign-in on Windows", "NEW Markets and a catalog created", "NEW 990 MAD copied as 91.08 EUR", "NEW 100 products published in 40 s", "NEW Metafield retyped with a backup"].map((t) => `<div class="ck"><span class="g">✓</span> ${t.startsWith("NEW ") ? `<span class="ver new">NEW 0.12</span> ${t.slice(4)}` : t}</div>`).join("")}
   </div>
 </div>`, CARD_CSS + `
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
@@ -732,35 +753,36 @@ render("tested", 1280, 288, `
   .stat b { font-size: 34px; font-weight: 800; }
   .stat span { font-size: 13.5px; color: #aab6c4; line-height: 1.4; }
   .checks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px 14px; margin-top: 16px; font-size: 13.5px; color: #c9d4df; }
+  .ck { white-space: nowrap; }
+  .ck .ver { font-size: 10px; padding: 1px 6px; }
 `);
 
 // ---------------------------------------------------------------- roadmap
-const done = (t) => `<div class="it"><span class="ck g">✓</span>${t}</div>`;
-const todo = (t) => `<div class="it"><span class="ck muted">○</span>${t}</div>`;
+const done = (t, v = "") => `<div class="it"><span class="ck g">✓</span><span class="itx">${t}</span>${v ? ver(v) : ""}</div>`;
+const todo = (t) => `<div class="it"><span class="ck muted">○</span><span class="itx">${t}</span></div>`;
 const group = (title, cls, items) => `<div class="grp"><div class="gt ${cls}">${title}</div>${items.join("")}</div>`;
-render("roadmap", 1280, 462, `
+render("roadmap", 1280, 585, `
 <div class="wrap">
-  <div class="title"><h2>Roadmap</h2><span class="muted">shipped in 0.11.3, and what comes next</span></div>
+  <div class="title"><h2>Roadmap</h2><span class="muted">shipped up to 0.12.0, and what comes next · v = version that added it</span></div>
   <div class="cols">
     <div class="card pane">
       <div class="ph"><span class="badge bg-g">Shipped</span></div>
       <div class="two">
-        ${group("Syncing", "g", [done("11 item types incl. products"), done("ID remapping, incl. variants"), done("Barcodes, weight, stock (opt-in)"), done("Batched writes for big catalogs")])}
-        ${group("Safety", "g", [done("Dry-run plans, drift check"), done("Never deletes, inside items too"), done("A person confirms production"), done("Validated input, time limits")])}
-        ${group("Ways to use it", "g", [done("MCP server, 13 tools, live status"), done("CLI: drift checks, md reports"), done("Config as code, theme diff"), done("No-app sign-in, on npm")])}
-        ${group("Quality", "g", [done("163 automated tests, linted"), done("Checked on 3 API versions"), done("Live on Linux and Windows"), done("Parallel reads and writes")])}
+        ${group("Syncing", "g", [done("Markets, catalogs, price lists", "new"), done("Sales channels, product status", "new"), done("Inventory locations", "new"), done("Collection sources, picked products", "new"), done("Currency conversion, type fixes", "new"), done("Products, variants, stock", "0.4"), done("ID remapping, incl. variants", "0.1")])}
+        ${group("Safety", "g", [done("Dry-run plans, drift check", "0.1"), done("Never deletes, inside items too", "0.1"), done("A person confirms production", "0.5"), done("Validated input, time limits", "0.5"), done("Backup before a retype", "new")])}
+        ${group("Ways to use it", "g", [done("MCP server, 13 tools", "0.1"), done("CLI: drift checks, md reports", "0.2"), done("Config as code, theme diff", "0.2"), done("No-app sign-in", "0.3"), done("Live status and cancel", "0.10")])}
+        ${group("Quality", "g", [done("198 automated tests, linted"), done("Checked on 3 API versions"), done("Live on Linux and Windows"), done("Batched writes, 12 at once", "0.11")])}
       </div>
     </div>
     <div class="card pane">
       <div class="ph"><span class="badge bg-b">Next</span></div>
       ${[
-        "Collection rules on Shopify's new sources model",
-        "Redirects in bulk",
-        "Product prices per market (opt-in)",
+        "Smart rules through sources only, once 2026-04 is dropped",
+        "Bulk writes for product updates and redirects",
         "Translations of option names and values",
         "Remap blog articles",
         "Metafield values on pages and blogs",
-        "Menu link translations, markets",
+        "Menu link translations",
         "Sync discounts, behind an explicit flag",
         "Undo an applied plan from the audit log",
         "Optional deletes, behind an explicit flag",
@@ -774,7 +796,8 @@ render("roadmap", 1280, 462, `
   .badge { font-size: 12px; font-weight: 700; color: #0b0f14; padding: 3px 10px; border-radius: 999px; }
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 22px; }
   .gt { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 6px; }
-  .it { font-size: 14px; color: #c9d4df; padding: 5px 0; border-top: 1px solid #1c2530; display: flex; gap: 10px; }
+  .it { font-size: 14px; color: #c9d4df; padding: 5px 0; border-top: 1px solid #1c2530; display: flex; gap: 10px; align-items: center; }
+  .itx { flex: 1; }
   .ck { width: 14px; display: inline-block; }
 `);
 
